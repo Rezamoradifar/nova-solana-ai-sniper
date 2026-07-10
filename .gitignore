@@ -39,3 +39,4 @@ data/certbot/
 
 # Claude Code local settings (not part of the project)
 .claude/
+.scratch/

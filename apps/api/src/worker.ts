@@ -5,6 +5,7 @@ import { JupiterClient } from './solana/jupiter.js';
 import { DexScreenerClient } from './solana/dexscreener.js';
 import { TokenEventClassifier } from './detection/detectors.js';
 import { RiskAnalyzer } from './detection/riskAnalyzer.js';
+import { extractMintFromParsedTx } from './detection/extractMint.js';
 import { PositionManager } from './trading/positionManager.js';
 import { AutoTrader } from './trading/autoTrader.js';
 import { TradingSafety, verifySafetySystemReady, type SafetyConfig } from './trading/safety.js';
@@ -31,7 +32,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
 
   const dexScreener = new DexScreenerClient(app.config.DEXSCREENER_API_BASE);
   const jupiter = new JupiterClient({ apiBase: app.config.JUPITER_API_BASE });
-  const riskAnalyzer = new RiskAnalyzer(connection, dexScreener);
+  const riskAnalyzer = new RiskAnalyzer(connection, dexScreener, jupiter, app.log as never);
 
   const safetyConfig: SafetyConfig = {
     maxTradeSol: app.config.MAX_TRADE_SOL,
@@ -149,8 +150,15 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       const tx = await connection.getParsedTransaction(event.signature, {
         maxSupportedTransactionVersion: 0,
       });
-      const mint = extractMintFromTx(tx);
-      if (!mint) return;
+      if (!tx) return;
+      const mint = extractMintFromParsedTx(tx);
+      if (!mint) {
+        app.log.warn(
+          { signature: event.signature },
+          'could not confidently resolve the mint for a detected pump.fun create — skipping rather than guessing',
+        );
+        return;
+      }
 
       const riskFlags = await riskAnalyzer.analyze({ mint });
 
@@ -210,14 +218,4 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     twitterMonitor?.stop();
     priceMonitor.stop();
   };
-}
-
-function extractMintFromTx(
-  tx: Awaited<ReturnType<import('@solana/web3.js').Connection['getParsedTransaction']>>,
-): string | undefined {
-  if (!tx) return undefined;
-  const accountKeys = tx.transaction.message.accountKeys;
-  // pump.fun `create` places the new mint as the 2nd account key by convention;
-  // this is a heuristic and should be validated against the IDL for production hardening.
-  return accountKeys[1]?.pubkey?.toBase58();
 }

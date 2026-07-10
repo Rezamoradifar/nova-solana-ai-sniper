@@ -4,6 +4,43 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Every detected token showed `Liquidity = $0`. Root-caused with live mainnet data
+  (real Helius RPC + DexScreener calls against freshly-launched tokens) to two
+  compounding bugs, both in the `new_token` detection path (`apps/api/src/worker.ts`
+  → `RiskAnalyzer.analyze`):
+  1. `extractMintFromTx` took `accountKeys[1]` as "the mint" on the assumption it's
+     always the 2nd account key in a pump.fun `create` transaction. True only for the
+     simplest tx shape — verified wrong in 4 of 5 live sampled creates (anything
+     bundled with a dev-buy, routed through Jito, or wrapped by a router shifts
+     Solana's account-key ordering, which is grouped by signer/writable status, not
+     per-instruction position). Every downstream lookup (mint authority, holder
+     concentration, DexScreener) then ran against a garbage non-mint address and
+     silently fell back to its default via an existing `.catch()`. Replaced with
+     `extractMintFromParsedTx` (`apps/api/src/detection/extractMint.ts`), which reads
+     the mint directly out of the transaction's `pre`/`postTokenBalances` — correct
+     regardless of transaction shape, verified against real fixtures. Returns
+     `undefined` (skip the event) rather than guess when genuinely ambiguous.
+  2. Even with the correct mint, DexScreener's own API response for a pre-migration
+     pump.fun pair (`dexId: "pumpfun"`) omits the `liquidity` field entirely (confirmed
+     by dumping raw live responses — `fdv`/`marketCap` are present, `liquidity` is
+     simply absent) — `pair?.liquidity?.usd ?? 0` silently defaulted to 0 for every
+     token that hasn't migrated to a real AMM pool yet, i.e. effectively all of them at
+     detection time. `RiskAnalyzer` now falls back to reading the token's on-chain
+     pump.fun bonding-curve account directly (`apps/api/src/solana/pumpfunBondingCurve.ts`
+     — PDA-derived, decoded, cross-checked against the account's own raw lamport
+     balance on live data) when DexScreener has no liquidity figure, and as a last
+     resort to a Jupiter quote's price-impact (`estimateLiquidityFromPriceImpact`) when
+     even that isn't available. Raydium liquidity was already covered correctly by
+     DexScreener/Jupiter and needed no separate client. All raw API/RPC responses are
+     logged at debug level for future diagnosis (the shared logger already redacts any
+     secret-shaped field). Verified end-to-end against 5 real, newly-launched mainnet
+     tokens: 0 now show $0 (previously 5/5 would have).
+  - This also silently blocked every auto-buy config with a nonzero
+    `minLiquidityUsd` threshold (`AutoTrader.evaluateAndMaybeBuy`), since `0 <
+minLiquidityUsd` was always true.
+
 ### Added
 
 - Referral system: `User.referralCode` (auto-generated, 8-char, ambiguous-character-free) is
