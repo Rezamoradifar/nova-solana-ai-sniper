@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { PortfolioService } from '../trading/portfolio.js';
+import { PortfolioService } from '@nova/shared';
 
 export default async function portfolioRoutes(fastify: FastifyInstance) {
   const portfolioService = new PortfolioService(fastify.prisma);

@@ -120,6 +120,7 @@ model Trade {
   txSignature String?     @unique
   slippageBps Int         @default(100)
   jitoTip     Float?
+  isPaperTrade Boolean    @default(false)
   createdAt   DateTime    @default(now())
   confirmedAt DateTime?
 
@@ -148,6 +149,7 @@ model Position {
   trailingStopPercent  Float?
   highWaterMarkUsd     Float?
   realizedPnlUsd       Float?
+  isPaperTrade         Boolean        @default(false)
   closedAt             DateTime?
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt

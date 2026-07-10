@@ -22,12 +22,6 @@ export function registerAdminCommands(
 ): void {
   const admin = requireAdmin(adminIds);
 
-  bot.command('start', async (ctx) => {
-    await ctx.reply(
-      '👋 Nova Solana AI Sniper bot online.\nUse /status for system health, /stats for trading stats.',
-    );
-  });
-
   bot.command('status', admin, async (ctx) => {
     const [tokenCount, openPositions, users] = await Promise.all([
       prisma.token.count(),

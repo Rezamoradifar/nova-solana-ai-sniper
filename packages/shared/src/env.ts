@@ -1,6 +1,18 @@
 import { z } from 'zod';
 
 /**
+ * `z.coerce.boolean()` is a footgun for env vars: `Boolean("false")` is `true`,
+ * so it would turn LIVE_TRADING=false into `true`. This only accepts the literal
+ * strings "true"/"false".
+ */
+function booleanFlag(defaultValue: boolean) {
+  return z
+    .enum(['true', 'false'])
+    .default(defaultValue ? 'true' : 'false')
+    .transform((v) => v === 'true');
+}
+
+/**
  * Full superset of env vars used anywhere in the platform. Individual apps
  * import `envSchema.pick({...})` to validate only the vars they actually need,
  * so a missing Twitter key doesn't stop the API from booting, for example.
@@ -15,6 +27,12 @@ export const envSchema = z.object({
   API_PORT: z.coerce.number().default(4000),
   API_HOST: z.string().default('0.0.0.0'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
+
+  // Trading mode — the one hard safety switch. Real swaps only ever execute
+  // when LIVE_TRADING is the literal string "true"; every other value (unset,
+  // "false", typos) keeps the position manager in paper-fill mode.
+  PAPER_TRADING: booleanFlag(true),
+  LIVE_TRADING: booleanFlag(false),
 
   // Auth / secrets
   JWT_SECRET: z.string().min(16),

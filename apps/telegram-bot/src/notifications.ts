@@ -8,6 +8,7 @@ export interface TradeNotification {
   amountSol: number;
   priceUsd?: number;
   signature: string;
+  isPaperTrade?: boolean;
 }
 
 export interface PositionExitNotification {
@@ -15,6 +16,15 @@ export interface PositionExitNotification {
   reason: 'take_profit' | 'stop_loss' | 'trailing_stop';
   pnlPercent: number;
   pnlUsd?: number;
+  isPaperTrade?: boolean;
+}
+
+export interface NewTokenNotification {
+  mint: string;
+  dex: string;
+  liquidityUsd?: number;
+  isHoneypotSuspected?: boolean;
+  aiScore?: number;
 }
 
 /**
@@ -39,19 +49,23 @@ export class NotificationService {
 
   async notifyTrade(trade: TradeNotification): Promise<void> {
     const emoji = trade.side === 'BUY' ? '🟢' : '🔴';
+    const paperTag = trade.isPaperTrade ? ' 📝 PAPER' : '';
     const priceLine = trade.priceUsd ? `\nPrice: $${trade.priceUsd.toFixed(6)}` : '';
+    const txLine = trade.isPaperTrade
+      ? '\n_(simulated fill, no on-chain tx)_'
+      : `\n[Tx](https://solscan.io/tx/${trade.signature})`;
     await this.send(
-      `${emoji} *${trade.side}* \`${trade.symbol}\`\n` +
-        `Amount: ${trade.amountSol} SOL${priceLine}\n` +
-        `[Tx](https://solscan.io/tx/${trade.signature})`,
+      `${emoji} *${trade.side}*${paperTag} \`${trade.symbol}\`\n` +
+        `Amount: ${trade.amountSol} SOL${priceLine}${txLine}`,
     );
   }
 
   async notifyExit(exit: PositionExitNotification): Promise<void> {
     const emoji = exit.pnlPercent >= 0 ? '✅' : '⚠️';
+    const paperTag = exit.isPaperTrade ? ' 📝 PAPER' : '';
     const reasonLabel = exit.reason.replace(/_/g, ' ');
     await this.send(
-      `${emoji} Position closed: \`${exit.symbol}\`\n` +
+      `${emoji}${paperTag} Position closed: \`${exit.symbol}\`\n` +
         `Reason: ${reasonLabel}\n` +
         `PnL: ${exit.pnlPercent.toFixed(2)}%`,
     );
@@ -64,6 +78,19 @@ export class NotificationService {
   async notifySocialMention(text: string, tweetId: string): Promise<void> {
     await this.send(
       `🐦 *X mention*\n${text.slice(0, 300)}\n` + `[View](https://x.com/i/web/status/${tweetId})`,
+    );
+  }
+
+  async notifyNewToken(token: NewTokenNotification): Promise<void> {
+    const riskEmoji = token.isHoneypotSuspected ? '🚨' : '🆕';
+    const liquidityLine =
+      token.liquidityUsd !== undefined ? `\nLiquidity: $${token.liquidityUsd.toFixed(0)}` : '';
+    const scoreLine = token.aiScore !== undefined ? `\nScore: ${token.aiScore.toFixed(0)}/100` : '';
+    const honeypotLine = token.isHoneypotSuspected ? '\n⚠️ Honeypot/rug risk flagged' : '';
+    await this.send(
+      `${riskEmoji} *New ${token.dex} launch*\n` +
+        `\`${token.mint}\`${liquidityLine}${scoreLine}${honeypotLine}\n` +
+        `[Chart](https://dexscreener.com/solana/${token.mint})`,
     );
   }
 }

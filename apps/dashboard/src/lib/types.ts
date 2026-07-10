@@ -58,6 +58,23 @@ export interface Wallet {
   createdAt: string;
 }
 
+/** Returned only from POST /wallets — `mnemonic` is shown once and never persisted. */
+export interface WalletCreateResult extends Wallet {
+  mnemonic?: string;
+}
+
+/** AES-256-GCM-encrypted wallet backup file — useless without the password used to create it. */
+export interface WalletBackupFile {
+  version: number;
+  kind: string;
+  publicKey: string;
+  createdAt: string;
+  salt: string;
+  iv: string;
+  authTag: string;
+  ciphertext: string;
+}
+
 export interface PortfolioSummary {
   walletId: string;
   openPositions: number;

@@ -1,6 +1,6 @@
 import pino from 'pino';
 
-const SECRET_KEY_PATTERN = /(key|token|secret|password|seed|private)/i;
+const SECRET_KEY_PATTERN = /(key|token|secret|password|seed|private|mnemonic)/i;
 
 function redactUnknownKeys(obj: unknown): unknown {
   if (Array.isArray(obj)) return obj.map(redactUnknownKeys);

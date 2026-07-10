@@ -3,6 +3,7 @@ import { createLogger } from '@nova/shared';
 import { loadBotEnv, parseAdminIds } from './config/env.js';
 import { createBot } from './bot.js';
 import { registerAdminCommands } from './admin/commands.js';
+import { registerUiRouter } from './ui/router.js';
 
 const logger = createLogger('telegram-bot');
 
@@ -28,6 +29,7 @@ async function main() {
   }
 
   registerAdminCommands(bot, prisma, adminIds, logger);
+  registerUiRouter(bot, { prisma, encryptionKey: env.ENCRYPTION_KEY, logger });
 
   await bot.start({
     onStart: () => logger.info('telegram bot started (long polling)'),

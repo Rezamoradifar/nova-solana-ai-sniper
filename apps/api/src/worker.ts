@@ -31,6 +31,16 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   const jupiter = new JupiterClient({ apiBase: app.config.JUPITER_API_BASE });
   const riskAnalyzer = new RiskAnalyzer(connection, dexScreener);
 
+  // The one hard safety switch: real swaps only ever fire when LIVE_TRADING is
+  // explicitly "true". Everything else (unset, "false", PAPER_TRADING alone)
+  // keeps every auto-buy as a simulated fill — no wallet key is ever unsealed.
+  const paperTrading = !app.config.LIVE_TRADING;
+  app.log.warn(
+    paperTrading
+      ? '📝 PAPER TRADING mode — auto-buys are simulated, no real swaps or wallet keys used'
+      : '🔴 LIVE TRADING mode — auto-buys will execute real on-chain swaps',
+  );
+
   let notifier: NotificationService | undefined;
   if (app.config.TELEGRAM_BOT_TOKEN && app.config.TELEGRAM_CHAT_ID) {
     const bot = createBot(app.config.TELEGRAM_BOT_TOKEN, app.log as never);
@@ -45,6 +55,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     jupiter,
     app.log as never,
     notifier,
+    paperTrading,
   );
   const autoTrader = new AutoTrader({
     prisma: app.prisma,
@@ -138,6 +149,14 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
           data: { aiScore: aiScore.score, aiSummary: aiScore.summary },
         });
       }
+
+      await notifier?.notifyNewToken({
+        mint,
+        dex: 'PUMPFUN',
+        liquidityUsd: riskFlags.liquidityUsd,
+        isHoneypotSuspected: riskFlags.isHoneypotSuspected,
+        aiScore: aiScoreValue,
+      });
 
       await autoTrader.evaluateAndMaybeBuy(mint, token.id, riskFlags, aiScoreValue);
     } catch (err) {

@@ -1,9 +1,9 @@
+import { randomBytes } from 'node:crypto';
 import type { Connection } from '@solana/web3.js';
 import type { PrismaClient } from '@prisma/client';
-import type { Logger } from '@nova/shared';
+import { unsealKeypair, type Logger } from '@nova/shared';
 import type { NotificationService } from '@nova/telegram-bot';
 import { JupiterClient, SOL_MINT } from '../solana/jupiter.js';
-import { unsealKeypair } from '../security/keystore.js';
 import { evaluateExit, type ExitReason } from './exitEngine.js';
 import { eventBus } from '../lib/eventBus.js';
 
@@ -24,6 +24,11 @@ export interface OpenPositionParams {
   trailingStopPercent?: number;
 }
 
+/** A random-looking signature so paper trades are visually distinct from real (base58) ones. */
+function paperSignature(): string {
+  return `PAPER${randomBytes(16).toString('hex')}`;
+}
+
 export class PositionManager {
   constructor(
     private readonly prisma: PrismaClient,
@@ -31,21 +36,39 @@ export class PositionManager {
     private readonly jupiter: JupiterClient,
     private readonly logger: Logger,
     private readonly notifier?: NotificationService,
+    /** Real swaps only ever execute when this is explicitly false (LIVE_TRADING=true). */
+    private readonly paperTrading: boolean = true,
   ) {}
 
   async openPosition(params: OpenPositionParams) {
-    const keypair = unsealKeypair(params.encryptedSecret, params.encryptionKey);
     const amountLamports = BigInt(Math.floor(params.amountSol * LAMPORTS_PER_SOL));
 
-    const { quote, transaction } = await this.jupiter.prepareSwap(this.connection, keypair, {
-      inputMint: SOL_MINT,
-      outputMint: params.mint,
-      amountLamports,
-      slippageBps: params.slippageBps,
-    });
+    let outAmount: string;
+    let signature: string;
 
-    const signature = await this.connection.sendTransaction(transaction);
-    await this.connection.confirmTransaction(signature, 'confirmed');
+    if (this.paperTrading) {
+      // Simulated fill: get a real Jupiter quote for realistic sizing, but never touch
+      // the wallet's private key or broadcast anything.
+      const quote = await this.jupiter.getQuote({
+        inputMint: SOL_MINT,
+        outputMint: params.mint,
+        amountLamports,
+        slippageBps: params.slippageBps,
+      });
+      outAmount = quote.outAmount;
+      signature = paperSignature();
+    } else {
+      const keypair = unsealKeypair(params.encryptedSecret, params.encryptionKey);
+      const { quote, transaction } = await this.jupiter.prepareSwap(this.connection, keypair, {
+        inputMint: SOL_MINT,
+        outputMint: params.mint,
+        amountLamports,
+        slippageBps: params.slippageBps,
+      });
+      signature = await this.connection.sendTransaction(transaction);
+      await this.connection.confirmTransaction(signature, 'confirmed');
+      outAmount = quote.outAmount;
+    }
 
     const trade = await this.prisma.trade.create({
       data: {
@@ -54,10 +77,11 @@ export class PositionManager {
         side: 'BUY',
         status: 'CONFIRMED',
         amountSol: params.amountSol,
-        amountToken: Number(quote.outAmount),
+        amountToken: Number(outAmount),
         priceUsd: params.entryPriceUsd,
         txSignature: signature,
         slippageBps: params.slippageBps,
+        isPaperTrade: this.paperTrading,
         confirmedAt: new Date(),
       },
     });
@@ -67,12 +91,13 @@ export class PositionManager {
         walletId: params.walletId,
         tokenId: params.tokenId,
         entryPriceUsd: params.entryPriceUsd,
-        amountToken: Number(quote.outAmount),
+        amountToken: Number(outAmount),
         amountSolInvested: params.amountSol,
         highWaterMarkUsd: params.entryPriceUsd,
         takeProfitPercent: params.takeProfitPercent,
         stopLossPercent: params.stopLossPercent,
         trailingStopPercent: params.trailingStopPercent,
+        isPaperTrade: this.paperTrading,
       },
     });
 
@@ -88,6 +113,7 @@ export class PositionManager {
       amountSol: params.amountSol,
       priceUsd: params.entryPriceUsd || undefined,
       signature,
+      isPaperTrade: this.paperTrading,
     });
 
     return { trade, position };
@@ -141,17 +167,30 @@ export class PositionManager {
       include: { token: true },
     });
 
-    const keypair = unsealKeypair(encryptedSecret, encryptionKey);
+    let outAmountLamports: number;
+    let signature: string;
 
-    const { quote, transaction } = await this.jupiter.prepareSwap(this.connection, keypair, {
-      inputMint: position.token.mint,
-      outputMint: SOL_MINT,
-      amountLamports: BigInt(Math.floor(position.amountToken)),
-      slippageBps: 300,
-    });
-
-    const signature = await this.connection.sendTransaction(transaction);
-    await this.connection.confirmTransaction(signature, 'confirmed');
+    if (this.paperTrading) {
+      const quote = await this.jupiter.getQuote({
+        inputMint: position.token.mint,
+        outputMint: SOL_MINT,
+        amountLamports: BigInt(Math.floor(position.amountToken)),
+        slippageBps: 300,
+      });
+      outAmountLamports = Number(quote.outAmount);
+      signature = paperSignature();
+    } else {
+      const keypair = unsealKeypair(encryptedSecret, encryptionKey);
+      const { quote, transaction } = await this.jupiter.prepareSwap(this.connection, keypair, {
+        inputMint: position.token.mint,
+        outputMint: SOL_MINT,
+        amountLamports: BigInt(Math.floor(position.amountToken)),
+        slippageBps: 300,
+      });
+      signature = await this.connection.sendTransaction(transaction);
+      await this.connection.confirmTransaction(signature, 'confirmed');
+      outAmountLamports = Number(quote.outAmount);
+    }
 
     const realizedPnlUsd = (exit.currentPriceUsd - position.entryPriceUsd) * position.amountToken;
 
@@ -161,10 +200,11 @@ export class PositionManager {
         tokenId: position.tokenId,
         side: 'SELL',
         status: 'CONFIRMED',
-        amountSol: Number(quote.outAmount) / LAMPORTS_PER_SOL,
+        amountSol: outAmountLamports / LAMPORTS_PER_SOL,
         amountToken: position.amountToken,
         priceUsd: exit.currentPriceUsd,
         txSignature: signature,
+        isPaperTrade: this.paperTrading,
         confirmedAt: new Date(),
       },
     });
@@ -202,6 +242,7 @@ export class PositionManager {
         reason: exit.reason,
         pnlPercent,
         pnlUsd: realizedPnlUsd,
+        isPaperTrade: this.paperTrading,
       });
     }
 

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { generateUniqueReferralCode } from '../lib/referral.js';
+import { generateUniqueReferralCode } from '@nova/shared';
 
 const registerSchema = z.object({
   email: z.string().email(),

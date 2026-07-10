@@ -7,6 +7,7 @@ export const botEnvSchema = envSchema.pick({
   TELEGRAM_BOT_TOKEN: true,
   TELEGRAM_CHAT_ID: true,
   TELEGRAM_ADMIN_IDS: true,
+  ENCRYPTION_KEY: true,
 });
 
 export function loadBotEnv() {

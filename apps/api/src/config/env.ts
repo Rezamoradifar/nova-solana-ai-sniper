@@ -8,6 +8,8 @@ export const apiEnvSchema = envSchema.pick({
   API_PORT: true,
   API_HOST: true,
   CORS_ORIGIN: true,
+  PAPER_TRADING: true,
+  LIVE_TRADING: true,
   JWT_SECRET: true,
   ENCRYPTION_KEY: true,
   SOLANA_RPC_URL: true,
