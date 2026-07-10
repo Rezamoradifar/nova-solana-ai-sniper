@@ -1,0 +1,36 @@
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+
+# env
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+logs/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# prisma
+apps/api/prisma/migrations/dev/
+
+# keys / secrets
+*.pem
+*.key
+keystore/
+secrets/
+
+# misc
+*.tsbuildinfo
+.pnp.*

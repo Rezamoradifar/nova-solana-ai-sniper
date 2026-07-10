@@ -1,0 +1,246 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  TRADER
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String?  @unique
+  telegramId   String?  @unique
+  role         UserRole @default(TRADER)
+  passwordHash String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  wallets       Wallet[]
+  watchlists    WatchlistItem[]
+  snipeConfigs  SnipeConfig[]
+  copyConfigs   CopyTradeConfig[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+/// Wallet private keys are stored encrypted (AES-256-GCM) via the security layer,
+/// never in plaintext. `encryptedSecret` holds ciphertext + iv + authTag, base64-joined.
+model Wallet {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label           String
+  publicKey       String   @unique
+  encryptedSecret String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  trades   Trade[]
+  positions Position[]
+
+  @@index([userId])
+  @@map("wallets")
+}
+
+enum Dex {
+  PUMPFUN
+  RAYDIUM
+  ORCA
+  JUPITER
+}
+
+model Token {
+  id              String   @id @default(cuid())
+  mint            String   @unique
+  symbol          String?
+  name            String?
+  decimals        Int      @default(9)
+  dex             Dex
+  poolAddress     String?
+  createdAt       DateTime @default(now())
+  firstSeenAt     DateTime @default(now())
+
+  liquidityUsd        Float?
+  marketCapUsd         Float?
+  mintAuthorityRevoked Boolean?
+  freezeAuthorityRevoked Boolean?
+  lpBurnedOrLocked     Boolean?
+  top10HolderPercent   Float?
+  isHoneypotSuspected  Boolean?
+  aiScore              Float?
+  aiSummary            String?
+
+  trades    Trade[]
+  positions Position[]
+  snipes    SnipeConfig[]
+
+  @@index([dex])
+  @@index([createdAt])
+  @@map("tokens")
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum TradeStatus {
+  PENDING
+  CONFIRMED
+  FAILED
+}
+
+model Trade {
+  id          String      @id @default(cuid())
+  walletId    String
+  wallet      Wallet      @relation(fields: [walletId], references: [id])
+  tokenId     String
+  token       Token       @relation(fields: [tokenId], references: [id])
+  side        OrderSide
+  status      TradeStatus @default(PENDING)
+  amountSol   Float
+  amountToken Float?
+  priceUsd    Float?
+  txSignature String?     @unique
+  slippageBps Int         @default(100)
+  jitoTip     Float?
+  createdAt   DateTime    @default(now())
+  confirmedAt DateTime?
+
+  @@index([walletId])
+  @@index([tokenId])
+  @@map("trades")
+}
+
+enum PositionStatus {
+  OPEN
+  CLOSED
+}
+
+model Position {
+  id                   String         @id @default(cuid())
+  walletId             String
+  wallet               Wallet         @relation(fields: [walletId], references: [id])
+  tokenId              String
+  token                Token          @relation(fields: [tokenId], references: [id])
+  status               PositionStatus @default(OPEN)
+  entryPriceUsd        Float
+  amountToken           Float
+  amountSolInvested     Float
+  takeProfitPercent    Float?
+  stopLossPercent      Float?
+  trailingStopPercent  Float?
+  highWaterMarkUsd     Float?
+  realizedPnlUsd       Float?
+  closedAt             DateTime?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@index([walletId, status])
+  @@map("positions")
+}
+
+model SnipeConfig {
+  id                  String   @id @default(cuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenId             String?
+  token               Token?   @relation(fields: [tokenId], references: [id])
+  isActive            Boolean  @default(true)
+  buyAmountSol        Float
+  maxSlippageBps      Int      @default(300)
+  minLiquidityUsd     Float    @default(1000)
+  minAiScore          Float    @default(60)
+  takeProfitPercent   Float?
+  stopLossPercent     Float?
+  trailingStopPercent Float?
+  autoBuyOnLaunch     Boolean  @default(false)
+  createdAt           DateTime @default(now())
+
+  @@index([userId])
+  @@map("snipe_configs")
+}
+
+model SmartWallet {
+  id          String   @id @default(cuid())
+  address     String   @unique
+  label       String?
+  winRate     Float?
+  totalPnlUsd Float?
+  isTracked   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  @@map("smart_wallets")
+}
+
+model CopyTradeConfig {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  targetAddress   String
+  isActive        Boolean  @default(true)
+  copyPercentSize Float    @default(100)
+  maxAmountSol    Float?
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@map("copy_trade_configs")
+}
+
+model WatchlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mint      String
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@unique([userId, mint])
+  @@map("watchlist_items")
+}
+
+enum MarketingCategory {
+  NEWS
+  TRADING_TIPS
+  MARKET_UPDATES
+  TRENDING_TOKENS
+  REFERRAL
+  ANNOUNCEMENTS
+}
+
+model MarketingPost {
+  id           String            @id @default(cuid())
+  category     MarketingCategory
+  contentHash  String            @unique
+  title        String
+  body         String
+  imageUrl     String?
+  buttons      Json?
+  publishedAt  DateTime?
+  scheduledFor DateTime?
+  createdAt    DateTime          @default(now())
+
+  @@index([category])
+  @@map("marketing_posts")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  metadata  Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@map("audit_logs")
+}

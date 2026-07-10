@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm view *)",
+      "Bash(npm install *)",
+      "Bash(cat)",
+      "Bash(chmod +x .husky/pre-commit)",
+      "Bash(npx tsc *)",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./node_modules/ioredis/package.json'\\), null, 2\\)\\)\")",
+      "Bash(npx prisma *)",
+      "Bash(node *)",
+      "Bash(npx vitest *)",
+      "Bash(npx eslint *)",
+      "Bash(git mv *)",
+      "Bash(npx prettier *)",
+      "Bash(git add *)"
+    ]
+  }
+}
