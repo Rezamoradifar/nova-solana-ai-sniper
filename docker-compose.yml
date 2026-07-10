@@ -104,7 +104,9 @@ services:
     networks: [nova]
 
   nginx:
-    image: nginx:1.27-alpine
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
     restart: unless-stopped
     ports:
       - '80:80'

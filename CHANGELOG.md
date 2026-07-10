@@ -35,3 +35,9 @@ All notable changes to this project are documented in this file.
   job, the three app services, Nginx + certbot), `scripts/init-letsencrypt.sh` to bootstrap the
   first TLS certificate, `ecosystem.config.cjs` for PM2 on bare-metal/VPS deployments, and a
   GitHub Actions CI workflow (lint, format check, typecheck, test, build, Docker image builds).
+- `apps/dashboard`: React 18 + Vite 6 + Tailwind dark-theme SPA — overview (stat cards, recent
+  trades, TradingView chart embed), live token feed, positions, portfolio, wallet
+  create/import, snipe-config settings, PnL leaderboard, and a logs view. JWT auth against
+  `apps/api` with a protected-route shell; REST polling (no websocket yet). Its own Dockerfile
+  builds the static bundle and serves it from the same Nginx image that reverse-proxies
+  `/api/` to the API service.

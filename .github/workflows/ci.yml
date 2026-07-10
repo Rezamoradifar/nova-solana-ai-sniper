@@ -29,8 +29,11 @@ jobs:
       - name: Format check
         run: npm run format:check
 
-      - name: Typecheck
+      - name: Typecheck backend
         run: npx tsc -b packages/shared packages/ai apps/telegram-bot apps/marketing-engine apps/api --force
+
+      - name: Typecheck dashboard
+        run: npx tsc --noEmit -p apps/dashboard/tsconfig.json
 
       - name: Test
         run: npm run test
@@ -43,7 +46,7 @@ jobs:
     needs: build-test
     strategy:
       matrix:
-        app: [api, telegram-bot, marketing-engine]
+        app: [api, telegram-bot, marketing-engine, dashboard]
     steps:
       - uses: actions/checkout@v4
 
