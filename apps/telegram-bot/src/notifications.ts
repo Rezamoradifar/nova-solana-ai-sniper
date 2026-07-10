@@ -1,4 +1,4 @@
-import type { Bot } from 'grammy';
+import type { Api, Bot } from 'grammy';
 import type { Logger } from '@nova/shared';
 
 export interface TradeNotification {
@@ -108,5 +108,31 @@ export class NotificationService {
         `${migration.fromDex} → ${migration.toDex}\n` +
         `[Chart](https://dexscreener.com/solana/${migration.mint})`,
     );
+  }
+}
+
+/**
+ * Standalone (not part of NotificationService, which is bound to one fixed
+ * broadcast chat) because this sends to an arbitrary referrer's own chat —
+ * fired once, the moment maybeActivateReferralReward actually activates them.
+ * Swallows its own send error (logged, not thrown), same convention as
+ * NotificationService, so a Telegram outage never breaks the referral flow itself.
+ */
+export async function sendReferralRewardNotification(
+  api: Api,
+  chatId: string,
+  referredCount: number,
+  logger: Logger,
+): Promise<void> {
+  try {
+    await api.sendMessage(
+      chatId,
+      `🎉 *Referral reward unlocked!*\n\n` +
+        `You've referred ${referredCount} people — a default auto-buy sniper config is now active for you.\n` +
+        `Check ▶️ Start Sniper to review or adjust it.`,
+      { parse_mode: 'Markdown' },
+    );
+  } catch (err) {
+    logger.error({ err }, 'failed to send referral reward telegram notification');
   }
 }

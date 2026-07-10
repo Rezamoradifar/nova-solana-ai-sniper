@@ -152,7 +152,7 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
     const pendingAction = getPending(ctx.chat.id);
     if (!pendingAction) return next();
 
-    const user = await resolveOrCreateUser(deps.prisma, ctx);
+    const user = await resolveOrCreateUser(deps, ctx);
     const text = ctx.message.text;
     const send = async (result: ScreenResult) =>
       ctx.reply(result.text, { parse_mode: 'Markdown', reply_markup: result.keyboard });
@@ -245,7 +245,7 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
     if (!screen) return;
     clearPending(ctx.chat.id);
     try {
-      const user = await resolveOrCreateUser(deps.prisma, ctx);
+      const user = await resolveOrCreateUser(deps, ctx);
       const result = await renderScreen(screen, deps, user, ctx);
       await ctx.reply(result.text, { parse_mode: 'Markdown', reply_markup: result.keyboard });
     } catch (err) {
@@ -258,7 +258,7 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data;
     try {
-      const user = await resolveOrCreateUser(deps.prisma, ctx);
+      const user = await resolveOrCreateUser(deps, ctx);
       let result: ScreenResult | undefined;
 
       if (data.startsWith('s:')) {
@@ -293,11 +293,7 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
 
 /** Sends the welcome message (reply keyboard) followed by the Home screen. */
 export async function sendWelcomeAndHome(ctx: Context, deps: ScreenDeps): Promise<void> {
-  const user = await resolveOrCreateUser(
-    deps.prisma,
-    ctx,
-    ctx.match ? String(ctx.match) : undefined,
-  );
+  const user = await resolveOrCreateUser(deps, ctx, ctx.match ? String(ctx.match) : undefined);
   await ctx.reply('👋 *Nova Solana AI Sniper* is ready. Use the menu below to navigate.', {
     parse_mode: 'Markdown',
     reply_markup: mainMenuKeyboard(),
