@@ -61,13 +61,16 @@ import type { NativeDexExecutor, NativeSwapParams } from './types.js';
  * appending `pool_v2` + a fee recipient + its ATA (see `poolV2Pda` and
  * `NEW_FEE_RECIPIENTS` below).
  *
- * KNOWN OPEN ISSUE: this fix is sourced from pump-fun's own docs/issue tracker, not
- * yet confirmed against a fresh signed `simulateTransaction` dry-run (the prior
- * dry-run predates this account-list change). `PositionManager` always calls
- * `simulateTransaction` and refuses to send on any simulation error before this
- * executor's output is ever used for a real trade (see positionManager.test.ts), so
- * this still fails closed. Do not treat this executor as verified end-to-end until a
- * clean dry-run (zero simulation error) is confirmed.
+ * A follow-up signed `simulateTransaction` dry-run against that same real pool
+ * confirmed the `pool_v2`/fee-recipient fix: `err: null`, the `Buy` instruction
+ * completing inside the PumpSwap program with no error (96,062 CU). A second
+ * dry-run against a different real pool the wallet already held a token balance in
+ * (6gTQBJBV7DUQUGfsQoxzqi8Kgpa5ymF5riquo1k9sXoe) confirmed the mirror-image `Sell`
+ * path the same way (`err: null`, 98,729 CU). Both were simulation-only — no
+ * transaction was ever sent. `PositionManager` still calls `simulateTransaction`
+ * and refuses to send on any simulation error before this executor's output is ever
+ * used for a real trade (see positionManager.test.ts), so a bug here still fails
+ * closed even though this path is now verified end-to-end for a live buy and sell.
  */
 
 const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
