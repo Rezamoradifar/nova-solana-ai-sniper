@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Local `npm run dev:*` never actually loaded `.env` into `process.env` — only Docker Compose's
+  `env_file` directive did. Wired `dotenv-cli` into each app's `dev` script (and the root
+  `prisma:migrate`/`prisma:deploy` scripts), pointed at the repo-root `.env` explicitly since
+  npm sets each workspace's cwd to its own directory. Caught by actually booting
+  `apps/telegram-bot` against a real bot token instead of assuming the plumbing worked.
+
 ### Added
 
 - `apps/api/src/social`: X (Twitter) API v2 client and polling monitor (`since_id`-based

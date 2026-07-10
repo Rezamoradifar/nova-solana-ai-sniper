@@ -9,7 +9,7 @@
     ".": "./dist/lib.js"
   },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "dotenv -e ../../.env -- tsx watch src/index.ts",
     "build": "tsc -b",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",

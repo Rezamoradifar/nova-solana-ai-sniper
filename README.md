@@ -39,6 +39,11 @@ npm run prisma:migrate
 npm run dev:api
 ```
 
+Every `dev:*` and `prisma:*` script loads the root `.env` automatically via
+`dotenv-cli` (wired per-workspace since npm sets each workspace's cwd to its
+own directory, not the repo root). Docker Compose doesn't need this — it
+injects `.env` via `env_file` directly.
+
 ## Environment variables
 
 See `.env.example` for the full list. Only `DATABASE_URL`, `REDIS_URL`,
