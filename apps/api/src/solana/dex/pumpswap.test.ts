@@ -22,10 +22,18 @@ const REAL_POOL = {
   poolQuoteTokenAccount: '9Nkgzsqenp9a87akazm9zQc4eduTa7w2bd8ynvsJCoUf',
   lpSupply: 4193388284701n,
   coinCreator: '2q8dd3fpWuQdiUzgeNdMTKxmH3rKYwXgAfaGs8T6HFLZ',
+  isMayhemMode: false,
 };
 
-function buildRealPoolAccountData(): Buffer {
-  const buf = Buffer.alloc(243);
+// Real pool captured live 2026-07-10: 4bBe7N8WTABTr4AQFkKiM9ST54g8Z9Kb8qy2HTrWGzhn
+// (9mufaCxcGwrkA9oP3seaYbnveSh3tB5q3AAyUeSkpump / SOL) — this pool's `is_mayhem_mode`
+// byte is 1 on-chain, and a real signed simulateTransaction dry-run reproduced
+// `InvalidProtocolFeeRecipient` (6013) when the executor picked a normal-set
+// recipient for it; the fix reads this flag to pick from the reserved set instead.
+const MAYHEM_POOL_IS_MAYHEM_MODE = true;
+
+function buildRealPoolAccountData(isMayhemMode = REAL_POOL.isMayhemMode): Buffer {
+  const buf = Buffer.alloc(244);
   buf.writeUInt8(REAL_POOL.poolBump, 8);
   buf.writeUInt16LE(REAL_POOL.index, 9);
   new PublicKey(REAL_POOL.creator).toBuffer().copy(buf, 11);
@@ -36,6 +44,7 @@ function buildRealPoolAccountData(): Buffer {
   new PublicKey(REAL_POOL.poolQuoteTokenAccount).toBuffer().copy(buf, 171);
   buf.writeBigUInt64LE(REAL_POOL.lpSupply, 203);
   new PublicKey(REAL_POOL.coinCreator).toBuffer().copy(buf, 211);
+  buf.writeUInt8(isMayhemMode ? 1 : 0, 243);
   return buf;
 }
 
@@ -48,6 +57,15 @@ describe('decodePumpSwapPool', () => {
     expect(state.poolQuoteTokenAccount).toBe(REAL_POOL.poolQuoteTokenAccount);
     expect(state.lpSupply).toBe(REAL_POOL.lpSupply);
     expect(state.coinCreator).toBe(REAL_POOL.coinCreator);
+    expect(state.isMayhemMode).toBe(false);
+  });
+
+  it('decodes a real mayhem-mode pool with isMayhemMode true', () => {
+    const state = decodePumpSwapPool(
+      REAL_POOL.address,
+      buildRealPoolAccountData(MAYHEM_POOL_IS_MAYHEM_MODE),
+    );
+    expect(state.isMayhemMode).toBe(true);
   });
 
   it('throws on a too-short buffer instead of silently misreading it', () => {

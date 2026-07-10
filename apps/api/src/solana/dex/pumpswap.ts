@@ -31,8 +31,14 @@ const OFFSET = {
   // independently cross-checked (no second public source exposes it), only its
   // position in the byte layout.
   coinCreator: 211,
+  // is_mayhem_mode immediately follows coin_creator per the IDL. Verified live: a
+  // real pool (4bBe7N8WTABTr4AQFkKiM9ST54g8Z9Kb8qy2HTrWGzhn) that failed native
+  // PumpSwap buys with `InvalidProtocolFeeRecipient` (6013) has this byte set to 1
+  // — the pool requires a *reserved* fee recipient, not a normal one, and the swap
+  // executor was picking from the wrong (normal) list.
+  isMayhemMode: 243,
 };
-const MIN_ACCOUNT_LEN = OFFSET.coinCreator + 32;
+const MIN_ACCOUNT_LEN = OFFSET.isMayhemMode + 1;
 
 export interface PumpSwapPoolState {
   poolAddress: string;
@@ -42,6 +48,7 @@ export interface PumpSwapPoolState {
   poolQuoteTokenAccount: string;
   lpSupply: bigint;
   coinCreator: string;
+  isMayhemMode: boolean;
 }
 
 export function decodePumpSwapPool(poolAddress: string, data: Buffer): PumpSwapPoolState {
@@ -58,6 +65,7 @@ export function decodePumpSwapPool(poolAddress: string, data: Buffer): PumpSwapP
     poolQuoteTokenAccount: readPubkey(OFFSET.poolQuoteTokenAccount),
     lpSupply: data.readBigUInt64LE(OFFSET.lpSupply),
     coinCreator: readPubkey(OFFSET.coinCreator),
+    isMayhemMode: data.readUInt8(OFFSET.isMayhemMode) === 1,
   };
 }
 

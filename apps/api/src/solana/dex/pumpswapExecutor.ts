@@ -1,6 +1,7 @@
 import {
   Connection,
   PublicKey,
+  SystemProgram,
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
@@ -10,6 +11,8 @@ import {
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
+  createCloseAccountInstruction,
+  createSyncNativeInstruction,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
 import { PUMPSWAP_PROGRAM_ID, getPumpSwapPoolState } from './pumpswap.js';
@@ -25,15 +28,46 @@ import type { NativeDexExecutor, NativeSwapParams } from './types.js';
  * simulate first (same discipline the existing Jupiter path already follows in
  * JupiterClient.prepareSwap) before ever treating the result as sendable.
  *
- * Verification status: the `global_config` PDA seed was confirmed live (the
- * account was found and decoded successfully against a real mainnet pool). A full
- * signed dry-run simulation was not completed — that requires a real Keypair with
- * an actual SOL balance (a fee-payer that merely exists on-chain, with no
- * matching signer, hits an ATA-derivation mismatch, not a meaningful result), and
- * using a real wallet's private key even for a zero-cost simulation was judged
- * out of scope without the user's explicit go-ahead. Get that sign-off, then run
- * one signed `simulateTransaction` dry-run (still no broadcast) before this is
- * ever treated as fully verified.
+ * Verification status: the `global_config` PDA seed was confirmed live against a
+ * real mainnet pool, and a full signed `simulateTransaction` dry-run (real wallet,
+ * real signature, no broadcast) was run with the user's explicit authorization.
+ * That dry-run caught a real bug: PumpSwap consumes SOL as an SPL token balance
+ * (WSOL), not natively, so a buy failed with `AccountNotInitialized` on
+ * `user_quote_token_account` — nothing had wrapped the SOL into a WSOL account
+ * first. Fixed by wrapping (idempotent ATA + transfer + sync-native) before a buy
+ * and unwrapping (close account) after a sell, matching the
+ * `wrapAndUnwrapSol: true` behavior Jupiter's own path already relies on. A re-run
+ * confirmed that specific error is gone.
+ *
+ * A follow-up dry-run then failed on-chain with `InvalidProtocolFeeRecipient`
+ * (error 6013): the pool used to test (4bBe7N8WTABTr4AQFkKiM9ST54g8Z9Kb8qy2HTrWGzhn)
+ * has its `is_mayhem_mode` byte set to 1, and mayhem-mode pools only accept a
+ * recipient from `GlobalConfig.reserved_fee_recipient`/`reserved_fee_recipients`,
+ * not the normal `protocol_fee_recipients` array this code was unconditionally
+ * reading from. Fixed by decoding the pool's `is_mayhem_mode` flag (see
+ * `pumpswap.ts`) and selecting from the matching recipient set. A re-run against
+ * the same real pool confirmed `InvalidProtocolFeeRecipient` no longer occurs.
+ *
+ * That same re-run then failed on-chain with `Overflow` (error 6023,
+ * `programs/pump-amm/src/instructions/swap/buy.rs:438`). Diagnosed via pump-fun's
+ * own `pump-public-docs` GitHub repo (issue #29 and `docs/BREAKING_FEE_RECIPIENT.md`):
+ * an April 28 program upgrade added a `pool_v2` PDA (seeds `["pool-v2", base_mint]`)
+ * plus 2 more accounts — one of 8 new fee-recipient pubkeys (readonly) and that
+ * recipient's quote-mint ATA (mutable) — that must be appended to the *end* of both
+ * `buy` and `sell`'s account list, required for every pool regardless of
+ * cashback/mayhem status. The published IDL this executor was built from predates
+ * that upgrade, so the account list was 3 accounts short; the program reports that
+ * as a generic arithmetic `Overflow` rather than a missing-account error. Fixed by
+ * appending `pool_v2` + a fee recipient + its ATA (see `poolV2Pda` and
+ * `NEW_FEE_RECIPIENTS` below).
+ *
+ * KNOWN OPEN ISSUE: this fix is sourced from pump-fun's own docs/issue tracker, not
+ * yet confirmed against a fresh signed `simulateTransaction` dry-run (the prior
+ * dry-run predates this account-list change). `PositionManager` always calls
+ * `simulateTransaction` and refuses to send on any simulation error before this
+ * executor's output is ever used for a real trade (see positionManager.test.ts), so
+ * this still fails closed. Do not treat this executor as verified end-to-end until a
+ * clean dry-run (zero simulation error) is confirmed.
  */
 
 const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
@@ -49,6 +83,20 @@ const FEE_CONFIG_SEED_2 = Buffer.from([
   113, 180, 212, 248, 9, 12, 24, 233, 168, 99,
 ]);
 
+// Published by pump-fun in docs/BREAKING_FEE_RECIPIENT.md for the April 28 program
+// upgrade: any one of these 8 is a valid "new" fee recipient (same load-distribution
+// pattern as GlobalConfig.protocol_fee_recipients), so the first is used.
+const NEW_FEE_RECIPIENTS = [
+  '5YxQFdt3Tr9zJLvkFccqXVUwhdTWJQc1fFg2YPbxvxeD',
+  '9M4giFFMxmFGXtc3feFzRai56WbBqehoSeRE5GK7gf7',
+  'GXPFM2caqTtQYC2cJ5yJRi9VDkpsYZXzYdwYpGnLmtDL',
+  '3BpXnfJaUTiwXnJNe7Ej1rcbzqTTQUvLShZaWazebsVR',
+  '5cjcW9wExnJJiqgLjq7DEG75Pm6JBgE1hNv4B2vHXUW6',
+  'EHAAiTxcdDwQ3U4bU6YcMsQGaekdzLS3B5SmYo46kJtL',
+  '5eHhjP8JaYkz83CWwvGU2uMUXefd3AazWGx4gpcuEEYD',
+  'A7hAgCzFw14fejgCp387JUJRMNyz4j89JKnhtKU8piqW',
+].map((s) => new PublicKey(s));
+
 function pda(seeds: (Buffer | Uint8Array)[], programId: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(seeds, programId)[0];
 }
@@ -62,6 +110,10 @@ const userVolumeAccumulatorPda = (user: PublicKey) =>
 const coinCreatorVaultAuthorityPda = (coinCreator: PublicKey) =>
   pda([Buffer.from('creator_vault'), coinCreator.toBuffer()], PUMPSWAP_PROGRAM_ID);
 const feeConfigPda = () => pda([Buffer.from('fee_config'), FEE_CONFIG_SEED_2], FEE_PROGRAM_ID);
+// Added by the same April 28 upgrade as NEW_FEE_RECIPIENTS above (seeds per
+// pump-fun's pump-public-docs issue #29: ["pool-v2", base_mint]).
+const poolV2Pda = (baseMint: PublicKey) =>
+  pda([Buffer.from('pool-v2'), baseMint.toBuffer()], PUMPSWAP_PROGRAM_ID);
 
 async function getTokenProgramForMint(connection: Connection, mint: PublicKey): Promise<PublicKey> {
   if (mint.equals(WSOL_MINT)) return TOKEN_PROGRAM_ID;
@@ -72,22 +124,42 @@ async function getTokenProgramForMint(connection: Connection, mint: PublicKey): 
 
 interface GlobalConfigState {
   protocolFeeRecipients: PublicKey[];
+  reservedFeeRecipients: PublicKey[];
 }
 
 /**
  * GlobalConfig layout per the IDL: 8-byte discriminator, admin (32), lp_fee_bp (8),
- * protocol_fee_bp (8), disable_flags (1), then protocol_fee_recipients: [Pubkey; 8].
- * The program only validates the recipient passed is *one of* these 8 (a common
- * load-distribution pattern) — any entry works, so the first is used.
+ * protocol_fee_bp (8), disable_flags (1), protocol_fee_recipients ([Pubkey; 8]),
+ * coin_creator_fee_bp (8), admin_set_coin_creator_authority (32), whitelist_pda
+ * (32), reserved_fee_recipient (32), mayhem_mode_enabled (1),
+ * reserved_fee_recipients ([Pubkey; 7]).
+ *
+ * The program validates the passed recipient is a member of one of two disjoint
+ * sets depending on the *pool's own* `is_mayhem_mode` flag (see pumpswap.ts):
+ * non-mayhem pools require a `protocol_fee_recipients` entry, mayhem-mode pools
+ * require `reserved_fee_recipient` or a `reserved_fee_recipients` entry. Verified
+ * live: a real pool with `is_mayhem_mode = true` failed a signed
+ * simulateTransaction dry-run with `InvalidProtocolFeeRecipient` (6013) when given
+ * a normal-set recipient, which is what motivated reading both sets here instead of
+ * hardcoding the normal set.
  */
 function decodeGlobalConfig(data: Buffer): GlobalConfigState {
   let offset = 8 + 32 + 8 + 8 + 1;
-  const recipients: PublicKey[] = [];
+  const protocolFeeRecipients: PublicKey[] = [];
   for (let i = 0; i < 8; i++) {
-    recipients.push(new PublicKey(data.subarray(offset, offset + 32)));
+    protocolFeeRecipients.push(new PublicKey(data.subarray(offset, offset + 32)));
     offset += 32;
   }
-  return { protocolFeeRecipients: recipients };
+  offset += 8 + 32 + 32; // coin_creator_fee_bp, admin_set_coin_creator_authority, whitelist_pda
+  const reservedFeeRecipients: PublicKey[] = [
+    new PublicKey(data.subarray(offset, offset + 32)), // reserved_fee_recipient
+  ];
+  offset += 32 + 1; // reserved_fee_recipient, mayhem_mode_enabled
+  for (let i = 0; i < 7; i++) {
+    reservedFeeRecipients.push(new PublicKey(data.subarray(offset, offset + 32)));
+    offset += 32;
+  }
+  return { protocolFeeRecipients, reservedFeeRecipients };
 }
 
 /**
@@ -152,7 +224,11 @@ export class PumpSwapExecutor implements NativeDexExecutor {
       ]);
     if (!globalConfigInfo) throw new Error('PumpSwap GlobalConfig account not found');
     const globalConfig = decodeGlobalConfig(globalConfigInfo.data);
-    const protocolFeeRecipient = globalConfig.protocolFeeRecipients[0]!;
+    // Mayhem-mode pools only accept a reserved-set recipient; everyone else only
+    // accepts a normal-set recipient (see decodeGlobalConfig's docstring).
+    const protocolFeeRecipient = pool.isMayhemMode
+      ? globalConfig.reservedFeeRecipients[0]!
+      : globalConfig.protocolFeeRecipients[0]!;
 
     const baseReserve = BigInt(baseBal.value.amount);
     const quoteReserve = BigInt(quoteBal.value.amount);
@@ -244,24 +320,85 @@ export class PumpSwapExecutor implements NativeDexExecutor {
       ]);
     }
 
+    // Required by the April 28 program upgrade for both buy and sell, for every
+    // pool (see file header and NEW_FEE_RECIPIENTS/poolV2Pda above). Omitting these
+    // is what produced the Overflow (6023) error this fix addresses.
+    const newFeeRecipient = NEW_FEE_RECIPIENTS[0]!;
+    const newFeeRecipientAta = getAssociatedTokenAddressSync(
+      quoteMint,
+      newFeeRecipient,
+      true,
+      quoteTokenProgram,
+    );
+    keys.push(
+      { pubkey: poolV2Pda(baseMint), isSigner: false, isWritable: false },
+      { pubkey: newFeeRecipient, isSigner: false, isWritable: false },
+      { pubkey: newFeeRecipientAta, isSigner: false, isWritable: true },
+    );
+
     const ix = new TransactionInstruction({ programId: PUMPSWAP_PROGRAM_ID, keys, data });
 
     // Idempotent: never fails if the ATA already exists, matching the existing
     // Jupiter-swap path's assumption that ATA setup is the caller's problem to not
     // block on — this makes the native path self-sufficient instead.
+    const receivingAta = isBuy ? userBaseAta : userQuoteAta;
+    const receivingMint = isBuy ? baseMint : quoteMint;
+    const receivingTokenProgram = isBuy ? baseTokenProgram : quoteTokenProgram;
     const ataIx = createAssociatedTokenAccountIdempotentInstruction(
       signer.publicKey,
-      isBuy ? userBaseAta : userQuoteAta,
+      receivingAta,
       signer.publicKey,
-      isBuy ? baseMint : quoteMint,
-      isBuy ? baseTokenProgram : quoteTokenProgram,
+      receivingMint,
+      receivingTokenProgram,
     );
+
+    const instructions: TransactionInstruction[] = [ataIx];
+
+    if (isBuy) {
+      // PumpSwap consumes SOL as an SPL token balance (WSOL), not natively — the
+      // quote side has to actually be wrapped before the Buy instruction can spend
+      // it. Verified live: omitting this fails with AccountNotInitialized on
+      // user_quote_token_account.
+      instructions.push(
+        createAssociatedTokenAccountIdempotentInstruction(
+          signer.publicKey,
+          userQuoteAta,
+          signer.publicKey,
+          quoteMint,
+          quoteTokenProgram,
+        ),
+        SystemProgram.transfer({
+          fromPubkey: signer.publicKey,
+          toPubkey: userQuoteAta,
+          lamports: amountLamports,
+        }),
+        createSyncNativeInstruction(userQuoteAta, quoteTokenProgram),
+      );
+    }
+
+    instructions.push(ix);
+
+    if (isSell) {
+      // Mirror image of the buy-side wrap: unwrap the WSOL received back to native
+      // SOL and reclaim the account's rent, matching the same
+      // wrapAndUnwrapSol: true behavior Jupiter's own swaps already rely on (so a
+      // sell through this fallback lands real SOL, not a stranded WSOL balance).
+      instructions.push(
+        createCloseAccountInstruction(
+          userQuoteAta,
+          signer.publicKey,
+          signer.publicKey,
+          [],
+          quoteTokenProgram,
+        ),
+      );
+    }
 
     const { blockhash } = await connection.getLatestBlockhash();
     const message = new TransactionMessage({
       payerKey: signer.publicKey,
       recentBlockhash: blockhash,
-      instructions: [ataIx, ix],
+      instructions,
     }).compileToV0Message();
     const tx = new VersionedTransaction(message);
     tx.sign([signer]);
