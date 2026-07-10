@@ -1,4 +1,4 @@
-export type Dex = 'pumpfun' | 'raydium' | 'orca' | 'jupiter';
+export type Dex = 'pumpfun' | 'raydium' | 'orca' | 'jupiter' | 'pumpswap' | 'meteora';
 
 export interface TokenInfo {
   mint: string;

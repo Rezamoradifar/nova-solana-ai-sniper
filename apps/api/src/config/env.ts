@@ -32,6 +32,7 @@ export const apiEnvSchema = envSchema.pick({
   DEXSCREENER_API_BASE: true,
   JUPITER_API_BASE: true,
   PRICE_CHECK_INTERVAL_MS: true,
+  MIGRATION_CHECK_INTERVAL_MS: true,
 });
 
 export function loadApiEnv() {

@@ -51,14 +51,33 @@ export class PumpFunMonitor {
   }
 }
 
+// Anchored to the exact instruction name (not a bare substring): live sampling this
+// session turned up `CreateFeeSharingConfig` and `MigrateBondingCurveCreator` — unrelated
+// fee/creator-payout admin instructions that happen to contain "Create"/"Migrate" as a
+// substring and involve zero token balance movement. A loose `.includes()` match would
+// misclassify those as a new-token launch / migration. `CreateV2` is included alongside
+// `Create` since pump.fun's live instruction set includes both create variants.
+const CREATE_INSTRUCTION_RE = /Instruction:\s*(Create|CreateV2)$/;
+const BUY_INSTRUCTION_RE = /Instruction:\s*(Buy|BuyV2|BuyExactQuoteInV2)$/;
+const WITHDRAW_INSTRUCTION_RE = /Instruction:\s*Withdraw$/;
+
 export function isCreateInstruction(logs: string[]): boolean {
-  return logs.some((l) => l.includes('Instruction: Create'));
+  return logs.some((l) => CREATE_INSTRUCTION_RE.test(l));
 }
 
 export function isBuyInstruction(logs: string[]): boolean {
-  return logs.some((l) => l.includes('Instruction: Buy'));
+  return logs.some((l) => BUY_INSTRUCTION_RE.test(l));
 }
 
+/**
+ * Best-effort hint only, not authoritative — live sampling found no reliably-observed
+ * single "this bonding curve just migrated" log line (the real Withdraw-driven migration
+ * event turned out to be rare relative to overall program traffic, and "Migrate" as a
+ * substring false-positives on unrelated admin instructions, see above). The ground-truth
+ * migration signal is the bonding curve account's own `complete` flag
+ * (`solana/pumpfunBondingCurve.ts`), checked by `MigrationMonitor`. This hint exists only
+ * to trigger an immediate out-of-band recheck instead of waiting for the next poll tick.
+ */
 export function isMigrationInstruction(logs: string[]): boolean {
-  return logs.some((l) => l.includes('Instruction: Withdraw') || l.includes('Migrate'));
+  return logs.some((l) => WITHDRAW_INSTRUCTION_RE.test(l));
 }

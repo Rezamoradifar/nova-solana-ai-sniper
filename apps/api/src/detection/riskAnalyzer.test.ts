@@ -14,26 +14,40 @@ describe('resolveLiquidityUsd', () => {
     expect(
       resolveLiquidityUsd({
         dexScreenerLiquidityUsd: 0,
+        nativeDexLiquidityUsd: 3000,
         bondingCurveLiquidityUsd: 5000,
         jupiterEstimateLiquidityUsd: 5000,
       }),
     ).toEqual({ liquidityUsd: 0, source: 'dexscreener' });
   });
 
-  it('falls back to the bonding curve estimate when DexScreener has no liquidity field at all', () => {
+  it('falls back to the native DEX reader when DexScreener has nothing, before the bonding curve or Jupiter estimate', () => {
     expect(
       resolveLiquidityUsd({
         dexScreenerLiquidityUsd: undefined,
+        nativeDexLiquidityUsd: 14760.76,
+        bondingCurveLiquidityUsd: 5000,
+        jupiterEstimateLiquidityUsd: 999,
+      }),
+    ).toEqual({ liquidityUsd: 14760.76, source: 'native_dex' });
+  });
+
+  it('falls back to the bonding curve estimate when neither DexScreener nor the native reader have anything', () => {
+    expect(
+      resolveLiquidityUsd({
+        dexScreenerLiquidityUsd: undefined,
+        nativeDexLiquidityUsd: undefined,
         bondingCurveLiquidityUsd: 107.71,
         jupiterEstimateLiquidityUsd: 999,
       }),
     ).toEqual({ liquidityUsd: 107.71, source: 'pumpfun_bonding_curve' });
   });
 
-  it('falls back to the Jupiter estimate only when both other sources are unavailable', () => {
+  it('falls back to the Jupiter estimate only when every other source is unavailable', () => {
     expect(
       resolveLiquidityUsd({
         dexScreenerLiquidityUsd: undefined,
+        nativeDexLiquidityUsd: undefined,
         bondingCurveLiquidityUsd: undefined,
         jupiterEstimateLiquidityUsd: 250,
       }),
@@ -44,6 +58,7 @@ describe('resolveLiquidityUsd', () => {
     expect(
       resolveLiquidityUsd({
         dexScreenerLiquidityUsd: undefined,
+        nativeDexLiquidityUsd: undefined,
         bondingCurveLiquidityUsd: undefined,
         jupiterEstimateLiquidityUsd: undefined,
       }),
@@ -94,6 +109,61 @@ describe('RiskAnalyzer.analyze liquidity fallback chain', () => {
       (connection as { getAccountInfo: ReturnType<typeof vi.fn> }).getAccountInfo,
     ).not.toHaveBeenCalled();
     expect((jupiter as { getQuote: ReturnType<typeof vi.fn> }).getQuote).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the native DEX reader when a known dex+poolAddress is passed and DexScreener has nothing', async () => {
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const jupiter = { getQuote: vi.fn() } as never;
+    const connection = { getAccountInfo: vi.fn().mockResolvedValue(null) } as never;
+    const dexRegistry = {
+      getLiquidity: vi.fn().mockResolvedValue({
+        dex: 'RAYDIUM',
+        poolAddress: 'Pool1111111111111111111111111111111111111',
+        baseMint: 'MintAAAA',
+        quoteMint: 'So11111111111111111111111111111111111111112',
+        baseReserve: 1000,
+        quoteReserve: 5,
+        liquidityUsd: 14760.76,
+      }),
+    } as never;
+
+    const analyzer = new RiskAnalyzer(connection, dexScreener, jupiter, fakeLogger(), dexRegistry);
+    const result = await analyzer.analyze({
+      mint: 'MintAAAA',
+      dex: 'RAYDIUM',
+      poolAddress: 'Pool1111111111111111111111111111111111111',
+    });
+
+    expect(result.liquidityUsd).toBe(14760.76);
+    expect(
+      (dexRegistry as { getLiquidity: ReturnType<typeof vi.fn> }).getLiquidity,
+    ).toHaveBeenCalledWith('RAYDIUM', 'Pool1111111111111111111111111111111111111');
+    expect((jupiter as { getQuote: ReturnType<typeof vi.fn> }).getQuote).not.toHaveBeenCalled();
+  });
+
+  it('skips the native DEX reader when no dexRegistry was injected, falling through to the next source', async () => {
+    const dexScreener = {
+      getBestSolanaPair: vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ priceUsd: '77.91' }),
+    } as never;
+    const jupiter = {
+      getQuote: vi
+        .fn()
+        .mockResolvedValue({ priceImpactPct: '2', inAmount: '1', outAmount: '1', routePlan: [] }),
+    } as never;
+    const connection = { getAccountInfo: vi.fn().mockResolvedValue(null) } as never;
+
+    // No dexRegistry passed at all — analyzer must not throw, just skip that source.
+    const analyzer = new RiskAnalyzer(connection, dexScreener, jupiter, fakeLogger());
+    const result = await analyzer.analyze({
+      mint: 'MintAAAA',
+      dex: 'RAYDIUM',
+      poolAddress: 'Pool111',
+    });
+
+    expect(result.liquidityUsd).toBeGreaterThan(0);
   });
 
   it('falls back to the bonding curve when DexScreener has a pair but no liquidity field (pump.fun case)', async () => {

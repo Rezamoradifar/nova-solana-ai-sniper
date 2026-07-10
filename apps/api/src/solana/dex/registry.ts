@@ -1,0 +1,144 @@
+import type { Connection, ParsedTransactionWithMeta } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
+import type { Logger } from '@nova/shared';
+import type { Dex } from '@prisma/client';
+import { SolPriceOracle } from '../pumpfunBondingCurve.js';
+import type { DexScreenerClient } from '../dexscreener.js';
+import { PUMPSWAP_PROGRAM_ID, PumpSwapMonitor, getPumpSwapLiquidity } from './pumpswap.js';
+import { RAYDIUM_CPMM_PROGRAM_ID, RaydiumCpmmMonitor, getRaydiumCpmmLiquidity } from './raydium.js';
+import {
+  ORCA_WHIRLPOOL_PROGRAM_ID,
+  OrcaWhirlpoolMonitor,
+  getOrcaWhirlpoolLiquidity,
+} from './orca.js';
+import { METEORA_DLMM_PROGRAM_ID, MeteoraDlmmMonitor, getMeteoraDlmmLiquidity } from './meteora.js';
+import {
+  NotImplementedNativeExecutor,
+  type DexMonitor,
+  type DexPoolInfo,
+  type NativeDexExecutor,
+  type NativeDexName,
+} from './types.js';
+
+type NativeDex = NativeDexName;
+
+const PROGRAM_ID_BY_DEX: Record<NativeDex, PublicKey> = {
+  PUMPSWAP: PUMPSWAP_PROGRAM_ID,
+  RAYDIUM: RAYDIUM_CPMM_PROGRAM_ID,
+  ORCA: ORCA_WHIRLPOOL_PROGRAM_ID,
+  METEORA: METEORA_DLMM_PROGRAM_ID,
+};
+
+// Cheap to skip outright — never a newly-created pool account, no point paying an
+// RPC round trip to find that out for every transaction scanned.
+const NEVER_A_POOL_ACCOUNT = new Set([
+  '11111111111111111111111111111111',
+  'ComputeBudget111111111111111111111111111111',
+  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+  'So11111111111111111111111111111111111111112',
+  'SysvarRent111111111111111111111111111111111',
+  'Sysvar1nstructions1111111111111111111111111',
+]);
+
+type LiquidityReader = (
+  connection: Connection,
+  dexScreener: DexScreenerClient,
+  solPriceOracle: SolPriceOracle,
+  poolAddress: string,
+) => Promise<DexPoolInfo | undefined>;
+
+/**
+ * One place that knows about every non-Jupiter DEX integration, so worker.ts and
+ * positionManager.ts don't need a per-DEX conditional each — adding a real native
+ * executor for Raydium/Orca/Meteora later (currently `NotImplementedNativeExecutor`
+ * stubs) is a change to this file's construction only, not to any call site.
+ */
+export class DexRegistry {
+  readonly monitors: ReadonlyMap<NativeDex, DexMonitor>;
+  private readonly liquidityReaders: ReadonlyMap<NativeDex, LiquidityReader>;
+  private readonly executors: ReadonlyMap<NativeDex, NativeDexExecutor>;
+  private readonly solPriceOracle = new SolPriceOracle();
+
+  constructor(
+    private readonly connection: Connection,
+    private readonly dexScreener: DexScreenerClient,
+    logger: Logger,
+    executorOverrides: Partial<Record<NativeDex, NativeDexExecutor>> = {},
+  ) {
+    this.monitors = new Map<NativeDex, DexMonitor>([
+      ['PUMPSWAP', new PumpSwapMonitor(connection, logger)],
+      ['RAYDIUM', new RaydiumCpmmMonitor(connection, logger)],
+      ['ORCA', new OrcaWhirlpoolMonitor(connection, logger)],
+      ['METEORA', new MeteoraDlmmMonitor(connection, logger)],
+    ]);
+    this.liquidityReaders = new Map<NativeDex, LiquidityReader>([
+      ['PUMPSWAP', getPumpSwapLiquidity],
+      ['RAYDIUM', getRaydiumCpmmLiquidity],
+      ['ORCA', getOrcaWhirlpoolLiquidity],
+      ['METEORA', getMeteoraDlmmLiquidity],
+    ]);
+    this.executors = new Map<NativeDex, NativeDexExecutor>([
+      ['PUMPSWAP', executorOverrides.PUMPSWAP ?? new NotImplementedNativeExecutor('PUMPSWAP')],
+      ['RAYDIUM', executorOverrides.RAYDIUM ?? new NotImplementedNativeExecutor('RAYDIUM')],
+      ['ORCA', executorOverrides.ORCA ?? new NotImplementedNativeExecutor('ORCA')],
+      ['METEORA', executorOverrides.METEORA ?? new NotImplementedNativeExecutor('METEORA')],
+    ]);
+  }
+
+  startAll(onLaunch: Parameters<DexMonitor['start']>[0]): void {
+    for (const monitor of this.monitors.values()) monitor.start(onLaunch);
+  }
+
+  async stopAll(): Promise<void> {
+    await Promise.all([...this.monitors.values()].map((m) => m.stop()));
+  }
+
+  async getLiquidity(dex: Dex, poolAddress: string): Promise<DexPoolInfo | undefined> {
+    const reader = this.liquidityReaders.get(dex as NativeDex);
+    if (!reader) return undefined;
+    return reader(this.connection, this.dexScreener, this.solPriceOracle, poolAddress);
+  }
+
+  getExecutor(dex: Dex): NativeDexExecutor | undefined {
+    return this.executors.get(dex as NativeDex);
+  }
+
+  /**
+   * Finds the pool a launch event's transaction just created, by checking each of
+   * the transaction's non-signer account keys for one now owned by the target
+   * DEX's program and decodable as that DEX's pool struct — rather than parsing
+   * the specific creation instruction's account ordering (which, unlike the
+   * pool-decode logic itself, was never observed against a live example to
+   * verify). Reuses the same decoders already verified against real accounts, so
+   * a false match (wrong owner, or too-short data) is rejected by the decoder
+   * itself, not silently accepted.
+   */
+  async resolveNewPool(
+    dex: NativeDex,
+    tx: ParsedTransactionWithMeta,
+  ): Promise<DexPoolInfo | undefined> {
+    const programId = PROGRAM_ID_BY_DEX[dex];
+    const reader = this.liquidityReaders.get(dex);
+    if (!reader) return undefined;
+
+    const candidates = tx.transaction.message.accountKeys.filter(
+      (k) => k.writable && !k.signer && !NEVER_A_POOL_ACCOUNT.has(k.pubkey.toBase58()),
+    );
+
+    for (const candidate of candidates) {
+      const address = candidate.pubkey.toBase58();
+      const info = await this.connection.getAccountInfo(candidate.pubkey).catch(() => null);
+      if (!info || !info.owner.equals(programId)) continue;
+      const pool = await reader(
+        this.connection,
+        this.dexScreener,
+        this.solPriceOracle,
+        address,
+      ).catch(() => undefined);
+      if (pool) return pool;
+    }
+    return undefined;
+  }
+}

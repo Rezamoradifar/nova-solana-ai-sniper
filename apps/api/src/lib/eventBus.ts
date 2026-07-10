@@ -9,7 +9,7 @@ import { EventEmitter } from 'node:events';
  * instances too.
  */
 export type LiveEventType =
-  'token.created' | 'trade.created' | 'position.updated' | 'social.mention';
+  'token.created' | 'token.migrated' | 'trade.created' | 'position.updated' | 'social.mention';
 
 export interface LiveEvent {
   type: LiveEventType;

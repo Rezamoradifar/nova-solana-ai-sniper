@@ -27,6 +27,13 @@ export interface NewTokenNotification {
   aiScore?: number;
 }
 
+export interface MigrationNotification {
+  mint: string;
+  symbol?: string;
+  fromDex: string;
+  toDex: string;
+}
+
 /**
  * Pushes trade/position/error alerts to the configured broadcast chat. Every
  * method swallows its own send errors (logged, not thrown) so a Telegram
@@ -91,6 +98,15 @@ export class NotificationService {
       `${riskEmoji} *New ${token.dex} launch*\n` +
         `\`${token.mint}\`${liquidityLine}${scoreLine}${honeypotLine}\n` +
         `[Chart](https://dexscreener.com/solana/${token.mint})`,
+    );
+  }
+
+  async notifyMigration(migration: MigrationNotification): Promise<void> {
+    const label = migration.symbol ?? migration.mint.slice(0, 8);
+    await this.send(
+      `🚀 *Migration detected*: \`${label}\`\n` +
+        `${migration.fromDex} → ${migration.toDex}\n` +
+        `[Chart](https://dexscreener.com/solana/${migration.mint})`,
     );
   }
 }

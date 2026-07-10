@@ -82,6 +82,9 @@ export const envSchema = z.object({
   JUPITER_API_BASE: z.string().url().default('https://lite-api.jup.ag'),
   // How often open positions are re-priced to evaluate take-profit/stop-loss/trailing-stop.
   PRICE_CHECK_INTERVAL_MS: z.coerce.number().min(5000).default(15000),
+  // How often recently-seen pump.fun tokens are polled for a bonding-curve migration —
+  // rarer than a price tick, so a longer default interval than PRICE_CHECK_INTERVAL_MS.
+  MIGRATION_CHECK_INTERVAL_MS: z.coerce.number().min(10000).default(30000),
 
   // Marketing / links
   DASHBOARD_URL: z.string().url().default('http://localhost:5173'),

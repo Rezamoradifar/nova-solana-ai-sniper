@@ -1,5 +1,6 @@
 import type { Connection } from '@solana/web3.js';
 import type { RiskFlags, Logger } from '@nova/shared';
+import type { Dex } from '@prisma/client';
 import { getHolderConcentration, getMintAuthorityInfo } from './onchain.js';
 import type { DexScreenerClient, DexScreenerPair } from '../solana/dexscreener.js';
 import type { JupiterClient } from '../solana/jupiter.js';
@@ -9,13 +10,17 @@ import {
   getBondingCurveState,
   SolPriceOracle,
 } from '../solana/pumpfunBondingCurve.js';
+import type { DexRegistry } from '../solana/dex/registry.js';
 
 export interface RiskAnalysisInput {
   mint: string;
+  /** Known venue + pool for this token, if already on file — enables the native-DEX liquidity reader as a fallback source. */
+  dex?: Dex;
+  poolAddress?: string;
 }
 
 export type LiquiditySource =
-  'dexscreener' | 'pumpfun_bonding_curve' | 'jupiter_estimate' | 'unavailable';
+  'dexscreener' | 'native_dex' | 'pumpfun_bonding_curve' | 'jupiter_estimate' | 'unavailable';
 
 export interface LiquidityResolution {
   liquidityUsd: number;
@@ -23,19 +28,27 @@ export interface LiquidityResolution {
 }
 
 /**
- * Picks the best available liquidity figure out of the three candidate sources,
- * in confidence order. Pure and independently unit-tested so the fallback
- * priority can't silently regress. DexScreener's own `liquidity` field is
- * absent (not just zero) for pre-migration pump.fun pairs — a present-but-zero
- * value is trusted as real, only an *absent* one triggers fallback.
+ * Picks the best available liquidity figure out of the candidate sources, in
+ * confidence order. Pure and independently unit-tested so the fallback priority
+ * can't silently regress. DexScreener's own `liquidity` field is absent (not just
+ * zero) for pre-migration pump.fun pairs — a present-but-zero value is trusted as
+ * real, only an *absent* one triggers fallback. Native DEX reads (PumpSwap/
+ * Raydium/Orca/Meteora) rank above the pump.fun bonding curve and Jupiter estimate
+ * — they're a direct on-chain reserve read for a pool we already have the address
+ * for, not an approximation — but below DexScreener, which aggregates across
+ * every pool for a mint rather than just the one pool we happen to know about.
  */
 export function resolveLiquidityUsd(candidates: {
   dexScreenerLiquidityUsd: number | undefined;
+  nativeDexLiquidityUsd: number | undefined;
   bondingCurveLiquidityUsd: number | undefined;
   jupiterEstimateLiquidityUsd: number | undefined;
 }): LiquidityResolution {
   if (candidates.dexScreenerLiquidityUsd !== undefined) {
     return { liquidityUsd: candidates.dexScreenerLiquidityUsd, source: 'dexscreener' };
+  }
+  if (candidates.nativeDexLiquidityUsd !== undefined) {
+    return { liquidityUsd: candidates.nativeDexLiquidityUsd, source: 'native_dex' };
   }
   if (candidates.bondingCurveLiquidityUsd !== undefined) {
     return { liquidityUsd: candidates.bondingCurveLiquidityUsd, source: 'pumpfun_bonding_curve' };
@@ -79,6 +92,8 @@ export class RiskAnalyzer {
     private readonly dexScreener: DexScreenerClient,
     private readonly jupiter: JupiterClient,
     private readonly logger: Logger,
+    /** Optional: enables the native-DEX liquidity reader as a fallback source. */
+    private readonly dexRegistry?: DexRegistry,
   ) {}
 
   async analyze(input: RiskAnalysisInput): Promise<RiskFlags> {
@@ -101,7 +116,12 @@ export class RiskAnalyzer {
 
     this.logger.debug({ mint: input.mint, dexScreenerPair: pair }, 'raw dexscreener response');
 
-    const { liquidityUsd, source } = await this.resolveLiquidity(input.mint, pair);
+    const { liquidityUsd, source } = await this.resolveLiquidity(
+      input.mint,
+      pair,
+      input.dex,
+      input.poolAddress,
+    );
 
     this.logger.info(
       { mint: input.mint, liquidityUsd, source },
@@ -125,15 +145,28 @@ export class RiskAnalyzer {
     };
   }
 
-  /** DexScreener -> on-chain pump.fun bonding curve -> Jupiter price-impact estimate -> 0. */
+  /** DexScreener -> native DEX reader -> on-chain pump.fun bonding curve -> Jupiter price-impact estimate -> 0. */
   private async resolveLiquidity(
     mint: string,
     pair: DexScreenerPair | undefined,
+    dex: Dex | undefined,
+    poolAddress: string | undefined,
   ): Promise<LiquidityResolution> {
     const dexScreenerLiquidityUsd = pair?.liquidity?.usd;
     if (dexScreenerLiquidityUsd !== undefined) {
       return resolveLiquidityUsd({
         dexScreenerLiquidityUsd,
+        nativeDexLiquidityUsd: undefined,
+        bondingCurveLiquidityUsd: undefined,
+        jupiterEstimateLiquidityUsd: undefined,
+      });
+    }
+
+    const nativeDexLiquidityUsd = await this.tryNativeDexLiquidity(mint, dex, poolAddress);
+    if (nativeDexLiquidityUsd !== undefined) {
+      return resolveLiquidityUsd({
+        dexScreenerLiquidityUsd: undefined,
+        nativeDexLiquidityUsd,
         bondingCurveLiquidityUsd: undefined,
         jupiterEstimateLiquidityUsd: undefined,
       });
@@ -143,6 +176,7 @@ export class RiskAnalyzer {
     if (bondingCurveLiquidityUsd !== undefined) {
       return resolveLiquidityUsd({
         dexScreenerLiquidityUsd: undefined,
+        nativeDexLiquidityUsd: undefined,
         bondingCurveLiquidityUsd,
         jupiterEstimateLiquidityUsd: undefined,
       });
@@ -151,9 +185,26 @@ export class RiskAnalyzer {
     const jupiterEstimateLiquidityUsd = await this.tryJupiterLiquidityEstimate(mint);
     return resolveLiquidityUsd({
       dexScreenerLiquidityUsd: undefined,
+      nativeDexLiquidityUsd: undefined,
       bondingCurveLiquidityUsd: undefined,
       jupiterEstimateLiquidityUsd,
     });
+  }
+
+  private async tryNativeDexLiquidity(
+    mint: string,
+    dex: Dex | undefined,
+    poolAddress: string | undefined,
+  ): Promise<number | undefined> {
+    if (!this.dexRegistry || !dex || !poolAddress) return undefined;
+    try {
+      const pool = await this.dexRegistry.getLiquidity(dex, poolAddress);
+      this.logger.debug({ mint, dex, poolAddress, pool }, 'raw native DEX pool response');
+      return pool?.liquidityUsd;
+    } catch (err) {
+      this.logger.debug({ mint, dex, poolAddress, err }, 'native DEX liquidity lookup failed');
+      return undefined;
+    }
   }
 
   private async tryBondingCurveLiquidity(mint: string): Promise<number | undefined> {

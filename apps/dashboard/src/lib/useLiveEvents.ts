@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { getToken } from './api.js';
 
 export type LiveEventType =
-  'token.created' | 'trade.created' | 'position.updated' | 'social.mention';
+  'token.created' | 'token.migrated' | 'trade.created' | 'position.updated' | 'social.mention';
 
 export interface LiveEvent {
   type: LiveEventType;
