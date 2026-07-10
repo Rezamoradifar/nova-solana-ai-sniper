@@ -9,6 +9,7 @@ import { PositionManager } from './trading/positionManager.js';
 import { AutoTrader } from './trading/autoTrader.js';
 import { hasAnyAiProvider, resolveAiProvider, scoreToken } from '@nova/ai';
 import { createBot, NotificationService } from '@nova/telegram-bot';
+import { eventBus } from './lib/eventBus.js';
 
 /**
  * Wires the detection -> risk -> AI-score -> auto-trade pipeline together and
@@ -100,6 +101,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
           isHoneypotSuspected: riskFlags.isHoneypotSuspected,
         },
       });
+
+      eventBus.publish('token.created', { tokenId: token.id, mint, dex: 'PUMPFUN' });
 
       const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
       let aiScoreValue = ruleScore;

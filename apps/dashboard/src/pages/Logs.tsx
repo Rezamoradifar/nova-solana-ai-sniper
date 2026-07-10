@@ -1,9 +1,11 @@
 import { api } from '../lib/api.js';
 import { usePolling } from '../lib/usePolling.js';
+import { useLiveEvents } from '../lib/useLiveEvents.js';
 import type { Trade } from '../lib/types.js';
 
 export function Logs() {
-  const { data: trades } = usePolling(() => api.get<Trade[]>('/trades'), 5000);
+  const liveTick = useLiveEvents(['trade.created']);
+  const { data: trades } = usePolling(() => api.get<Trade[]>('/trades'), 5000, liveTick);
 
   return (
     <div className="space-y-6">

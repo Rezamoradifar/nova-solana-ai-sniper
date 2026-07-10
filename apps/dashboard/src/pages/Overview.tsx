@@ -1,5 +1,6 @@
 import { api } from '../lib/api.js';
 import { usePolling } from '../lib/usePolling.js';
+import { useLiveEvents } from '../lib/useLiveEvents.js';
 import { StatCard } from '../components/StatCard.js';
 import { TradingViewWidget } from '../components/TradingViewWidget.js';
 import type { PortfolioSummary, Trade } from '../lib/types.js';
@@ -10,8 +11,13 @@ function formatUsd(value: number): string {
 }
 
 export function Overview() {
-  const { data: portfolio } = usePolling(() => api.get<PortfolioSummary[]>('/portfolio'), 8000);
-  const { data: trades } = usePolling(() => api.get<Trade[]>('/trades'), 5000);
+  const liveTick = useLiveEvents(['trade.created', 'position.updated']);
+  const { data: portfolio } = usePolling(
+    () => api.get<PortfolioSummary[]>('/portfolio'),
+    8000,
+    liveTick,
+  );
+  const { data: trades } = usePolling(() => api.get<Trade[]>('/trades'), 5000, liveTick);
 
   const totals = (portfolio ?? []).reduce(
     (acc, p) => ({

@@ -1,16 +1,19 @@
 import { useState } from 'react';
 import { api } from '../lib/api.js';
 import { usePolling } from '../lib/usePolling.js';
+import { useLiveEvents } from '../lib/useLiveEvents.js';
 import type { Token } from '../lib/types.js';
 
 const DEX_FILTERS = ['ALL', 'PUMPFUN', 'RAYDIUM', 'ORCA', 'JUPITER'] as const;
 
 export function Tokens() {
   const [dexFilter, setDexFilter] = useState<(typeof DEX_FILTERS)[number]>('ALL');
+  const liveTick = useLiveEvents(['token.created']);
 
   const { data: tokens } = usePolling(
     () => api.get<Token[]>(`/tokens${dexFilter === 'ALL' ? '' : `?dex=${dexFilter}`}`),
     4000,
+    liveTick,
   );
 
   return (

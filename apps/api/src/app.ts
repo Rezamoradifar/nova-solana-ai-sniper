@@ -3,6 +3,7 @@ import { ZodError } from 'zod';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
+import websocket from '@fastify/websocket';
 import configPlugin from './plugins/config.js';
 import prismaPlugin from './plugins/prisma.js';
 import redisPlugin from './plugins/redis.js';
@@ -15,6 +16,7 @@ import positionRoutes from './routes/positions.js';
 import snipeRoutes from './routes/snipes.js';
 import portfolioRoutes from './routes/portfolio.js';
 import walletRoutes from './routes/wallets.js';
+import wsRoutes from './routes/ws.js';
 
 export async function buildApp() {
   // trustProxy: the API only ever receives real client traffic via the Nginx
@@ -29,6 +31,7 @@ export async function buildApp() {
   await app.register(prismaPlugin);
   await app.register(redisPlugin);
   await app.register(authPlugin);
+  await app.register(websocket);
 
   await app.register(healthRoutes);
   await app.register(authRoutes);
@@ -38,6 +41,7 @@ export async function buildApp() {
   await app.register(snipeRoutes);
   await app.register(portfolioRoutes);
   await app.register(walletRoutes);
+  await app.register(wsRoutes);
 
   app.setErrorHandler((err: FastifyError | ZodError, _req, reply) => {
     if (err instanceof ZodError) {

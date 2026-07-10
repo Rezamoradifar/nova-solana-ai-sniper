@@ -1,9 +1,11 @@
 import { api } from '../lib/api.js';
 import { usePolling } from '../lib/usePolling.js';
+import { useLiveEvents } from '../lib/useLiveEvents.js';
 import type { Position } from '../lib/types.js';
 
 export function Positions() {
-  const { data: positions } = usePolling(() => api.get<Position[]>('/positions'), 5000);
+  const liveTick = useLiveEvents(['position.updated']);
+  const { data: positions } = usePolling(() => api.get<Position[]>('/positions'), 5000, liveTick);
 
   return (
     <div className="space-y-6">

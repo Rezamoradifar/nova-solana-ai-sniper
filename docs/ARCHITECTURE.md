@@ -87,7 +87,13 @@ through the Telegram marketing bot.
 
 React/Vite dark-theme SPA: live charts (TradingView widget embed), wallet
 monitor, trade/position logs, snipe/copy-trade settings, portfolio, and a PnL
-leaderboard. Talks to `apps/api` over REST + a websocket for live updates.
+leaderboard. Talks to `apps/api` over REST, plus a `/ws` websocket
+(`useLiveEvents`) that pushes `token.created`/`trade.created`/
+`position.updated` events from an in-process event bus
+(`apps/api/src/lib/eventBus.ts`) so pages refetch immediately instead of
+waiting out their poll interval. The JWT is passed as a `?token=` query param
+on the handshake (browsers can't set custom headers on a WS upgrade request);
+REST polling stays on as a resilience fallback if the socket drops.
 
 ## Security posture
 

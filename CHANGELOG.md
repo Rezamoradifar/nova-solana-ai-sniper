@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Real-time updates: an in-process event bus (`apps/api/src/lib/eventBus.ts`) publishing
+  `token.created`/`trade.created`/`position.updated`, exposed over a JWT-authenticated `/ws`
+  websocket route. The dashboard's `useLiveEvents` hook subscribes and bumps a refresh signal
+  that `usePolling` consumes to refetch immediately, with REST polling remaining as a fallback
+  if the socket drops.
+
 - Monorepo scaffold: npm workspaces, TypeScript project references, ESLint 9 flat config,
   Prettier, Husky + lint-staged, Vitest.
 - `packages/shared`: env schema validation (zod), redacting logger (pino), shared domain types.

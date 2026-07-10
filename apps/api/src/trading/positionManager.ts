@@ -5,6 +5,7 @@ import type { NotificationService } from '@nova/telegram-bot';
 import { JupiterClient, SOL_MINT } from '../solana/jupiter.js';
 import { unsealKeypair } from '../security/keystore.js';
 import { evaluateExit, type ExitReason } from './exitEngine.js';
+import { eventBus } from '../lib/eventBus.js';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
@@ -76,6 +77,9 @@ export class PositionManager {
     });
 
     this.logger.info({ tradeId: trade.id, positionId: position.id, signature }, 'position opened');
+
+    eventBus.publish('trade.created', { tradeId: trade.id, side: 'BUY', mint: params.mint });
+    eventBus.publish('position.updated', { positionId: position.id, status: 'OPEN' });
 
     await this.notifier?.notifyTrade({
       side: 'BUY',
@@ -151,7 +155,7 @@ export class PositionManager {
 
     const realizedPnlUsd = (exit.currentPriceUsd - position.entryPriceUsd) * position.amountToken;
 
-    await this.prisma.trade.create({
+    const sellTrade = await this.prisma.trade.create({
       data: {
         walletId,
         tokenId: position.tokenId,
@@ -178,6 +182,17 @@ export class PositionManager {
       { positionId, signature, reason: exit.reason, realizedPnlUsd },
       'position closed',
     );
+
+    eventBus.publish('trade.created', {
+      tradeId: sellTrade.id,
+      side: 'SELL',
+      mint: position.token.mint,
+    });
+    eventBus.publish('position.updated', {
+      positionId: updated.id,
+      status: 'CLOSED',
+      realizedPnlUsd,
+    });
 
     if (exit.reason) {
       const pnlPercent =
