@@ -21,6 +21,21 @@ export interface QuoteResponse {
   [key: string]: unknown;
 }
 
+export type PriorityLevel = 'medium' | 'high' | 'veryHigh';
+
+export interface SwapBuildOptions {
+  /** Ceiling on the priority fee Jupiter's own tiered estimator may spend, in lamports. */
+  maxPriorityFeeLamports?: number;
+  priorityLevel?: PriorityLevel;
+  /**
+   * Lets Jupiter's own infrastructure compute slippage from real-time market
+   * depth/volatility for this specific route, rather than always using a flat
+   * client-side number. `slippageBps` on the quote still acts as the outer bound
+   * Jupiter won't exceed, so a caller's configured ceiling is always respected.
+   */
+  dynamicSlippage?: boolean;
+}
+
 export class JupiterClient {
   constructor(private readonly config: JupiterClientConfig) {}
 
@@ -41,8 +56,17 @@ export class JupiterClient {
   async buildSwapTransaction(
     quote: QuoteResponse,
     userPublicKey: string,
-    priorityFeeLamports?: number,
+    options?: SwapBuildOptions,
   ): Promise<VersionedTransaction> {
+    const prioritizationFeeLamports = options?.maxPriorityFeeLamports
+      ? {
+          priorityLevelWithMaxLamports: {
+            priorityLevel: options.priorityLevel ?? 'high',
+            maxLamports: options.maxPriorityFeeLamports,
+          },
+        }
+      : 'auto';
+
     const res = await fetch(`${this.config.apiBase}/swap/v1/swap`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -51,7 +75,8 @@ export class JupiterClient {
         userPublicKey,
         wrapAndUnwrapSol: true,
         dynamicComputeUnitLimit: true,
-        prioritizationFeeLamports: priorityFeeLamports ?? 'auto',
+        dynamicSlippage: options?.dynamicSlippage ?? false,
+        prioritizationFeeLamports,
       }),
     });
     if (!res.ok) {
@@ -67,9 +92,14 @@ export class JupiterClient {
     connection: Connection,
     signer: Keypair,
     params: QuoteParams,
+    options?: SwapBuildOptions,
   ): Promise<{ quote: QuoteResponse; transaction: VersionedTransaction }> {
     const quote = await this.getQuote(params);
-    const transaction = await this.buildSwapTransaction(quote, signer.publicKey.toBase58());
+    const transaction = await this.buildSwapTransaction(
+      quote,
+      signer.publicKey.toBase58(),
+      options,
+    );
     transaction.sign([signer]);
 
     const sim = await connection.simulateTransaction(transaction, { sigVerify: false });

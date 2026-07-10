@@ -16,6 +16,13 @@ function fakeSafety() {
   return { checkBeforeOpen: vi.fn().mockResolvedValue({ allowed: true }) } as never;
 }
 
+/** A signed-looking transaction: broadcastTransaction reads signatures[0] via bs58. */
+function fakeSignedVersionedTx(): VersionedTransaction {
+  return Object.assign(Object.create(VersionedTransaction.prototype), {
+    signatures: [new Uint8Array(64).fill(1)],
+  }) as VersionedTransaction;
+}
+
 const BASE_PARAMS = {
   userId: 'user-1',
   walletId: 'wallet-1',
@@ -31,7 +38,7 @@ const BASE_PARAMS = {
 describe('PositionManager live-swap fallback (openPosition)', () => {
   it('uses Jupiter directly and never touches the native registry when Jupiter succeeds', async () => {
     const prepareSwap = vi.fn().mockResolvedValue({
-      transaction: { serialize: () => Buffer.alloc(0) },
+      transaction: fakeSignedVersionedTx(),
     });
     const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
     const connection = {
@@ -75,7 +82,7 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
       getQuote: vi.fn(),
     } as never;
 
-    const fakeTx = Object.create(VersionedTransaction.prototype) as VersionedTransaction;
+    const fakeTx = fakeSignedVersionedTx();
     const buildSwap = vi.fn().mockResolvedValue(fakeTx);
     const executor = { dex: 'PUMPSWAP', buildSwap };
     const dexRegistry = { getExecutor: vi.fn().mockReturnValue(executor) } as never;
@@ -93,12 +100,10 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            dex: 'PUMPSWAP',
-            poolAddress: 'Pool111111111111111111111111111111111111',
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          dex: 'PUMPSWAP',
+          poolAddress: 'Pool111111111111111111111111111111111111',
+        }),
       },
     } as never;
 
@@ -133,7 +138,7 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
       prepareSwap: vi.fn().mockRejectedValue(new Error('no route found')),
       getQuote: vi.fn(),
     } as never;
-    const fakeTx = Object.create(VersionedTransaction.prototype) as VersionedTransaction;
+    const fakeTx = fakeSignedVersionedTx();
     const executor = { dex: 'PUMPSWAP', buildSwap: vi.fn().mockResolvedValue(fakeTx) };
     const dexRegistry = { getExecutor: vi.fn().mockReturnValue(executor) } as never;
 
@@ -146,12 +151,10 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const prisma = {
       token: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({
-            dex: 'PUMPSWAP',
-            poolAddress: 'Pool111111111111111111111111111111111111',
-          }),
+        findUnique: vi.fn().mockResolvedValue({
+          dex: 'PUMPSWAP',
+          poolAddress: 'Pool111111111111111111111111111111111111',
+        }),
       },
     } as never;
 
@@ -196,5 +199,103 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
     );
 
     await expect(manager.openPosition(BASE_PARAMS)).rejects.toBe(jupiterErr);
+  });
+});
+
+describe('PositionManager Jito bundle broadcast', () => {
+  it('sends via a Jito bundle (tip + swap) when configured, and confirms by the swap tx signature', async () => {
+    const fakeTx = fakeSignedVersionedTx();
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeTx }),
+      getQuote: vi.fn(),
+    } as never;
+    const sendBundle = vi.fn().mockResolvedValue('bundle-id-123');
+    const jito = { sendBundle } as never;
+    const sendTransaction = vi.fn();
+    const confirmTransaction = vi.fn().mockResolvedValue(undefined);
+    const connection = {
+      getLatestBlockhash: vi
+        .fn()
+        .mockResolvedValue({ blockhash: 'So11111111111111111111111111111111111111112' }),
+      sendTransaction,
+      confirmTransaction,
+      getParsedTransaction: vi
+        .fn()
+        .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const prisma = {
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
+      token: { findUnique: vi.fn() },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+      undefined,
+      jito,
+    );
+
+    await manager.openPosition(BASE_PARAMS);
+
+    expect(sendBundle).toHaveBeenCalledTimes(1);
+    const bundleArg = sendBundle.mock.calls[0]![0];
+    expect(bundleArg).toHaveLength(2); // [tipTx, swapTx]
+    expect(bundleArg[1]).toBe(fakeTx);
+    expect(sendTransaction).not.toHaveBeenCalled(); // never falls through when the bundle succeeds
+    expect(confirmTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to a direct send when Jito bundle submission fails, never blocking the trade', async () => {
+    const fakeTx = fakeSignedVersionedTx();
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeTx }),
+      getQuote: vi.fn(),
+    } as never;
+    const jito = {
+      sendBundle: vi.fn().mockRejectedValue(new Error('block engine unreachable')),
+    } as never;
+    const sendTransaction = vi.fn().mockResolvedValue('direct-sig');
+    const connection = {
+      getLatestBlockhash: vi
+        .fn()
+        .mockResolvedValue({ blockhash: 'So11111111111111111111111111111111111111112' }),
+      sendTransaction,
+      confirmTransaction: vi.fn().mockResolvedValue(undefined),
+      getParsedTransaction: vi
+        .fn()
+        .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const prisma = {
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
+      token: { findUnique: vi.fn() },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+      undefined,
+      jito,
+    );
+
+    const { trade } = await manager.openPosition(BASE_PARAMS);
+
+    expect(trade.id).toBe('trade-1');
+    expect(sendTransaction).toHaveBeenCalledWith(fakeTx);
   });
 });

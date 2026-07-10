@@ -33,6 +33,7 @@ export const apiEnvSchema = envSchema.pick({
   JUPITER_API_BASE: true,
   PRICE_CHECK_INTERVAL_MS: true,
   MIGRATION_CHECK_INTERVAL_MS: true,
+  MAX_PRIORITY_FEE_LAMPORTS: true,
 });
 
 export function loadApiEnv() {

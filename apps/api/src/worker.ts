@@ -9,6 +9,7 @@ import { extractMintFromParsedTx } from './detection/extractMint.js';
 import { MigrationMonitor } from './detection/migrationMonitor.js';
 import { DexRegistry } from './solana/dex/registry.js';
 import { PumpSwapExecutor } from './solana/dex/pumpswapExecutor.js';
+import { JitoClient } from './solana/jito.js';
 import { PositionManager } from './trading/positionManager.js';
 import { AutoTrader } from './trading/autoTrader.js';
 import { TradingSafety, verifySafetySystemReady, type SafetyConfig } from './trading/safety.js';
@@ -39,6 +40,14 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   const dexRegistry = new DexRegistry(connection, dexScreener, app.log as never, {
     PUMPSWAP: new PumpSwapExecutor(),
   });
+  // No-ops (undefined) when unset, same convention as every other optional
+  // integration in this codebase — sends just go direct, never blocked on Jito.
+  const jito = app.config.JITO_BLOCK_ENGINE_URL
+    ? new JitoClient({ blockEngineUrl: app.config.JITO_BLOCK_ENGINE_URL })
+    : undefined;
+  if (!jito) {
+    app.log.warn('JITO_BLOCK_ENGINE_URL not set — sends go direct, no Jito bundle protection');
+  }
   const riskAnalyzer = new RiskAnalyzer(
     connection,
     dexScreener,
@@ -102,6 +111,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     notifier,
     paperTrading,
     dexRegistry,
+    jito,
+    app.config.MAX_PRIORITY_FEE_LAMPORTS,
   );
   const autoTrader = new AutoTrader({
     prisma: app.prisma,

@@ -56,6 +56,10 @@ export const envSchema = z.object({
   HELIUS_API_KEY: z.string().optional(),
   JITO_BLOCK_ENGINE_URL: z.string().url().optional(),
   JITO_AUTH_KEYPAIR: z.string().optional(),
+  // Ceiling passed to Jupiter's dynamic/tiered priority-fee estimation — an
+  // operator-controlled cap, same pattern as MAX_TRADE_SOL, so a fee spike can't
+  // silently burn an unbounded amount of SOL per swap.
+  MAX_PRIORITY_FEE_LAMPORTS: z.coerce.number().positive().default(1_000_000),
 
   // AI providers
   ANTHROPIC_API_KEY: z.string().optional(),

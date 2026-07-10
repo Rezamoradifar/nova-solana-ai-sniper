@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import bs58 from 'bs58';
 import { Connection, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import { getMint } from '@solana/spl-token';
 import type { Dex, PrismaClient } from '@prisma/client';
@@ -8,11 +9,19 @@ import { JupiterClient, SOL_MINT } from '../solana/jupiter.js';
 import type { DexScreenerClient } from '../solana/dexscreener.js';
 import { SolPriceOracle } from '../solana/pumpfunBondingCurve.js';
 import type { DexRegistry } from '../solana/dex/registry.js';
+import { JitoClient } from '../solana/jito.js';
 import { evaluateExit, type ExitReason } from './exitEngine.js';
 import { eventBus } from '../lib/eventBus.js';
 import { TradingSafety, SafetyCheckError } from './safety.js';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
+const DEFAULT_MAX_PRIORITY_FEE_LAMPORTS = 1_000_000;
+// Modest fixed tip — Jito bundles need a nonzero tip to be considered by
+// validators, but this is a fallback-with-graceful-degradation path (a rejected
+// or unlanded bundle just falls through to a plain send), not the only way a
+// trade can land, so a small fixed amount is a reasonable default over adding
+// another tunable for this pass.
+const JITO_TIP_LAMPORTS = 100_000;
 
 /**
  * Never trust a pre-trade Jupiter quote for bookkeeping — actual execution almost
@@ -120,7 +129,40 @@ export class PositionManager {
     private readonly paperTrading: boolean = true,
     /** Optional: enables a native-DEX fallback when Jupiter can't route a live swap. */
     private readonly dexRegistry?: DexRegistry,
+    /** Optional: gated on JITO_BLOCK_ENGINE_URL being configured; unset means every send goes direct. */
+    private readonly jito?: JitoClient,
+    private readonly maxPriorityFeeLamports: number = DEFAULT_MAX_PRIORITY_FEE_LAMPORTS,
   ) {}
+
+  /**
+   * Sends a signed transaction via a Jito bundle (tip + swap) when Jito is
+   * configured, falling back to a plain direct send if bundle submission fails —
+   * Jito can never be the reason a trade doesn't happen. Confirmation uses the
+   * swap transaction's own signature either way, since a Jito-landed transaction
+   * still appears on-chain under its normal signature once it lands.
+   */
+  private async broadcastTransaction(
+    transaction: VersionedTransaction,
+    signer: Keypair,
+  ): Promise<string> {
+    const signature = bs58.encode(transaction.signatures[0]!);
+
+    if (this.jito) {
+      try {
+        const { blockhash } = await this.connection.getLatestBlockhash();
+        const tipTx = JitoClient.buildTipTransaction(signer, JITO_TIP_LAMPORTS, blockhash);
+        await this.jito.sendBundle([tipTx, transaction]);
+        await this.connection.confirmTransaction(signature, 'confirmed');
+        return signature;
+      } catch (err) {
+        this.logger.warn({ err }, 'Jito bundle submission failed — falling back to a direct send');
+      }
+    }
+
+    await this.connection.sendTransaction(transaction);
+    await this.connection.confirmTransaction(signature, 'confirmed');
+    return signature;
+  }
 
   /**
    * Jupiter first, always — it already aggregates every DEX this platform knows
@@ -142,10 +184,12 @@ export class PositionManager {
     getFallbackTarget: () => Promise<{ dex: Dex; poolAddress: string | null } | undefined>,
   ): Promise<string> {
     try {
-      const { transaction } = await this.jupiter.prepareSwap(this.connection, keypair, swapParams);
-      const signature = await this.connection.sendTransaction(transaction);
-      await this.connection.confirmTransaction(signature, 'confirmed');
-      return signature;
+      const { transaction } = await this.jupiter.prepareSwap(this.connection, keypair, swapParams, {
+        maxPriorityFeeLamports: this.maxPriorityFeeLamports,
+        priorityLevel: 'high',
+        dynamicSlippage: true,
+      });
+      return await this.broadcastTransaction(transaction, keypair);
     } catch (jupiterErr) {
       const target = await getFallbackTarget();
       const executor = target ? this.dexRegistry?.getExecutor(target.dex) : undefined;
@@ -171,9 +215,7 @@ export class PositionManager {
           `Native ${target.dex} swap simulation failed: ${JSON.stringify(sim.value.err)}`,
         );
       }
-      const signature = await this.connection.sendTransaction(tx);
-      await this.connection.confirmTransaction(signature, 'confirmed');
-      return signature;
+      return await this.broadcastTransaction(tx, keypair);
     }
   }
 
