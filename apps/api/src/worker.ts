@@ -16,7 +16,8 @@ import { TradingSafety, verifySafetySystemReady, type SafetyConfig } from './tra
 import { PriceMonitor } from './trading/priceMonitor.js';
 import { hasAnyAiProvider, resolveAiProvider, scoreToken } from '@nova/ai';
 import type { Dex } from '@nova/shared';
-import { createBot, NotificationService } from '@nova/telegram-bot';
+import { createBot, NotificationService, sendNewTokenAlertToUsers } from '@nova/telegram-bot';
+import type { Bot } from 'grammy';
 import { eventBus } from './lib/eventBus.js';
 import { TwitterClient } from './social/twitter.js';
 import { TwitterMonitor } from './social/twitterMonitor.js';
@@ -94,9 +95,12 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   );
 
   let notifier: NotificationService | undefined;
+  // Hoisted so handleNewTokenLaunch below can also send the same launch alert
+  // directly to each user with a live SnipeConfig, not just the broadcast chat.
+  let telegramBot: Bot | undefined;
   if (app.config.TELEGRAM_BOT_TOKEN && app.config.TELEGRAM_CHAT_ID) {
-    const bot = createBot(app.config.TELEGRAM_BOT_TOKEN, app.log as never);
-    notifier = new NotificationService(bot, app.config.TELEGRAM_CHAT_ID, app.log as never);
+    telegramBot = createBot(app.config.TELEGRAM_BOT_TOKEN, app.log as never);
+    notifier = new NotificationService(telegramBot, app.config.TELEGRAM_CHAT_ID, app.log as never);
   } else {
     app.log.warn('TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — trade notifications disabled');
   }
@@ -239,13 +243,35 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       });
     }
 
-    await notifier?.notifyNewToken({
+    const newTokenAlert = {
       mint,
       dex,
       liquidityUsd: riskFlags.liquidityUsd,
       isHoneypotSuspected: riskFlags.isHoneypotSuspected,
       aiScore: aiScoreValue,
-    });
+    };
+    await notifier?.notifyNewToken(newTokenAlert);
+
+    // Personal counterpart to the broadcast above: every user with a live snipe
+    // config (isActive + autoBuyOnLaunch — same set AutoTrader.evaluateAndMaybeBuy
+    // is about to query below) gets the identical alert to their own chat, not just
+    // whoever owns TELEGRAM_CHAT_ID. Covers referral-reward-activated users the same
+    // as self-activated ones — there's no separate "referral" alert path.
+    if (telegramBot) {
+      const recipients = await app.prisma.user.findMany({
+        where: {
+          telegramId: { not: null },
+          snipeConfigs: { some: { isActive: true, autoBuyOnLaunch: true } },
+        },
+        select: { telegramId: true },
+      });
+      await sendNewTokenAlertToUsers(
+        telegramBot.api,
+        recipients.map((u) => u.telegramId!),
+        newTokenAlert,
+        app.log as never,
+      );
+    }
 
     await autoTrader.evaluateAndMaybeBuy(mint, token.id, riskFlags, aiScoreValue);
   }
