@@ -27,8 +27,11 @@ function verifyPassword(password: string, stored: string): boolean {
   return candidate.length === hash.length && timingSafeEqual(candidate, hash);
 }
 
+// Credential-stuffing/brute-force guard, tighter than the global 100/min limit.
+const AUTH_RATE_LIMIT = { max: 8, timeWindow: '1 minute' };
+
 export default async function authRoutes(fastify: FastifyInstance) {
-  fastify.post('/auth/register', async (req, reply) => {
+  fastify.post('/auth/register', { config: { rateLimit: AUTH_RATE_LIMIT } }, async (req, reply) => {
     const body = registerSchema.parse(req.body);
     const existing = await fastify.prisma.user.findUnique({ where: { email: body.email } });
     if (existing) {
@@ -37,16 +40,25 @@ export default async function authRoutes(fastify: FastifyInstance) {
     const user = await fastify.prisma.user.create({
       data: { email: body.email, passwordHash: hashPassword(body.password) },
     });
+    await fastify.prisma.auditLog.create({
+      data: { userId: user.id, action: 'auth.register', ip: req.ip },
+    });
     const token = fastify.jwt.sign({ userId: user.id, role: user.role });
     return reply.code(201).send({ token });
   });
 
-  fastify.post('/auth/login', async (req, reply) => {
+  fastify.post('/auth/login', { config: { rateLimit: AUTH_RATE_LIMIT } }, async (req, reply) => {
     const body = loginSchema.parse(req.body);
     const user = await fastify.prisma.user.findUnique({ where: { email: body.email } });
     if (!user?.passwordHash || !verifyPassword(body.password, user.passwordHash)) {
+      await fastify.prisma.auditLog.create({
+        data: { action: 'auth.login_failed', ip: req.ip, metadata: { email: body.email } },
+      });
       return reply.code(401).send({ error: 'Invalid credentials' });
     }
+    await fastify.prisma.auditLog.create({
+      data: { userId: user.id, action: 'auth.login', ip: req.ip },
+    });
     const token = fastify.jwt.sign({ userId: user.id, role: user.role });
     return reply.send({ token });
   });

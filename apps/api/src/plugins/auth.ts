@@ -16,7 +16,10 @@ declare module '@fastify/jwt' {
 }
 
 export default fp(async (fastify: FastifyInstance) => {
-  await fastify.register(fastifyJwt, { secret: fastify.config.JWT_SECRET });
+  await fastify.register(fastifyJwt, {
+    secret: fastify.config.JWT_SECRET,
+    sign: { expiresIn: '7d' },
+  });
 
   fastify.decorate('authenticate', async (req: FastifyRequest, reply: FastifyReply) => {
     try {

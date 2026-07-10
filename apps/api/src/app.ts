@@ -17,7 +17,10 @@ import portfolioRoutes from './routes/portfolio.js';
 import walletRoutes from './routes/wallets.js';
 
 export async function buildApp() {
-  const app = Fastify({ logger: true });
+  // trustProxy: the API only ever receives real client traffic via the Nginx
+  // reverse proxy (docker-compose), which sets X-Forwarded-For — without this,
+  // rate limiting would key off Nginx's own IP and apply to all users at once.
+  const app = Fastify({ logger: true, trustProxy: true });
 
   await app.register(configPlugin);
   await app.register(helmet);

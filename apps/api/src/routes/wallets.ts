@@ -42,7 +42,13 @@ export default async function walletRoutes(fastify: FastifyInstance) {
 
   fastify.post('/wallets/import', { preHandler: fastify.authenticate }, async (req, reply) => {
     const body = importSchema.parse(req.body);
-    const sealed = importWalletFromSecretKey(body.secretKeyBase58, fastify.config.ENCRYPTION_KEY);
+    let sealed: ReturnType<typeof importWalletFromSecretKey>;
+    try {
+      sealed = importWalletFromSecretKey(body.secretKeyBase58, fastify.config.ENCRYPTION_KEY);
+    } catch {
+      // Malformed input (bad base58 / wrong key length), not a server error.
+      return reply.code(400).send({ error: 'Invalid secret key' });
+    }
     const wallet = await fastify.prisma.wallet.create({
       data: {
         userId: req.user.userId,

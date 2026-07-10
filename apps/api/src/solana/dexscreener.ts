@@ -17,7 +17,7 @@ export class DexScreenerClient {
   constructor(private readonly apiBase: string) {}
 
   async getPairsForToken(mint: string): Promise<DexScreenerPair[]> {
-    const res = await fetch(`${this.apiBase}/token-pairs/v1/solana/${mint}`);
+    const res = await fetch(`${this.apiBase}/token-pairs/v1/solana/${encodeURIComponent(mint)}`);
     if (!res.ok) {
       if (res.status === 404) return [];
       throw new Error(`DexScreener lookup failed: ${res.status}`);

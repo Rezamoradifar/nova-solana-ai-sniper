@@ -99,8 +99,14 @@ leaderboard. Talks to `apps/api` over REST + a websocket for live updates.
   even via an unexpected object shape.
 - All secrets are supplied via environment variables (`.env`, gitignored) —
   never committed, never returned by any API response.
-- JWT auth + rate limiting + helmet on the API; scrypt (not plaintext/reversible
-  hashing) for user passwords.
+- JWT auth (7-day expiry) + tiered rate limiting (global 100/min, 8/min on
+  auth routes) + helmet + `trustProxy` (correct client IPs behind Nginx) on
+  the API; scrypt (not plaintext/reversible hashing) for user passwords.
+- Every user-data route scopes results to `req.user.userId`; `AuditLog`
+  records wallet creation/import and login/register attempts (with IP).
+
+See `SECURITY.md` for the full posture, including reviewed-and-accepted
+`npm audit` findings.
 
 ## Deployment
 

@@ -41,3 +41,19 @@ All notable changes to this project are documented in this file.
   `apps/api` with a protected-route shell; REST polling (no websocket yet). Its own Dockerfile
   builds the static bundle and serves it from the same Nginx image that reverse-proxies
   `/api/` to the API service.
+
+### Security
+
+- JWT tokens now expire (7 days) instead of being valid forever.
+- `trustProxy: true` on the API so rate limiting keys off the real client IP (via
+  `X-Forwarded-For`) rather than Nginx's own IP once behind the reverse proxy.
+- Tighter rate limit (8/min) on `/auth/login` and `/auth/register` against credential
+  stuffing/brute force, on top of the existing global 100/min limit.
+- `AuditLog` entries for login/register (success and failure, with IP), in addition to the
+  existing wallet create/import entries.
+- Wallet import now returns 400 on a malformed secret key instead of an unhandled 500.
+- DexScreener token-pair lookups URL-encode the mint before interpolating it into the request
+  path (defense in depth).
+- `SECURITY.md` documents the full posture plus every currently-open `npm audit` finding,
+  reviewed individually (none apply to this codebase's actual usage; each would require an
+  unverified breaking major-version bump to clear).
