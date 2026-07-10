@@ -8,7 +8,8 @@ import { EventEmitter } from 'node:events';
  * swap this for Redis pub/sub so events reach clients connected to other
  * instances too.
  */
-export type LiveEventType = 'token.created' | 'trade.created' | 'position.updated';
+export type LiveEventType =
+  'token.created' | 'trade.created' | 'position.updated' | 'social.mention';
 
 export interface LiveEvent {
   type: LiveEventType;

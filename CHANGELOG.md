@@ -6,6 +6,11 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- `apps/api/src/social`: X (Twitter) API v2 client and polling monitor (`since_id`-based
+  dedupe, resilient to rate-limit errors) for cashtag/keyword mentions. Disabled with a warning
+  log when `TWITTER_BEARER_TOKEN` is unset — same graceful-no-op pattern as the Telegram bot
+  and AI providers. Publishes `social.mention` on the event bus and pushes a Telegram alert
+  (`NotificationService.notifySocialMention`) per mention.
 - Real-time updates: an in-process event bus (`apps/api/src/lib/eventBus.ts`) publishing
   `token.created`/`trade.created`/`position.updated`, exposed over a JWT-authenticated `/ws`
   websocket route. The dashboard's `useLiveEvents` hook subscribes and bumps a refresh signal

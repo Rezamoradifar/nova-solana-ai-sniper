@@ -42,6 +42,10 @@ export const envSchema = z.object({
   TWITTER_ACCESS_TOKEN: z.string().optional(),
   TWITTER_ACCESS_SECRET: z.string().optional(),
   TWITTER_BEARER_TOKEN: z.string().optional(),
+  TWITTER_SEARCH_QUERY: z
+    .string()
+    .default('(pump.fun OR "solana memecoin" OR $SOL) -is:retweet lang:en'),
+  TWITTER_POLL_INTERVAL_MS: z.coerce.number().min(15000).default(60000),
 
   // Third-party market data
   DEXSCREENER_API_BASE: z.string().url().default('https://api.dexscreener.com'),

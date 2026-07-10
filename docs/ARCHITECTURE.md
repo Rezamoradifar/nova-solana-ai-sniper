@@ -36,6 +36,10 @@ The core backend. Organized by layer:
   launches, liquidity adds, migrations, whale wallet activity. Also owns the
   rule-based risk analyzer (mint/freeze authority, holder concentration,
   liquidity depth via DexScreener).
+- `social/` — X (Twitter) API v2 client + polling monitor (`since_id`-based,
+  no in-memory ID set needed) for cashtag/keyword mentions. Disabled with a
+  warning log when `TWITTER_BEARER_TOKEN` is unset; when enabled, publishes
+  `social.mention` events and pushes a Telegram notification per mention.
 - `trading/` — the exit engine (TP/SL/trailing stop) is a pure function so it
   can be unit tested and reused identically in live trading and backtesting.
   Position manager executes swaps via Jupiter and records trades/positions.

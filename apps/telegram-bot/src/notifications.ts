@@ -60,4 +60,10 @@ export class NotificationService {
   async notifyError(context: string, message: string): Promise<void> {
     await this.send(`🚨 *Error* in ${context}\n${message}`);
   }
+
+  async notifySocialMention(text: string, tweetId: string): Promise<void> {
+    await this.send(
+      `🐦 *X mention*\n${text.slice(0, 300)}\n` + `[View](https://x.com/i/web/status/${tweetId})`,
+    );
+  }
 }

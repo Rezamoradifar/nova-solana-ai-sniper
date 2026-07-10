@@ -10,6 +10,8 @@ import { AutoTrader } from './trading/autoTrader.js';
 import { hasAnyAiProvider, resolveAiProvider, scoreToken } from '@nova/ai';
 import { createBot, NotificationService } from '@nova/telegram-bot';
 import { eventBus } from './lib/eventBus.js';
+import { TwitterClient } from './social/twitter.js';
+import { TwitterMonitor } from './social/twitterMonitor.js';
 
 /**
  * Wires the detection -> risk -> AI-score -> auto-trade pipeline together and
@@ -70,6 +72,23 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     app.log.warn('No ANTHROPIC_API_KEY/OPENAI_API_KEY set — AI scoring disabled, rule-based only');
   }
 
+  let twitterMonitor: TwitterMonitor | undefined;
+  if (app.config.TWITTER_BEARER_TOKEN) {
+    const twitterClient = new TwitterClient({ bearerToken: app.config.TWITTER_BEARER_TOKEN });
+    twitterMonitor = new TwitterMonitor(
+      twitterClient,
+      app.config.TWITTER_SEARCH_QUERY,
+      app.config.TWITTER_POLL_INTERVAL_MS,
+      app.log as never,
+    );
+    twitterMonitor.start(async (tweet) => {
+      eventBus.publish('social.mention', { tweetId: tweet.id, text: tweet.text });
+      await notifier?.notifySocialMention(tweet.text, tweet.id);
+    });
+  } else {
+    app.log.warn('TWITTER_BEARER_TOKEN not set — Twitter/X monitor disabled');
+  }
+
   monitor.start(async (event) => {
     const detection = classifier.classify(event);
     if (!detection || detection.kind !== 'new_token') return;
@@ -128,6 +147,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
 
   return async () => {
     await monitor.stop();
+    twitterMonitor?.stop();
   };
 }
 

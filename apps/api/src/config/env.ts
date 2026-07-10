@@ -19,6 +19,9 @@ export const apiEnvSchema = envSchema.pick({
   OPENAI_API_KEY: true,
   TELEGRAM_BOT_TOKEN: true,
   TELEGRAM_CHAT_ID: true,
+  TWITTER_BEARER_TOKEN: true,
+  TWITTER_SEARCH_QUERY: true,
+  TWITTER_POLL_INTERVAL_MS: true,
   DEXSCREENER_API_BASE: true,
   JUPITER_API_BASE: true,
 });
