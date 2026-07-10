@@ -104,8 +104,18 @@ leaderboard. Talks to `apps/api` over REST + a websocket for live updates.
 
 ## Deployment
 
-Docker Compose brings up Postgres, Redis, the API, the Telegram bot, the
-marketing engine, and an Nginx reverse proxy (TLS via certbot) in front of the
-API and dashboard. PM2 (`ecosystem.config.cjs`) is the process supervisor
-inside each app container, restarting on crash and exposing health checks that
-Compose's `healthcheck` blocks poll.
+Two supported paths, matched to two different restart-on-crash mechanisms:
+
+- **Docker Compose** (`docker-compose.yml`) — Postgres, Redis, a one-shot
+  `migrate` job, the API, Telegram bot, marketing engine, and an Nginx reverse
+  proxy (TLS via certbot) in front of the API. Each app service uses
+  `restart: unless-stopped` plus a `healthcheck` block for crash recovery —
+  PM2 is deliberately not run a second time inside these containers.
+- **Bare-metal/VPS** (`ecosystem.config.cjs`) — for deployments without
+  Docker, PM2 supervises the three Node processes directly (`pm2 start
+ecosystem.config.cjs`), restarting on crash with backoff and a memory cap.
+
+`scripts/init-letsencrypt.sh` bootstraps the first Let's Encrypt certificate
+(a chicken-and-egg problem: nginx's config references a cert that doesn't
+exist on a fresh server, so it needs a throwaway self-signed one just to boot
+long enough for certbot to obtain the real one via the HTTP-01 challenge).

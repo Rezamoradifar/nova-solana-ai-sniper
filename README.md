@@ -58,6 +58,34 @@ using `ENCRYPTION_KEY` and are never logged or returned by the API.
 - `npm run lint` / `npm run format`
 - `npm run prisma:migrate` / `prisma:deploy`
 
+## Deployment (Docker Compose)
+
+```bash
+cp .env.example .env   # fill in secrets
+docker compose up -d postgres redis
+docker compose run --rm migrate
+docker compose up -d api telegram-bot marketing-engine
+```
+
+PM2 process management (`ecosystem.config.cjs`) and Docker Compose's own
+`restart: unless-stopped` + healthchecks cover crash recovery in the two
+respective deployment paths — see the comment at the top of
+`ecosystem.config.cjs` for when to use which.
+
+### Nginx + SSL
+
+`docker/nginx/nginx.conf` expects a real domain and an existing Let's Encrypt
+certificate, which don't exist yet on a fresh server. Bootstrap both with:
+
+```bash
+./scripts/init-letsencrypt.sh your-domain.example you@example.com
+docker compose up -d nginx certbot
+```
+
+This issues a throwaway self-signed cert so nginx can boot, requests the real
+certificate via the HTTP-01 webroot challenge, then reloads nginx. The
+`certbot` service renews it automatically afterwards.
+
 ## Docs
 
 See `docs/ARCHITECTURE.md` for system design and `CHANGELOG.md` for release history.

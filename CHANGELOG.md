@@ -30,3 +30,8 @@ All notable changes to this project are documented in this file.
   deduplication against previously published posts, and a self-scheduling daily runner that
   posts 3-5 times/day at randomized, minimum-spaced times. No-ops with a warning log when
   Telegram or AI credentials are unset.
+- Deployment: multi-stage Dockerfiles for api/telegram-bot/marketing-engine (Alpine, non-root,
+  pruned production `node_modules`), `docker-compose.yml` (Postgres, Redis, one-shot `migrate`
+  job, the three app services, Nginx + certbot), `scripts/init-letsencrypt.sh` to bootstrap the
+  first TLS certificate, `ecosystem.config.cjs` for PM2 on bare-metal/VPS deployments, and a
+  GitHub Actions CI workflow (lint, format check, typecheck, test, build, Docker image builds).

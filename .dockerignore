@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+**/dist
+**/build
+.git
+.github
+.husky
+coverage
+*.log
+.env
+.env.*
+!.env.example
+docs
+apps/dashboard/node_modules
+apps/dashboard/dist

@@ -30,6 +30,7 @@ apps/api/prisma/migrations/dev/
 *.key
 keystore/
 secrets/
+data/certbot/
 
 # misc
 *.tsbuildinfo
