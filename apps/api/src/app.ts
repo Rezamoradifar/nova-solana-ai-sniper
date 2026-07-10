@@ -16,6 +16,8 @@ import positionRoutes from './routes/positions.js';
 import snipeRoutes from './routes/snipes.js';
 import portfolioRoutes from './routes/portfolio.js';
 import walletRoutes from './routes/wallets.js';
+import referralRoutes from './routes/referrals.js';
+import copyTradeRoutes from './routes/copyTrades.js';
 import wsRoutes from './routes/ws.js';
 
 export async function buildApp() {
@@ -41,6 +43,8 @@ export async function buildApp() {
   await app.register(snipeRoutes);
   await app.register(portfolioRoutes);
   await app.register(walletRoutes);
+  await app.register(referralRoutes);
+  await app.register(copyTradeRoutes);
   await app.register(wsRoutes);
 
   app.setErrorHandler((err: FastifyError | ZodError, _req, reply) => {

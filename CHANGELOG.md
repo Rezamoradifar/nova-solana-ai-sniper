@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Referral system: `User.referralCode` (auto-generated, 8-char, ambiguous-character-free) is
+  issued at registration; `POST /auth/register` accepts an optional `referralCode` to credit
+  the referrer (`User.referredByCode`). New `GET /referrals` returns a user's own code and
+  referred-user count. Copy trading now has REST routes (`GET/POST/DELETE /copy-trades`) —
+  they didn't exist before, even though the `CopyTradeConfig` model and mirroring service did.
+  The platform is 100% free: every user has full access to all features (including copy
+  trading) regardless of tier. The `User.subscriptionTier` (FREE/PRO) column and enum remain
+  in the schema, unused, so paid tiers can be introduced later without another migration —
+  there is currently no auto-upgrade, no `requirePro` gate, and no tier-based restriction
+  anywhere in the codebase.
+
 ### Fixed
 
 - Local `npm run dev:*` never actually loaded `.env` into `process.env` — only Docker Compose's
