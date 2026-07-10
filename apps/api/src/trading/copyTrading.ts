@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
 import type { PositionManager } from './positionManager.js';
+import { SafetyCheckError } from './safety.js';
 
 export interface CopyTradeSignal {
   targetAddress: string;
@@ -40,7 +41,9 @@ export class CopyTradingService {
 
       try {
         await this.positionManager.openPosition({
+          userId: config.userId,
           walletId: wallet.id,
+          walletPublicKey: wallet.publicKey,
           encryptedSecret: wallet.encryptedSecret,
           encryptionKey: this.encryptionKey,
           tokenId: signal.tokenId,
@@ -50,6 +53,13 @@ export class CopyTradingService {
           entryPriceUsd: signal.entryPriceUsd,
         });
       } catch (err) {
+        if (err instanceof SafetyCheckError) {
+          this.logger.warn(
+            { userId: config.userId, targetAddress: signal.targetAddress, reason: err.reason },
+            'copy trade blocked by safety check',
+          );
+          continue;
+        }
         this.logger.error(
           { err, userId: config.userId, targetAddress: signal.targetAddress },
           'copy trade execution failed',

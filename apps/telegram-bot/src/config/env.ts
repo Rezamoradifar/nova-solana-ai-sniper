@@ -4,6 +4,7 @@ export const botEnvSchema = envSchema.pick({
   NODE_ENV: true,
   LOG_LEVEL: true,
   DATABASE_URL: true,
+  REDIS_URL: true,
   TELEGRAM_BOT_TOKEN: true,
   TELEGRAM_CHAT_ID: true,
   TELEGRAM_ADMIN_IDS: true,

@@ -6,11 +6,14 @@ import type { NotificationService } from '@nova/telegram-bot';
 import { JupiterClient, SOL_MINT } from '../solana/jupiter.js';
 import { evaluateExit, type ExitReason } from './exitEngine.js';
 import { eventBus } from '../lib/eventBus.js';
+import { TradingSafety, SafetyCheckError } from './safety.js';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
 export interface OpenPositionParams {
+  userId: string;
   walletId: string;
+  walletPublicKey: string;
   encryptedSecret: string;
   encryptionKey: string;
   tokenId: string;
@@ -35,12 +38,30 @@ export class PositionManager {
     private readonly connection: Connection,
     private readonly jupiter: JupiterClient,
     private readonly logger: Logger,
+    private readonly safety: TradingSafety,
     private readonly notifier?: NotificationService,
     /** Real swaps only ever execute when this is explicitly false (LIVE_TRADING=true). */
     private readonly paperTrading: boolean = true,
   ) {}
 
   async openPosition(params: OpenPositionParams) {
+    const check = await this.safety.checkBeforeOpen(
+      {
+        userId: params.userId,
+        walletId: params.walletId,
+        walletPublicKey: params.walletPublicKey,
+        amountSol: params.amountSol,
+      },
+      { isLive: !this.paperTrading },
+    );
+    if (!check.allowed) {
+      this.logger.warn(
+        { reason: check.reason, walletId: params.walletId, mint: params.mint },
+        'trade blocked by safety check',
+      );
+      throw new SafetyCheckError(check.reason ?? 'unknown safety violation');
+    }
+
     const amountLamports = BigInt(Math.floor(params.amountSol * LAMPORTS_PER_SOL));
 
     let outAmount: string;

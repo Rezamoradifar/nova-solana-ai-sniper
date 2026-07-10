@@ -18,7 +18,8 @@
   "dependencies": {
     "@nova/shared": "*",
     "@prisma/client": "^5.22.0",
-    "grammy": "^1.32.0"
+    "grammy": "^1.32.0",
+    "ioredis": "^5.4.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

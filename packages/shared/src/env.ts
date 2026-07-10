@@ -34,6 +34,18 @@ export const envSchema = z.object({
   PAPER_TRADING: booleanFlag(true),
   LIVE_TRADING: booleanFlag(false),
 
+  // Live-trading safety rails — operator-controlled ceilings independent of any
+  // per-user SnipeConfig, enforced on every open (paper or live) except the
+  // on-chain balance check, which only makes sense for real swaps.
+  MAX_TRADE_SOL: z.coerce.number().positive().default(1),
+  MAX_DAILY_LOSS_USD: z.coerce.number().positive().default(50),
+  MAX_OPEN_POSITIONS: z.coerce.number().int().positive().default(5),
+  MIN_WALLET_RESERVE_SOL: z.coerce.number().nonnegative().default(0.01),
+  // Emergency stop. This env value is a hard, restart-required override; the
+  // real "flip it right now without redeploying" switch lives in Redis (see
+  // apps/api/src/trading/safety.ts) and is toggled via the /killswitch admin command.
+  KILL_SWITCH: booleanFlag(false),
+
   // Auth / secrets
   JWT_SECRET: z.string().min(16),
   ENCRYPTION_KEY: z.string().min(32),

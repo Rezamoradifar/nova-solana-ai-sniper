@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { Redis } from 'ioredis';
 import { createLogger } from '@nova/shared';
 import { loadBotEnv, parseAdminIds } from './config/env.js';
 import { createBot } from './bot.js';
@@ -19,6 +20,7 @@ async function main() {
   }
 
   const prisma = new PrismaClient();
+  const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3 });
   const bot = createBot(env.TELEGRAM_BOT_TOKEN, logger);
   const adminIds = parseAdminIds(env.TELEGRAM_ADMIN_IDS);
 
@@ -28,7 +30,7 @@ async function main() {
     );
   }
 
-  registerAdminCommands(bot, prisma, adminIds, logger);
+  registerAdminCommands(bot, prisma, adminIds, logger, redis);
   registerUiRouter(bot, { prisma, encryptionKey: env.ENCRYPTION_KEY, logger });
 
   await bot.start({

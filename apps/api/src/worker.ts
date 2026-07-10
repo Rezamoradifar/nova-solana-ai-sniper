@@ -7,6 +7,7 @@ import { TokenEventClassifier } from './detection/detectors.js';
 import { RiskAnalyzer } from './detection/riskAnalyzer.js';
 import { PositionManager } from './trading/positionManager.js';
 import { AutoTrader } from './trading/autoTrader.js';
+import { TradingSafety, verifySafetySystemReady, type SafetyConfig } from './trading/safety.js';
 import { hasAnyAiProvider, resolveAiProvider, scoreToken } from '@nova/ai';
 import { createBot, NotificationService } from '@nova/telegram-bot';
 import { eventBus } from './lib/eventBus.js';
@@ -31,10 +32,37 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   const jupiter = new JupiterClient({ apiBase: app.config.JUPITER_API_BASE });
   const riskAnalyzer = new RiskAnalyzer(connection, dexScreener);
 
+  const safetyConfig: SafetyConfig = {
+    maxTradeSol: app.config.MAX_TRADE_SOL,
+    maxDailyLossUsd: app.config.MAX_DAILY_LOSS_USD,
+    maxOpenPositions: app.config.MAX_OPEN_POSITIONS,
+    minWalletReserveSol: app.config.MIN_WALLET_RESERVE_SOL,
+    killSwitchEnv: app.config.KILL_SWITCH,
+  };
+  const safety = new TradingSafety(
+    app.prisma,
+    app.redis,
+    connection,
+    safetyConfig,
+    app.log as never,
+  );
+
   // The one hard safety switch: real swaps only ever fire when LIVE_TRADING is
-  // explicitly "true". Everything else (unset, "false", PAPER_TRADING alone)
-  // keeps every auto-buy as a simulated fill — no wallet key is ever unsealed.
-  const paperTrading = !app.config.LIVE_TRADING;
+  // explicitly "true" AND the safety system verifiably works. Everything else
+  // (unset, "false", a broken safety net) keeps every auto-buy as a simulated
+  // fill — no wallet key is ever unsealed.
+  let paperTrading = true;
+  if (app.config.LIVE_TRADING) {
+    const readiness = await verifySafetySystemReady(safetyConfig, app.redis);
+    if (readiness.ready) {
+      paperTrading = false;
+    } else {
+      app.log.error(
+        { errors: readiness.errors },
+        '🔴 LIVE_TRADING=true was requested but the safety system is not ready — forcing PAPER TRADING instead',
+      );
+    }
+  }
   app.log.warn(
     paperTrading
       ? '📝 PAPER TRADING mode — auto-buys are simulated, no real swaps or wallet keys used'
@@ -54,6 +82,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     connection,
     jupiter,
     app.log as never,
+    safety,
     notifier,
     paperTrading,
   );

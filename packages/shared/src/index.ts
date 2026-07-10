@@ -6,3 +6,4 @@ export * from './security/keystore.js';
 export * from './security/backup.js';
 export * from './portfolio.js';
 export * from './referral.js';
+export * from './killSwitch.js';

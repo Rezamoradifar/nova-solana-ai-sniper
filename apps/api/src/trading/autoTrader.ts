@@ -3,6 +3,7 @@ import type { Logger } from '@nova/shared';
 import type { RiskFlags } from '@nova/shared';
 import { RiskAnalyzer } from '../detection/riskAnalyzer.js';
 import type { PositionManager } from './positionManager.js';
+import { SafetyCheckError } from './safety.js';
 
 export interface EvaluateLaunchInput {
   mint: string;
@@ -55,7 +56,9 @@ export class AutoTrader {
 
       try {
         await this.deps.positionManager.openPosition({
+          userId: config.userId,
           walletId: wallet.id,
+          walletPublicKey: wallet.publicKey,
           encryptedSecret: wallet.encryptedSecret,
           encryptionKey: this.deps.encryptionKey,
           tokenId,
@@ -69,6 +72,14 @@ export class AutoTrader {
         });
         results.push({ userId: config.userId, bought: true });
       } catch (err) {
+        if (err instanceof SafetyCheckError) {
+          this.deps.logger.warn(
+            { userId: config.userId, mint, reason: err.reason },
+            'auto-buy blocked by safety check',
+          );
+          results.push({ userId: config.userId, bought: false, reason: 'safety_blocked' });
+          continue;
+        }
         this.deps.logger.error({ err, userId: config.userId, mint }, 'auto-buy failed');
         results.push({ userId: config.userId, bought: false, reason: 'execution_error' });
       }
