@@ -91,8 +91,23 @@ export const envSchema = z.object({
 
 export type FullEnv = z.infer<typeof envSchema>;
 
+/**
+ * A key present in `.env` but left blank (`COMMUNITY_URL=`) is how operators
+ * naturally spell "not configured yet" — but dotenv loads that as `""`, not
+ * `undefined`, so it fails `.optional()` fields that also validate shape
+ * (`.url()`, `.email()`, etc.): blank fails the shape check instead of being
+ * treated as absent. Normalizing blank strings to `undefined` before parsing
+ * makes "key missing" and "key present but blank" behave identically for
+ * every optional field, without weakening required (non-optional) fields —
+ * a blank required field still fails validation, just as "Required" instead
+ * of a shape error, which is arguably clearer anyway.
+ */
+function withBlankStringsAsUndefined(env: NodeJS.ProcessEnv): Record<string, string | undefined> {
+  return Object.fromEntries(Object.entries(env).map(([k, v]) => [k, v === '' ? undefined : v]));
+}
+
 export function loadEnv<T extends z.ZodTypeAny>(schema: T): z.infer<T> {
-  const parsed = schema.safeParse(process.env);
+  const parsed = schema.safeParse(withBlankStringsAsUndefined(process.env));
   if (!parsed.success) {
     const issues = parsed.error.issues
       .map((i) => `  - ${i.path.join('.')}: ${i.message}`)
