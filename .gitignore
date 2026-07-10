@@ -34,3 +34,7 @@ secrets/
 # misc
 *.tsbuildinfo
 .pnp.*
+
+
+# Claude Code local settings (not part of the project)
+.claude/
