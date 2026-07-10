@@ -80,6 +80,8 @@ export const envSchema = z.object({
   // Third-party market data
   DEXSCREENER_API_BASE: z.string().url().default('https://api.dexscreener.com'),
   JUPITER_API_BASE: z.string().url().default('https://lite-api.jup.ag'),
+  // How often open positions are re-priced to evaluate take-profit/stop-loss/trailing-stop.
+  PRICE_CHECK_INTERVAL_MS: z.coerce.number().min(5000).default(15000),
 
   // Marketing / links
   DASHBOARD_URL: z.string().url().default('http://localhost:5173'),

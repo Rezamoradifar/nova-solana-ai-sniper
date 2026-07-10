@@ -8,6 +8,7 @@ import { RiskAnalyzer } from './detection/riskAnalyzer.js';
 import { PositionManager } from './trading/positionManager.js';
 import { AutoTrader } from './trading/autoTrader.js';
 import { TradingSafety, verifySafetySystemReady, type SafetyConfig } from './trading/safety.js';
+import { PriceMonitor } from './trading/priceMonitor.js';
 import { hasAnyAiProvider, resolveAiProvider, scoreToken } from '@nova/ai';
 import { createBot, NotificationService } from '@nova/telegram-bot';
 import { eventBus } from './lib/eventBus.js';
@@ -93,6 +94,17 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     logger: app.log as never,
     encryptionKey: app.config.ENCRYPTION_KEY,
   });
+
+  // Drives TP/SL/trailing-stop: without this loop those fields are just stored
+  // numbers with nothing evaluating them against the live price.
+  const priceMonitor = new PriceMonitor({
+    prisma: app.prisma,
+    dexScreener,
+    positionManager,
+    logger: app.log as never,
+    encryptionKey: app.config.ENCRYPTION_KEY,
+  });
+  priceMonitor.start(app.config.PRICE_CHECK_INTERVAL_MS);
 
   const classifier = new TokenEventClassifier(app.log as never);
   const monitor = new PumpFunMonitor(connection, app.log as never);
@@ -196,6 +208,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   return async () => {
     await monitor.stop();
     twitterMonitor?.stop();
+    priceMonitor.stop();
   };
 }
 

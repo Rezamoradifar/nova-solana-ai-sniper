@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { Connection } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';
 import type { PrismaClient } from '@prisma/client';
 import { unsealKeypair, type Logger } from '@nova/shared';
 import type { NotificationService } from '@nova/telegram-bot';
@@ -9,6 +9,76 @@ import { eventBus } from '../lib/eventBus.js';
 import { TradingSafety, SafetyCheckError } from './safety.js';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
+
+/**
+ * Never trust a pre-trade Jupiter quote for bookkeeping — actual execution almost
+ * always differs slightly from the estimate. Reads what actually landed in the
+ * wallet from the confirmed transaction's own balance snapshot.
+ */
+async function getActualTokenDelta(
+  connection: Connection,
+  signature: string,
+  ownerPubkey: string,
+  mint: string,
+): Promise<bigint> {
+  const tx = await connection.getParsedTransaction(signature, {
+    maxSupportedTransactionVersion: 0,
+    commitment: 'confirmed',
+  });
+  if (!tx?.meta) {
+    throw new Error(
+      `Could not fetch confirmed transaction ${signature} to verify the actual amount received`,
+    );
+  }
+  const findAmount = (balances: typeof tx.meta.postTokenBalances) =>
+    balances?.find((b) => b.owner === ownerPubkey && b.mint === mint)?.uiTokenAmount.amount;
+
+  const pre = BigInt(findAmount(tx.meta.preTokenBalances) ?? '0');
+  const post = BigInt(findAmount(tx.meta.postTokenBalances) ?? '0');
+  return post - pre;
+}
+
+/** Same idea as getActualTokenDelta, but for native SOL (lamports), which isn't an SPL token balance. */
+async function getActualSolDelta(
+  connection: Connection,
+  signature: string,
+  ownerPubkey: string,
+): Promise<bigint> {
+  const tx = await connection.getParsedTransaction(signature, {
+    maxSupportedTransactionVersion: 0,
+    commitment: 'confirmed',
+  });
+  if (!tx?.meta) {
+    throw new Error(
+      `Could not fetch confirmed transaction ${signature} to verify the actual amount received`,
+    );
+  }
+  const accountIndex = tx.transaction.message.accountKeys.findIndex(
+    (k) => k.pubkey.toBase58() === ownerPubkey,
+  );
+  if (accountIndex === -1) {
+    throw new Error(`Owner ${ownerPubkey} not found in transaction ${signature}`);
+  }
+  // The signer is also the fee payer, so this delta is already net of the network fee.
+  return BigInt(tx.meta.postBalances[accountIndex]!) - BigInt(tx.meta.preBalances[accountIndex]!);
+}
+
+/**
+ * The wallet's real, current on-chain balance of a token — the only safe source
+ * of truth for "how much can we actually sell." Never sell a stored/estimated
+ * amount without checking this first.
+ */
+async function getRealTokenBalance(
+  connection: Connection,
+  ownerPubkey: string,
+  mint: string,
+): Promise<bigint> {
+  const resp = await connection.getParsedTokenAccountsByOwner(new PublicKey(ownerPubkey), {
+    mint: new PublicKey(mint),
+  });
+  if (resp.value.length === 0) return 0n;
+  return BigInt(resp.value[0]!.account.data.parsed.info.tokenAmount.amount);
+}
 
 export interface OpenPositionParams {
   userId: string;
@@ -80,7 +150,7 @@ export class PositionManager {
       signature = paperSignature();
     } else {
       const keypair = unsealKeypair(params.encryptedSecret, params.encryptionKey);
-      const { quote, transaction } = await this.jupiter.prepareSwap(this.connection, keypair, {
+      const { transaction } = await this.jupiter.prepareSwap(this.connection, keypair, {
         inputMint: SOL_MINT,
         outputMint: params.mint,
         amountLamports,
@@ -88,7 +158,15 @@ export class PositionManager {
       });
       signature = await this.connection.sendTransaction(transaction);
       await this.connection.confirmTransaction(signature, 'confirmed');
-      outAmount = quote.outAmount;
+      // The quote is only an estimate — record what actually landed in the wallet,
+      // since a later sell has to work with the real balance, not the estimate.
+      const actualReceived = await getActualTokenDelta(
+        this.connection,
+        signature,
+        keypair.publicKey.toBase58(),
+        params.mint,
+      );
+      outAmount = actualReceived.toString();
     }
 
     const trade = await this.prisma.trade.create({
@@ -189,6 +267,7 @@ export class PositionManager {
     });
 
     let outAmountLamports: number;
+    let soldAmountToken: number;
     let signature: string;
 
     if (this.paperTrading) {
@@ -199,18 +278,36 @@ export class PositionManager {
         slippageBps: 300,
       });
       outAmountLamports = Number(quote.outAmount);
+      soldAmountToken = position.amountToken;
       signature = paperSignature();
     } else {
       const keypair = unsealKeypair(encryptedSecret, encryptionKey);
-      const { quote, transaction } = await this.jupiter.prepareSwap(this.connection, keypair, {
+      // Never sell the stored/estimated amount blindly — it can exceed what's actually
+      // in the wallet (e.g. from a quote-vs-actual gap at buy time) and get rejected
+      // on-chain. Cap to the real balance, whichever is smaller.
+      const realBalance = await getRealTokenBalance(
+        this.connection,
+        keypair.publicKey.toBase58(),
+        position.token.mint,
+      );
+      const recordedAmount = BigInt(Math.floor(position.amountToken));
+      const sellAmountRaw = realBalance < recordedAmount ? realBalance : recordedAmount;
+
+      const { transaction } = await this.jupiter.prepareSwap(this.connection, keypair, {
         inputMint: position.token.mint,
         outputMint: SOL_MINT,
-        amountLamports: BigInt(Math.floor(position.amountToken)),
+        amountLamports: sellAmountRaw,
         slippageBps: 300,
       });
       signature = await this.connection.sendTransaction(transaction);
       await this.connection.confirmTransaction(signature, 'confirmed');
-      outAmountLamports = Number(quote.outAmount);
+      const actualSolReceived = await getActualSolDelta(
+        this.connection,
+        signature,
+        keypair.publicKey.toBase58(),
+      );
+      outAmountLamports = Number(actualSolReceived);
+      soldAmountToken = Number(sellAmountRaw);
     }
 
     const realizedPnlUsd = (exit.currentPriceUsd - position.entryPriceUsd) * position.amountToken;
@@ -222,7 +319,7 @@ export class PositionManager {
         side: 'SELL',
         status: 'CONFIRMED',
         amountSol: outAmountLamports / LAMPORTS_PER_SOL,
-        amountToken: position.amountToken,
+        amountToken: soldAmountToken,
         priceUsd: exit.currentPriceUsd,
         txSignature: signature,
         isPaperTrade: this.paperTrading,

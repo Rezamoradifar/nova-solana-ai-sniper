@@ -31,6 +31,7 @@ export const apiEnvSchema = envSchema.pick({
   TWITTER_POLL_INTERVAL_MS: true,
   DEXSCREENER_API_BASE: true,
   JUPITER_API_BASE: true,
+  PRICE_CHECK_INTERVAL_MS: true,
 });
 
 export function loadApiEnv() {
