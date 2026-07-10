@@ -7,9 +7,5 @@
     "types": ["node"]
   },
   "include": ["src"],
-  "references": [
-    { "path": "../../packages/shared" },
-    { "path": "../../packages/ai" },
-    { "path": "../telegram-bot" }
-  ]
+  "references": [{ "path": "../../packages/shared" }]
 }

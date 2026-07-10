@@ -8,6 +8,7 @@ import { RiskAnalyzer } from './detection/riskAnalyzer.js';
 import { PositionManager } from './trading/positionManager.js';
 import { AutoTrader } from './trading/autoTrader.js';
 import { hasAnyAiProvider, resolveAiProvider, scoreToken } from '@nova/ai';
+import { createBot, NotificationService } from '@nova/telegram-bot';
 
 /**
  * Wires the detection -> risk -> AI-score -> auto-trade pipeline together and
@@ -26,7 +27,22 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   const dexScreener = new DexScreenerClient(app.config.DEXSCREENER_API_BASE);
   const jupiter = new JupiterClient({ apiBase: app.config.JUPITER_API_BASE });
   const riskAnalyzer = new RiskAnalyzer(connection, dexScreener);
-  const positionManager = new PositionManager(app.prisma, connection, jupiter, app.log as never);
+
+  let notifier: NotificationService | undefined;
+  if (app.config.TELEGRAM_BOT_TOKEN && app.config.TELEGRAM_CHAT_ID) {
+    const bot = createBot(app.config.TELEGRAM_BOT_TOKEN, app.log as never);
+    notifier = new NotificationService(bot, app.config.TELEGRAM_CHAT_ID, app.log as never);
+  } else {
+    app.log.warn('TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — trade notifications disabled');
+  }
+
+  const positionManager = new PositionManager(
+    app.prisma,
+    connection,
+    jupiter,
+    app.log as never,
+    notifier,
+  );
   const autoTrader = new AutoTrader({
     prisma: app.prisma,
     riskAnalyzer,

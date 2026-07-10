@@ -4,6 +4,7 @@
     { "path": "apps/api" },
     { "path": "apps/telegram-bot" },
     { "path": "apps/marketing-engine" },
-    { "path": "packages/shared" }
+    { "path": "packages/shared" },
+    { "path": "packages/ai" }
   ]
 }

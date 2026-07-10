@@ -1,9 +1,10 @@
 import type { Connection } from '@solana/web3.js';
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
+import type { NotificationService } from '@nova/telegram-bot';
 import { JupiterClient, SOL_MINT } from '../solana/jupiter.js';
 import { unsealKeypair } from '../security/keystore.js';
-import { evaluateExit } from './exitEngine.js';
+import { evaluateExit, type ExitReason } from './exitEngine.js';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
@@ -13,6 +14,7 @@ export interface OpenPositionParams {
   encryptionKey: string;
   tokenId: string;
   mint: string;
+  symbol?: string;
   amountSol: number;
   slippageBps: number;
   entryPriceUsd: number;
@@ -27,6 +29,7 @@ export class PositionManager {
     private readonly connection: Connection,
     private readonly jupiter: JupiterClient,
     private readonly logger: Logger,
+    private readonly notifier?: NotificationService,
   ) {}
 
   async openPosition(params: OpenPositionParams) {
@@ -73,6 +76,16 @@ export class PositionManager {
     });
 
     this.logger.info({ tradeId: trade.id, positionId: position.id, signature }, 'position opened');
+
+    await this.notifier?.notifyTrade({
+      side: 'BUY',
+      symbol: params.symbol ?? params.mint.slice(0, 8),
+      mint: params.mint,
+      amountSol: params.amountSol,
+      priceUsd: params.entryPriceUsd || undefined,
+      signature,
+    });
+
     return { trade, position };
   }
 
@@ -117,7 +130,7 @@ export class PositionManager {
     walletId: string,
     encryptedSecret: string,
     encryptionKey: string,
-    exit: { currentPriceUsd: number; reason?: string },
+    exit: { currentPriceUsd: number; reason?: ExitReason },
   ) {
     const position = await this.prisma.position.findUniqueOrThrow({
       where: { id: positionId },
@@ -165,6 +178,17 @@ export class PositionManager {
       { positionId, signature, reason: exit.reason, realizedPnlUsd },
       'position closed',
     );
+
+    if (exit.reason) {
+      const pnlPercent =
+        ((exit.currentPriceUsd - position.entryPriceUsd) / position.entryPriceUsd) * 100;
+      await this.notifier?.notifyExit({
+        symbol: position.token.symbol ?? position.token.mint.slice(0, 8),
+        reason: exit.reason,
+        pnlPercent,
+        pnlUsd: realizedPnlUsd,
+      });
+    }
 
     return { closed: true as const, position: updated, signature };
   }

@@ -17,6 +17,8 @@ export const apiEnvSchema = envSchema.pick({
   JITO_AUTH_KEYPAIR: true,
   ANTHROPIC_API_KEY: true,
   OPENAI_API_KEY: true,
+  TELEGRAM_BOT_TOKEN: true,
+  TELEGRAM_CHAT_ID: true,
   DEXSCREENER_API_BASE: true,
   JUPITER_API_BASE: true,
 });

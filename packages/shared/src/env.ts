@@ -46,6 +46,11 @@ export const envSchema = z.object({
   // Third-party market data
   DEXSCREENER_API_BASE: z.string().url().default('https://api.dexscreener.com'),
   JUPITER_API_BASE: z.string().url().default('https://lite-api.jup.ag'),
+
+  // Marketing / links
+  DASHBOARD_URL: z.string().url().default('http://localhost:5173'),
+  COMMUNITY_URL: z.string().url().optional(),
+  REFERRAL_BASE_URL: z.string().url().optional(),
 });
 
 export type FullEnv = z.infer<typeof envSchema>;
