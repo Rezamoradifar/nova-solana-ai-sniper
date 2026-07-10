@@ -21,10 +21,11 @@ const REAL_POOL = {
   poolBaseTokenAccount: '2uTUzoGAyTqVAQoitEj6qAtLiJKBoFszFJZm7pusNoRB',
   poolQuoteTokenAccount: '9Nkgzsqenp9a87akazm9zQc4eduTa7w2bd8ynvsJCoUf',
   lpSupply: 4193388284701n,
+  coinCreator: '2q8dd3fpWuQdiUzgeNdMTKxmH3rKYwXgAfaGs8T6HFLZ',
 };
 
 function buildRealPoolAccountData(): Buffer {
-  const buf = Buffer.alloc(211);
+  const buf = Buffer.alloc(243);
   buf.writeUInt8(REAL_POOL.poolBump, 8);
   buf.writeUInt16LE(REAL_POOL.index, 9);
   new PublicKey(REAL_POOL.creator).toBuffer().copy(buf, 11);
@@ -34,6 +35,7 @@ function buildRealPoolAccountData(): Buffer {
   new PublicKey(REAL_POOL.poolBaseTokenAccount).toBuffer().copy(buf, 139);
   new PublicKey(REAL_POOL.poolQuoteTokenAccount).toBuffer().copy(buf, 171);
   buf.writeBigUInt64LE(REAL_POOL.lpSupply, 203);
+  new PublicKey(REAL_POOL.coinCreator).toBuffer().copy(buf, 211);
   return buf;
 }
 
@@ -45,6 +47,7 @@ describe('decodePumpSwapPool', () => {
     expect(state.poolBaseTokenAccount).toBe(REAL_POOL.poolBaseTokenAccount);
     expect(state.poolQuoteTokenAccount).toBe(REAL_POOL.poolQuoteTokenAccount);
     expect(state.lpSupply).toBe(REAL_POOL.lpSupply);
+    expect(state.coinCreator).toBe(REAL_POOL.coinCreator);
   });
 
   it('throws on a too-short buffer instead of silently misreading it', () => {

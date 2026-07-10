@@ -24,8 +24,15 @@ const OFFSET = {
   poolBaseTokenAccount: 139,
   poolQuoteTokenAccount: 171,
   lpSupply: 203,
+  // Confirmed against the official pump-fun/pump-public-docs IDL's `Pool` struct
+  // field order (coin_creator immediately follows lp_supply). Offset arithmetic is
+  // consistent with every field before it, each of which was independently
+  // cross-checked against real balances/mints — coin_creator's own *value* wasn't
+  // independently cross-checked (no second public source exposes it), only its
+  // position in the byte layout.
+  coinCreator: 211,
 };
-const MIN_ACCOUNT_LEN = OFFSET.lpSupply + 8;
+const MIN_ACCOUNT_LEN = OFFSET.coinCreator + 32;
 
 export interface PumpSwapPoolState {
   poolAddress: string;
@@ -34,6 +41,7 @@ export interface PumpSwapPoolState {
   poolBaseTokenAccount: string;
   poolQuoteTokenAccount: string;
   lpSupply: bigint;
+  coinCreator: string;
 }
 
 export function decodePumpSwapPool(poolAddress: string, data: Buffer): PumpSwapPoolState {
@@ -49,6 +57,7 @@ export function decodePumpSwapPool(poolAddress: string, data: Buffer): PumpSwapP
     poolBaseTokenAccount: readPubkey(OFFSET.poolBaseTokenAccount),
     poolQuoteTokenAccount: readPubkey(OFFSET.poolQuoteTokenAccount),
     lpSupply: data.readBigUInt64LE(OFFSET.lpSupply),
+    coinCreator: readPubkey(OFFSET.coinCreator),
   };
 }
 

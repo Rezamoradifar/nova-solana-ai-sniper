@@ -8,6 +8,7 @@ import { RiskAnalyzer } from './detection/riskAnalyzer.js';
 import { extractMintFromParsedTx } from './detection/extractMint.js';
 import { MigrationMonitor } from './detection/migrationMonitor.js';
 import { DexRegistry } from './solana/dex/registry.js';
+import { PumpSwapExecutor } from './solana/dex/pumpswapExecutor.js';
 import { PositionManager } from './trading/positionManager.js';
 import { AutoTrader } from './trading/autoTrader.js';
 import { TradingSafety, verifySafetySystemReady, type SafetyConfig } from './trading/safety.js';
@@ -35,7 +36,9 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
 
   const dexScreener = new DexScreenerClient(app.config.DEXSCREENER_API_BASE);
   const jupiter = new JupiterClient({ apiBase: app.config.JUPITER_API_BASE });
-  const dexRegistry = new DexRegistry(connection, dexScreener, app.log as never);
+  const dexRegistry = new DexRegistry(connection, dexScreener, app.log as never, {
+    PUMPSWAP: new PumpSwapExecutor(),
+  });
   const riskAnalyzer = new RiskAnalyzer(
     connection,
     dexScreener,
@@ -98,6 +101,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     safety,
     notifier,
     paperTrading,
+    dexRegistry,
   );
   const autoTrader = new AutoTrader({
     prisma: app.prisma,

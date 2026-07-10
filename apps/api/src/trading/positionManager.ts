@@ -1,12 +1,13 @@
 import { randomBytes } from 'node:crypto';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import { getMint } from '@solana/spl-token';
-import type { PrismaClient } from '@prisma/client';
+import type { Dex, PrismaClient } from '@prisma/client';
 import { unsealKeypair, type Logger } from '@nova/shared';
 import type { NotificationService } from '@nova/telegram-bot';
 import { JupiterClient, SOL_MINT } from '../solana/jupiter.js';
 import type { DexScreenerClient } from '../solana/dexscreener.js';
 import { SolPriceOracle } from '../solana/pumpfunBondingCurve.js';
+import type { DexRegistry } from '../solana/dex/registry.js';
 import { evaluateExit, type ExitReason } from './exitEngine.js';
 import { eventBus } from '../lib/eventBus.js';
 import { TradingSafety, SafetyCheckError } from './safety.js';
@@ -117,7 +118,64 @@ export class PositionManager {
     private readonly notifier?: NotificationService,
     /** Real swaps only ever execute when this is explicitly false (LIVE_TRADING=true). */
     private readonly paperTrading: boolean = true,
+    /** Optional: enables a native-DEX fallback when Jupiter can't route a live swap. */
+    private readonly dexRegistry?: DexRegistry,
   ) {}
+
+  /**
+   * Jupiter first, always — it already aggregates every DEX this platform knows
+   * about and is the far more battle-tested path. Only on a Jupiter failure (e.g.
+   * "no route found," which can happen for a token that's too new for Jupiter's
+   * indexer to have picked up yet) does this fall back to a native DEX executor,
+   * and only if one is registered and the token's pool is known. The native
+   * builder's own simulation gate (mirroring JupiterClient.prepareSwap's) means a
+   * malformed fallback transaction is caught here, never sent.
+   */
+  private async sendSwap(
+    keypair: Keypair,
+    swapParams: {
+      inputMint: string;
+      outputMint: string;
+      amountLamports: bigint;
+      slippageBps: number;
+    },
+    getFallbackTarget: () => Promise<{ dex: Dex; poolAddress: string | null } | undefined>,
+  ): Promise<string> {
+    try {
+      const { transaction } = await this.jupiter.prepareSwap(this.connection, keypair, swapParams);
+      const signature = await this.connection.sendTransaction(transaction);
+      await this.connection.confirmTransaction(signature, 'confirmed');
+      return signature;
+    } catch (jupiterErr) {
+      const target = await getFallbackTarget();
+      const executor = target ? this.dexRegistry?.getExecutor(target.dex) : undefined;
+      if (!executor || !target?.poolAddress) throw jupiterErr;
+
+      this.logger.warn(
+        { err: jupiterErr, dex: target.dex, poolAddress: target.poolAddress },
+        'Jupiter could not route this swap — falling back to the native DEX executor',
+      );
+
+      const tx = await executor.buildSwap({
+        connection: this.connection,
+        signer: keypair,
+        ...swapParams,
+        poolAddress: target.poolAddress,
+      });
+      if (!(tx instanceof VersionedTransaction)) {
+        throw new Error(`Native ${target.dex} executor returned an unsupported transaction type`);
+      }
+      const sim = await this.connection.simulateTransaction(tx, { sigVerify: false });
+      if (sim.value.err) {
+        throw new Error(
+          `Native ${target.dex} swap simulation failed: ${JSON.stringify(sim.value.err)}`,
+        );
+      }
+      const signature = await this.connection.sendTransaction(tx);
+      await this.connection.confirmTransaction(signature, 'confirmed');
+      return signature;
+    }
+  }
 
   /**
    * Never trust a caller-supplied entry price (an auto-buy fires before any swap has
@@ -200,14 +258,19 @@ export class PositionManager {
       signature = paperSignature();
     } else {
       const keypair = unsealKeypair(params.encryptedSecret, params.encryptionKey);
-      const { transaction } = await this.jupiter.prepareSwap(this.connection, keypair, {
-        inputMint: SOL_MINT,
-        outputMint: params.mint,
-        amountLamports,
-        slippageBps: params.slippageBps,
-      });
-      signature = await this.connection.sendTransaction(transaction);
-      await this.connection.confirmTransaction(signature, 'confirmed');
+      signature = await this.sendSwap(
+        keypair,
+        {
+          inputMint: SOL_MINT,
+          outputMint: params.mint,
+          amountLamports,
+          slippageBps: params.slippageBps,
+        },
+        async () => {
+          const token = await this.prisma.token.findUnique({ where: { id: params.tokenId } });
+          return token ? { dex: token.dex, poolAddress: token.poolAddress } : undefined;
+        },
+      );
       // The quote is only an estimate — record what actually landed in the wallet,
       // since a later sell has to work with the real balance, not the estimate.
       const actualReceived = await getActualTokenDelta(
@@ -349,14 +412,16 @@ export class PositionManager {
       const recordedAmount = BigInt(Math.floor(position.amountToken));
       const sellAmountRaw = realBalance < recordedAmount ? realBalance : recordedAmount;
 
-      const { transaction } = await this.jupiter.prepareSwap(this.connection, keypair, {
-        inputMint: position.token.mint,
-        outputMint: SOL_MINT,
-        amountLamports: sellAmountRaw,
-        slippageBps: 300,
-      });
-      signature = await this.connection.sendTransaction(transaction);
-      await this.connection.confirmTransaction(signature, 'confirmed');
+      signature = await this.sendSwap(
+        keypair,
+        {
+          inputMint: position.token.mint,
+          outputMint: SOL_MINT,
+          amountLamports: sellAmountRaw,
+          slippageBps: 300,
+        },
+        async () => ({ dex: position.token.dex, poolAddress: position.token.poolAddress }),
+      );
       const actualSolReceived = await getActualSolDelta(
         this.connection,
         signature,
