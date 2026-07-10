@@ -48,6 +48,35 @@ describe('evaluateExit', () => {
     expect(result.shouldExit).toBe(false);
   });
 
+  it('never exits on take-profit/stop-loss from an unknown (zero) entry price', () => {
+    // A real bug: an automated auto-buy path once recorded entryPriceUsd=0 as a
+    // placeholder. (current - 0) / 0 is Infinity, which trivially "beats" any
+    // take-profit threshold and closes the position within one price tick,
+    // regardless of what the price actually did.
+    const result = evaluateExit({
+      entryPriceUsd: 0,
+      currentPriceUsd: 0.000002283,
+      highWaterMarkUsd: 0,
+      takeProfitPercent: 25,
+      stopLossPercent: 10,
+    });
+    expect(result.shouldExit).toBe(false);
+    expect(result.pnlPercent).toBe(0);
+  });
+
+  it('still evaluates trailing stop correctly even with an unknown entry price', () => {
+    // Trailing stop only compares currentPriceUsd against its own high-water mark,
+    // not entryPriceUsd, so it must keep working regardless of the guard above.
+    const result = evaluateExit({
+      entryPriceUsd: 0,
+      currentPriceUsd: 0.8,
+      highWaterMarkUsd: 1,
+      trailingStopPercent: 15,
+    });
+    expect(result.shouldExit).toBe(true);
+    expect(result.reason).toBe('trailing_stop');
+  });
+
   it('updates the high water mark even when not exiting', () => {
     const result = evaluateExit({
       entryPriceUsd: 1,

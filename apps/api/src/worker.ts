@@ -83,6 +83,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     app.prisma,
     connection,
     jupiter,
+    dexScreener,
     app.log as never,
     safety,
     notifier,

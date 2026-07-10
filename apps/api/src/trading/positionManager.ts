@@ -1,9 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import { Connection, PublicKey } from '@solana/web3.js';
+import { getMint } from '@solana/spl-token';
 import type { PrismaClient } from '@prisma/client';
 import { unsealKeypair, type Logger } from '@nova/shared';
 import type { NotificationService } from '@nova/telegram-bot';
 import { JupiterClient, SOL_MINT } from '../solana/jupiter.js';
+import type { DexScreenerClient } from '../solana/dexscreener.js';
+import { SolPriceOracle } from '../solana/pumpfunBondingCurve.js';
 import { evaluateExit, type ExitReason } from './exitEngine.js';
 import { eventBus } from '../lib/eventBus.js';
 import { TradingSafety, SafetyCheckError } from './safety.js';
@@ -91,7 +94,6 @@ export interface OpenPositionParams {
   symbol?: string;
   amountSol: number;
   slippageBps: number;
-  entryPriceUsd: number;
   takeProfitPercent?: number;
   stopLossPercent?: number;
   trailingStopPercent?: number;
@@ -103,16 +105,64 @@ function paperSignature(): string {
 }
 
 export class PositionManager {
+  private readonly solPriceOracle = new SolPriceOracle();
+
   constructor(
     private readonly prisma: PrismaClient,
     private readonly connection: Connection,
     private readonly jupiter: JupiterClient,
+    private readonly dexScreener: DexScreenerClient,
     private readonly logger: Logger,
     private readonly safety: TradingSafety,
     private readonly notifier?: NotificationService,
     /** Real swaps only ever execute when this is explicitly false (LIVE_TRADING=true). */
     private readonly paperTrading: boolean = true,
   ) {}
+
+  /**
+   * Never trust a caller-supplied entry price (an auto-buy fires before any swap has
+   * happened, so callers can only ever guess) — resolve it for real, from the same
+   * DexScreener price source PriceMonitor will use on every later tick, so entry and
+   * exit prices are apples-to-apples. Falls back to deriving a price from what was
+   * actually spent vs. actually received if DexScreener has nothing yet, and only
+   * as an absolute last resort returns 0 — which evaluateExit treats as "unknown,"
+   * never as a real price to compute PnL against.
+   */
+  private async resolveEntryPriceUsd(
+    mint: string,
+    amountSol: number,
+    tokensReceivedRaw: bigint,
+  ): Promise<number> {
+    try {
+      const pair = await this.dexScreener.getBestSolanaPair(mint);
+      const price = pair?.priceUsd ? Number(pair.priceUsd) : undefined;
+      if (price !== undefined && Number.isFinite(price) && price > 0) return price;
+    } catch (err) {
+      this.logger.debug(
+        { mint, err },
+        'dexscreener price lookup failed while resolving entry price',
+      );
+    }
+
+    try {
+      const [solPriceUsd, mintInfo] = await Promise.all([
+        this.solPriceOracle.getPriceUsd(this.dexScreener),
+        getMint(this.connection, new PublicKey(mint)),
+      ]);
+      const tokensReceived = Number(tokensReceivedRaw) / 10 ** mintInfo.decimals;
+      if (solPriceUsd !== undefined && tokensReceived > 0) {
+        return (amountSol * solPriceUsd) / tokensReceived;
+      }
+    } catch (err) {
+      this.logger.debug({ mint, err }, 'fallback entry price derivation failed');
+    }
+
+    this.logger.warn(
+      { mint },
+      'could not resolve a real entry price for this position — recording 0 (treated as unknown, not a real price, so TP/SL cannot fire off it)',
+    );
+    return 0;
+  }
 
   async openPosition(params: OpenPositionParams) {
     const check = await this.safety.checkBeforeOpen(
@@ -169,6 +219,12 @@ export class PositionManager {
       outAmount = actualReceived.toString();
     }
 
+    const entryPriceUsd = await this.resolveEntryPriceUsd(
+      params.mint,
+      params.amountSol,
+      BigInt(outAmount),
+    );
+
     const trade = await this.prisma.trade.create({
       data: {
         walletId: params.walletId,
@@ -177,7 +233,7 @@ export class PositionManager {
         status: 'CONFIRMED',
         amountSol: params.amountSol,
         amountToken: Number(outAmount),
-        priceUsd: params.entryPriceUsd,
+        priceUsd: entryPriceUsd,
         txSignature: signature,
         slippageBps: params.slippageBps,
         isPaperTrade: this.paperTrading,
@@ -189,10 +245,10 @@ export class PositionManager {
       data: {
         walletId: params.walletId,
         tokenId: params.tokenId,
-        entryPriceUsd: params.entryPriceUsd,
+        entryPriceUsd,
         amountToken: Number(outAmount),
         amountSolInvested: params.amountSol,
-        highWaterMarkUsd: params.entryPriceUsd,
+        highWaterMarkUsd: entryPriceUsd,
         takeProfitPercent: params.takeProfitPercent,
         stopLossPercent: params.stopLossPercent,
         trailingStopPercent: params.trailingStopPercent,
@@ -210,7 +266,7 @@ export class PositionManager {
       symbol: params.symbol ?? params.mint.slice(0, 8),
       mint: params.mint,
       amountSol: params.amountSol,
-      priceUsd: params.entryPriceUsd || undefined,
+      priceUsd: entryPriceUsd || undefined,
       signature,
       isPaperTrade: this.paperTrading,
     });

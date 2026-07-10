@@ -50,7 +50,6 @@ export class CopyTradingService {
           mint: signal.mint,
           amountSol,
           slippageBps: 300,
-          entryPriceUsd: signal.entryPriceUsd,
         });
       } catch (err) {
         if (err instanceof SafetyCheckError) {

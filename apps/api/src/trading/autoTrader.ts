@@ -65,7 +65,6 @@ export class AutoTrader {
           mint,
           amountSol: config.buyAmountSol,
           slippageBps: config.maxSlippageBps,
-          entryPriceUsd: 0,
           takeProfitPercent: config.takeProfitPercent ?? undefined,
           stopLossPercent: config.stopLossPercent ?? undefined,
           trailingStopPercent: config.trailingStopPercent ?? undefined,

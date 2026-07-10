@@ -21,7 +21,16 @@ export interface ExitDecision {
  * without touching the DB or an RPC connection. Called on every price tick.
  */
 export function evaluateExit(input: ExitCheckInput): ExitDecision {
-  const pnlPercent = ((input.currentPriceUsd - input.entryPriceUsd) / input.entryPriceUsd) * 100;
+  // A zero/negative entry price means it's genuinely unknown (never divide by it — that
+  // produces Infinity/NaN, which trivially "beats" any take-profit/stop-loss threshold
+  // and fires an exit that has nothing to do with real price movement). Treat it as 0%
+  // PnL instead: neither TP nor SL can fire off a made-up number, while trailing-stop
+  // (which only compares currentPriceUsd against its own high-water mark, not entry)
+  // is unaffected and keeps working.
+  const pnlPercent =
+    input.entryPriceUsd > 0
+      ? ((input.currentPriceUsd - input.entryPriceUsd) / input.entryPriceUsd) * 100
+      : 0;
 
   const newHighWaterMarkUsd = Math.max(input.highWaterMarkUsd, input.currentPriceUsd);
 

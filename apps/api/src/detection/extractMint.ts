@@ -1,3 +1,5 @@
+import { SOL_MINT } from '../solana/jupiter.js';
+
 export interface TokenBalanceLike {
   mint: string;
 }
@@ -8,6 +10,14 @@ export interface ParsedTxLike {
     postTokenBalances?: TokenBalanceLike[] | null;
   } | null;
 }
+
+// Wrapped SOL can legitimately show up as a "new" token balance in a create tx
+// (e.g. a freshly-created wSOL account used internally for routing/fees) without
+// ever being the token that was actually launched — SOL already exists, a pump.fun
+// `create` can't mint more of it. Verified live: this resolved a real detection to
+// SOL_MINT, which then made AutoTrader try to auto-buy SOL with SOL and fail on
+// Jupiter's own "circular arbitrage" guard.
+const NEVER_THE_LAUNCHED_MINT = new Set([SOL_MINT]);
 
 /**
  * Resolves the newly-created mint out of a pump.fun `create` transaction.
@@ -27,8 +37,8 @@ export function extractMintFromParsedTx(tx: ParsedTxLike): string | undefined {
   const pre = tx.meta?.preTokenBalances ?? [];
   const post = tx.meta?.postTokenBalances ?? [];
 
-  const preMints = new Set(pre.map((b) => b.mint));
-  const postMints = new Set(post.map((b) => b.mint));
+  const preMints = new Set(pre.map((b) => b.mint).filter((m) => !NEVER_THE_LAUNCHED_MINT.has(m)));
+  const postMints = new Set(post.map((b) => b.mint).filter((m) => !NEVER_THE_LAUNCHED_MINT.has(m)));
 
   const newMints = [...postMints].filter((m) => !preMints.has(m));
   if (newMints.length === 1) return newMints[0];
