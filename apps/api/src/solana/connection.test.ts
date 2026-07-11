@@ -16,7 +16,10 @@ describe('resolveAllRpcEndpoints', () => {
     });
   });
 
-  it('puts QuickNode first (as primary) with Helius as a fallback when both are configured', () => {
+  it('puts Helius first (as primary) with QuickNode as a fallback when both are configured', () => {
+    // Helius is primary — see resolveAllRpcEndpoints's doc comment: only the
+    // first provider's subscriptions are ever used, so it must be whichever
+    // provider is actually reliable for real-time launch detection.
     const config = {
       heliusApiKey: 'key123',
       quicknodeRpcUrl: 'https://quicknode.example.com',
@@ -24,14 +27,14 @@ describe('resolveAllRpcEndpoints', () => {
     };
     const endpoints = resolveAllRpcEndpoints(config);
     expect(endpoints[0]).toEqual({
-      label: 'quicknode',
-      url: 'https://quicknode.example.com',
-      wsUrl: 'wss://quicknode.example.com',
-    });
-    expect(endpoints[1]).toEqual({
       label: 'helius',
       url: resolveRpcUrl(config),
       wsUrl: resolveWsUrl(config),
+    });
+    expect(endpoints[1]).toEqual({
+      label: 'quicknode',
+      url: 'https://quicknode.example.com',
+      wsUrl: 'wss://quicknode.example.com',
     });
   });
 
@@ -46,7 +49,7 @@ describe('resolveAllRpcEndpoints', () => {
     expect(endpoints.map((e) => e.url)).toContain('https://custom-rpc.example.com');
   });
 
-  it('includes QuickNode, Chainstack, and comma-separated ADDITIONAL_RPC_URLS when configured, QuickNode first', () => {
+  it('includes QuickNode, Chainstack, and comma-separated ADDITIONAL_RPC_URLS when configured, Helius first', () => {
     const endpoints = resolveAllRpcEndpoints({
       heliusApiKey: 'key123',
       quicknodeRpcUrl: 'https://quicknode.example.com',
@@ -54,8 +57,8 @@ describe('resolveAllRpcEndpoints', () => {
       additionalRpcUrls: 'https://a.example.com, https://b.example.com',
     });
     expect(endpoints.map((e) => e.label)).toEqual([
-      'quicknode',
       'helius',
+      'quicknode',
       'chainstack',
       'custom-1',
       'custom-2',

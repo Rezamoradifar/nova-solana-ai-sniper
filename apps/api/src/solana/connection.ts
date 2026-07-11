@@ -41,24 +41,38 @@ export interface RpcEndpoint {
 /**
  * Every configured RPC endpoint, in priority order, deduped by URL — the full
  * pool `wrapWithMultiProviderFailover` load-balances and fails over across.
- * QuickNode first (if configured — the current production endpoint), then
- * Helius as a fallback (if configured), then Chainstack/any ADDITIONAL_RPC_URLS
- * if set, then the raw configured SOLANA_RPC_URL, and always ending with the
- * public mainnet-beta endpoint so there is at least one provider even with zero
- * configuration. Every one of these is optional and no-ops gracefully when
- * unset — same pattern as every other optional integration in this codebase.
+ * Helius first (if configured), then QuickNode (if configured) as a fallback,
+ * then Chainstack/any ADDITIONAL_RPC_URLS if set, then the raw configured
+ * SOLANA_RPC_URL, and always ending with the public mainnet-beta endpoint so
+ * there is at least one provider even with zero configuration. Every one of
+ * these is optional and no-ops gracefully when unset — same pattern as every
+ * other optional integration in this codebase.
+ *
+ * Helius is primary rather than QuickNode (reversed from this pool's original
+ * priority, see git history) because only the first-listed provider's
+ * subscriptions are ever used (see SUBSCRIPTION_METHODS in
+ * resilientConnection.ts — subscriptions can't rotate across providers
+ * without duplicating or orphaning them), so whichever provider is first
+ * silently owns 100% of real-time launch detection with zero failover if it
+ * degrades. Confirmed live 2026-07-11: QuickNode's plan hit its daily request
+ * limit and its WSS started rejecting every subscribe with the same "request
+ * limit reached" error and closing the socket (code 1001) — since it was
+ * primary at the time, this didn't just degrade ordinary RPC calls (those
+ * still failed over fine), it silently killed launch detection entirely,
+ * with zero events reaching any scanner, for hours. Helius was upgraded the
+ * same day specifically to take over as the reliable primary.
  */
 export function resolveAllRpcEndpoints(config: SolanaConfig): RpcEndpoint[] {
   const candidates: RpcEndpoint[] = [];
+  if (config.heliusApiKey) {
+    candidates.push({ label: 'helius', url: resolveRpcUrl(config), wsUrl: resolveWsUrl(config) });
+  }
   if (config.quicknodeRpcUrl) {
     candidates.push({
       label: 'quicknode',
       url: config.quicknodeRpcUrl,
       wsUrl: config.quicknodeWsUrl,
     });
-  }
-  if (config.heliusApiKey) {
-    candidates.push({ label: 'helius', url: resolveRpcUrl(config), wsUrl: resolveWsUrl(config) });
   }
   if (config.chainstackRpcUrl) {
     candidates.push({ label: 'chainstack', url: config.chainstackRpcUrl });

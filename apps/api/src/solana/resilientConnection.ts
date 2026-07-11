@@ -17,6 +17,13 @@ const RETRYABLE_PATTERNS = [
   '502',
   '503',
   '504',
+  // Some providers (e.g. QuickNode's Discover plan) cap getMultipleAccounts
+  // batch size well below the 100-account Solana protocol limit and reject
+  // larger batches with 413 rather than a plain rate-limit error — without
+  // this, that plan-specific cap kills the call outright on the very first
+  // provider instead of rotating to one that supports the full batch size.
+  '413',
+  'request entity too large',
 ];
 
 function isRetryable(err: unknown): boolean {
