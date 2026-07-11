@@ -299,3 +299,127 @@ describe('PositionManager Jito bundle broadcast', () => {
     expect(sendTransaction).toHaveBeenCalledWith(fakeTx);
   });
 });
+
+describe('PositionManager notification content', () => {
+  it('openPosition looks up the token dex and includes it on the BUY notification', async () => {
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
+      getQuote: vi.fn(),
+    } as never;
+    const connection = {
+      sendTransaction: vi.fn().mockResolvedValue('sig123'),
+      confirmTransaction: vi.fn().mockResolvedValue(undefined),
+      getParsedTransaction: vi
+        .fn()
+        .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const dexRegistry = { getExecutor: vi.fn() } as never;
+    const prisma = {
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
+      token: { findUnique: vi.fn().mockResolvedValue({ dex: 'PUMPSWAP' }) },
+    } as never;
+    const notifier = { notifyTrade: vi.fn(), notifyExit: vi.fn() } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      notifier,
+      false,
+      dexRegistry,
+    );
+
+    await manager.openPosition(BASE_PARAMS);
+
+    expect(
+      (notifier as { notifyTrade: ReturnType<typeof vi.fn> }).notifyTrade,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ side: 'BUY', mint: BASE_PARAMS.mint, dex: 'PUMPSWAP' }),
+    );
+  });
+
+  function fakeClosePositionSetup() {
+    const jupiter = {
+      getQuote: vi.fn().mockResolvedValue({ outAmount: '20000000' }),
+    } as never;
+    const connection = {} as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const notifier = { notifyTrade: vi.fn(), notifyExit: vi.fn() } as never;
+    const prisma = {
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: 'position-1',
+          tokenId: 'token-1',
+          entryPriceUsd: 0.001,
+          amountToken: 1000,
+          token: {
+            mint: 'MintAAAA1111111111111111111111111111111111',
+            dex: 'PUMPFUN',
+            symbol: 'FOO',
+          },
+        }),
+        update: vi.fn().mockResolvedValue({ id: 'position-1', status: 'CLOSED' }),
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'sell-trade-1' }) },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      notifier,
+      true, // paper trading — exercises the notification wiring without real swap machinery
+    );
+
+    return {
+      manager,
+      notifier: notifier as {
+        notifyTrade: ReturnType<typeof vi.fn>;
+        notifyExit: ReturnType<typeof vi.fn>;
+      },
+    };
+  }
+
+  it('closePosition always fires a Sell Signal (notifyTrade), even for a manual close with no exit reason', async () => {
+    const { manager, notifier } = fakeClosePositionSetup();
+
+    await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 });
+
+    expect(notifier.notifyTrade).toHaveBeenCalledWith(
+      expect.objectContaining({
+        side: 'SELL',
+        mint: 'MintAAAA1111111111111111111111111111111111',
+        dex: 'PUMPFUN',
+        symbol: 'FOO',
+      }),
+    );
+    // No reason given -- the TP/SL/trailing-specific alert must not fire.
+    expect(notifier.notifyExit).not.toHaveBeenCalled();
+  });
+
+  it('closePosition fires both the Sell Signal and the reason-specific exit alert for an automated close', async () => {
+    const { manager, notifier } = fakeClosePositionSetup();
+
+    await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', {
+      currentPriceUsd: 0.002,
+      reason: 'take_profit',
+    });
+
+    expect(notifier.notifyTrade).toHaveBeenCalledWith(expect.objectContaining({ side: 'SELL' }));
+    expect(notifier.notifyExit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: 'take_profit',
+        mint: 'MintAAAA1111111111111111111111111111111111',
+        dex: 'PUMPFUN',
+      }),
+    );
+  });
+});

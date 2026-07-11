@@ -142,6 +142,9 @@ export class RiskAnalyzer {
       top10HolderPercent: holders.top10HolderPercent,
       isHoneypotSuspected,
       liquidityUsd,
+      name: pair?.baseToken?.name,
+      symbol: pair?.baseToken?.symbol,
+      marketCapUsd: pair?.marketCap,
     };
   }
 

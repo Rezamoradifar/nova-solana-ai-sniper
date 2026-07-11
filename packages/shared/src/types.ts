@@ -17,6 +17,12 @@ export interface RiskFlags {
   top10HolderPercent: number;
   isHoneypotSuspected: boolean;
   liquidityUsd: number;
+  // Sourced straight from the DexScreener pair RiskAnalyzer already fetches for
+  // liquidity — no extra network call. Absent when no pair was found yet (e.g. a
+  // brand-new pump.fun bonding-curve token DexScreener hasn't indexed).
+  name?: string;
+  symbol?: string;
+  marketCapUsd?: number;
 }
 
 export interface AiScore {

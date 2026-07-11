@@ -366,10 +366,19 @@ export class PositionManager {
     eventBus.publish('trade.created', { tradeId: trade.id, side: 'BUY', mint: params.mint });
     eventBus.publish('position.updated', { positionId: position.id, status: 'OPEN' });
 
+    // dex is notification-only enrichment (for the DEX name + buy link) — a single
+    // indexed PK lookup, never gates or affects the trade itself, which has already
+    // fully executed above.
+    const token = await this.prisma.token.findUnique({
+      where: { id: params.tokenId },
+      select: { dex: true },
+    });
+
     await this.notifier?.notifyTrade({
       side: 'BUY',
       symbol: params.symbol ?? params.mint.slice(0, 8),
       mint: params.mint,
+      dex: token?.dex,
       amountSol: params.amountSol,
       priceUsd: entryPriceUsd || undefined,
       signature,
@@ -515,11 +524,28 @@ export class PositionManager {
       realizedPnlUsd,
     });
 
+    // Sell Signal: fires for every real sell regardless of what triggered it. This is
+    // additional to the TP/SL/trailing-specific alert below, not a replacement for
+    // it — before this, a manual close (exit.reason undefined) had no alert path at
+    // all, since notifyExit only ever fired when a reason was set.
+    await this.notifier?.notifyTrade({
+      side: 'SELL',
+      symbol: position.token.symbol ?? position.token.mint.slice(0, 8),
+      mint: position.token.mint,
+      dex: position.token.dex,
+      amountSol: outAmountLamports / LAMPORTS_PER_SOL,
+      priceUsd: exit.currentPriceUsd || undefined,
+      signature,
+      isPaperTrade: this.paperTrading,
+    });
+
     if (exit.reason) {
       const pnlPercent =
         ((exit.currentPriceUsd - position.entryPriceUsd) / position.entryPriceUsd) * 100;
       await this.notifier?.notifyExit({
         symbol: position.token.symbol ?? position.token.mint.slice(0, 8),
+        mint: position.token.mint,
+        dex: position.token.dex,
         reason: exit.reason,
         pnlPercent,
         pnlUsd: realizedPnlUsd,
