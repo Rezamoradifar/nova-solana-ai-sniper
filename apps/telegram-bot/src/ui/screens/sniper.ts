@@ -1,9 +1,17 @@
 import { InlineKeyboard } from 'grammy';
+import { MAX_SNIPE_CONFIGS_PER_USER } from '@nova/shared';
 import { withNav } from '../keyboards.js';
 import { sol } from '../format.js';
 import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
 
 const DEFAULT_BUY_AMOUNT_SOL = 0.1;
+
+// Telegram rejects a sendMessage whose text exceeds 4096 chars outright — cap how
+// many config lines this screen ever renders so a user who's at (or, for pre-cap
+// rows created before MAX_SNIPE_CONFIGS_PER_USER existed, well above) the limit
+// never gets a hard "message is too long" failure that locks them out of the
+// screen entirely.
+const MAX_RENDERED_CONFIG_LINES = 20;
 
 function formatConfig(c: {
   buyAmountSol: number;
@@ -30,12 +38,18 @@ export async function renderSniperStart(deps: ScreenDeps, user: ScreenUser): Pro
       'No snipe config yet.\n\nQuick-start creates a default auto-buy config you can fine-tune later in Settings.';
     keyboard.text('➕ Quick Start (0.1 SOL)', 'a:sniper:quickstart');
   } else {
-    text += configs.map(formatConfig).join('\n');
+    const shown = configs.slice(0, MAX_RENDERED_CONFIG_LINES);
+    text += shown.map(formatConfig).join('\n');
+    if (configs.length > shown.length) {
+      text += `\n… and ${configs.length - shown.length} more (contact support to clean these up).`;
+    }
     const anyPaused = configs.some((c) => !c.isActive);
     if (anyPaused) {
       keyboard.text('▶️ Resume All', 'a:sniper:resumeall').row();
     }
-    keyboard.text('➕ Add Another Config (0.1 SOL)', 'a:sniper:quickstart');
+    if (configs.length < MAX_SNIPE_CONFIGS_PER_USER) {
+      keyboard.text('➕ Add Another Config (0.1 SOL)', 'a:sniper:quickstart');
+    }
   }
 
   return { text, keyboard: withNav(keyboard, 'home') };
@@ -63,6 +77,14 @@ export async function renderSniperStop(deps: ScreenDeps, user: ScreenUser): Prom
 }
 
 export async function handleQuickStart(deps: ScreenDeps, user: ScreenUser): Promise<ScreenResult> {
+  // Defense in depth: renderSniperStart already hides this button at the cap, but
+  // an old Telegram message (or a double-tap already in flight) can still replay
+  // this callback, so re-check server-side rather than trusting the button state.
+  const existingCount = await deps.prisma.snipeConfig.count({ where: { userId: user.id } });
+  if (existingCount >= MAX_SNIPE_CONFIGS_PER_USER) {
+    return renderSniperStart(deps, user);
+  }
+
   await deps.prisma.snipeConfig.create({
     data: {
       userId: user.id,

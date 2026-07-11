@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { MAX_SNIPE_CONFIGS_PER_USER } from '@nova/shared';
 
 const createSchema = z.object({
   tokenId: z.string().optional(),
@@ -20,6 +21,14 @@ export default async function snipeRoutes(fastify: FastifyInstance) {
 
   fastify.post('/snipes', { preHandler: fastify.authenticate }, async (req, reply) => {
     const body = createSchema.parse(req.body);
+    const existingCount = await fastify.prisma.snipeConfig.count({
+      where: { userId: req.user.userId },
+    });
+    if (existingCount >= MAX_SNIPE_CONFIGS_PER_USER) {
+      return reply
+        .code(409)
+        .send({ error: `Maximum of ${MAX_SNIPE_CONFIGS_PER_USER} snipe configs per user` });
+    }
     const config = await fastify.prisma.snipeConfig.create({
       data: { ...body, userId: req.user.userId },
     });

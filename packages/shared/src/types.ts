@@ -1,5 +1,16 @@
 export type Dex = 'pumpfun' | 'raydium' | 'orca' | 'jupiter' | 'pumpswap' | 'meteora';
 
+/**
+ * Hard ceiling on SnipeConfigs a single user can hold, enforced at every creation
+ * path (apps/telegram-bot's Quick Start button and apps/api's POST /snipes route).
+ * Confirmed live 2026-07-11: with no cap, repeated taps of "Add Another Config"
+ * over one day left a user with 75 duplicate configs, which then made the
+ * Telegram sniper_start screen permanently fail with "message is too long" (over
+ * Telegram's 4096-char limit) — see renderSniperStart in
+ * apps/telegram-bot/src/ui/screens/sniper.ts.
+ */
+export const MAX_SNIPE_CONFIGS_PER_USER = 5;
+
 export interface TokenInfo {
   mint: string;
   symbol?: string;
