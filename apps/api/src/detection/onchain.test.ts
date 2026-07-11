@@ -29,12 +29,12 @@ describe('getHolderConcentration', () => {
           fakeAccount(HOLDER_1, '50'),
         ],
       }),
-      getTokenSupply: vi.fn().mockResolvedValue({ value: { amount: '1000' } }),
     };
 
     const result = await getHolderConcentration(
       connection as never,
       '8Jexwtd8Py1g2bkjhQXPXoSztf5WEBAHvdLb7gUmpump',
+      1000n,
       [VAULT_A, VAULT_B],
     );
 
@@ -48,12 +48,12 @@ describe('getHolderConcentration', () => {
       getTokenLargestAccounts: vi.fn().mockResolvedValue({
         value: [fakeAccount(WHALE, '900'), fakeAccount(HOLDER_1, '100')],
       }),
-      getTokenSupply: vi.fn().mockResolvedValue({ value: { amount: '1000' } }),
     };
 
     const result = await getHolderConcentration(
       connection as never,
       '8Jexwtd8Py1g2bkjhQXPXoSztf5WEBAHvdLb7gUmpump',
+      1000n,
     );
 
     expect(result.top10HolderPercent).toBe(100);
@@ -63,12 +63,12 @@ describe('getHolderConcentration', () => {
   it('returns zero rather than dividing by zero when total supply is 0', async () => {
     const connection = {
       getTokenLargestAccounts: vi.fn().mockResolvedValue({ value: [] }),
-      getTokenSupply: vi.fn().mockResolvedValue({ value: { amount: '0' } }),
     };
 
     const result = await getHolderConcentration(
       connection as never,
       '8Jexwtd8Py1g2bkjhQXPXoSztf5WEBAHvdLb7gUmpump',
+      0n,
     );
 
     expect(result).toEqual({ top10HolderPercent: 0, holderCount: 0 });

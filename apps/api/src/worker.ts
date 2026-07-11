@@ -151,6 +151,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     positionManager,
     logger: app.log as never,
     encryptionKey: app.config.ENCRYPTION_KEY,
+    entryFilterGloballyEnabled: app.config.ENTRY_FILTER_ENABLED,
   });
 
   // Drives TP/SL/trailing-stop: without this loop those fields are just stored

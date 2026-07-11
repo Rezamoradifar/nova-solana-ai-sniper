@@ -46,6 +46,17 @@ export const envSchema = z.object({
   // apps/api/src/trading/safety.ts) and is toggled via the /killswitch admin command.
   KILL_SWITCH: booleanFlag(false),
 
+  // Master switches for the staged profitability improvements — each defaults
+  // to false (today's behavior, unchanged) and is a second layer on top of the
+  // per-SnipeConfig opt-in fields (entryFilterEnabled, dynamicSizingEnabled,
+  // etc): both this flag AND the per-user config must opt in before any new
+  // logic runs. Lets an operator dark-launch or kill a whole stage instantly,
+  // without a redeploy, independent of what any individual user has configured.
+  ENTRY_FILTER_ENABLED: booleanFlag(false),
+  DYNAMIC_SIZING_ENABLED: booleanFlag(false),
+  PARTIAL_EXITS_ENABLED: booleanFlag(false),
+  BEST_ROUTE_EXECUTION_ENABLED: booleanFlag(false),
+
   // Auth / secrets
   JWT_SECRET: z.string().min(16),
   ENCRYPTION_KEY: z.string().min(32),

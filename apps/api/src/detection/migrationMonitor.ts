@@ -40,6 +40,32 @@ export interface MigrationMonitorDeps {
 // unbounded as the platform's all-time token count grows.
 const MAX_TOKEN_AGE_MS = 72 * 60 * 60 * 1000;
 
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * Per-token re-check cooldown, tiered by token age. Live production tracks 4000+
+ * pump.fun tokens within the 72h window at once — re-scanning every one of them
+ * every tick (previously: unconditional, ~80 RPC calls/min from this loop alone,
+ * regardless of trading activity) was the single largest sustained Helius credit
+ * drain in the system. Migration happens quickly relative to a token's lifetime
+ * (see class doc comment), so a token is most likely to graduate soon after
+ * launch — tokens under an hour old are checked every tick (cooldown 0); older,
+ * increasingly unlikely-to-migrate tokens are checked less and less often.
+ */
+const COOLDOWN_TIERS: ReadonlyArray<{ maxAgeMs: number; cooldownMs: number }> = [
+  { maxAgeMs: ONE_HOUR_MS, cooldownMs: 0 },
+  { maxAgeMs: 6 * ONE_HOUR_MS, cooldownMs: 5 * 60 * 1000 },
+  { maxAgeMs: 24 * ONE_HOUR_MS, cooldownMs: 15 * 60 * 1000 },
+  { maxAgeMs: Infinity, cooldownMs: 30 * 60 * 1000 },
+];
+
+const OLDEST_TIER_COOLDOWN_MS = COOLDOWN_TIERS[COOLDOWN_TIERS.length - 1]?.cooldownMs ?? 0;
+
+function cooldownForAgeMs(ageMs: number): number {
+  const tier = COOLDOWN_TIERS.find((t) => ageMs < t.maxAgeMs);
+  return tier ? tier.cooldownMs : OLDEST_TIER_COOLDOWN_MS;
+}
+
 /**
  * Polls every recently-seen pump.fun token's bonding curve account for its `complete`
  * flag — the ground-truth on-chain migration signal (verified against live mainnet
@@ -56,6 +82,10 @@ const MAX_TOKEN_AGE_MS = 72 * 60 * 60 * 1000;
 export class MigrationMonitor {
   private timer: ReturnType<typeof setInterval> | undefined;
   private ticking = false;
+  /** In-memory only — a restart re-checking everything once is harmless and
+   * simpler than persisting this. Pruned each tick to the current candidate set
+   * so it can't grow unbounded or outlive a token leaving the tracked window. */
+  private readonly lastCheckedAt = new Map<string, number>();
 
   constructor(private readonly deps: MigrationMonitorDeps) {}
 
@@ -75,6 +105,22 @@ export class MigrationMonitor {
         where: { dex: 'PUMPFUN', createdAt: { gt: new Date(Date.now() - MAX_TOKEN_AGE_MS) } },
       });
 
+      // Prune tokens that fell out of the tracked window (migrated, or aged past
+      // MAX_TOKEN_AGE_MS) so this map can't grow unbounded.
+      const candidateMints = new Set(candidates.map((t) => t.mint));
+      for (const mint of this.lastCheckedAt.keys()) {
+        if (!candidateMints.has(mint)) this.lastCheckedAt.delete(mint);
+      }
+
+      const now = Date.now();
+      const due = candidates.filter((token) => {
+        const last = this.lastCheckedAt.get(token.mint);
+        if (last === undefined) return true;
+        const ageMs = token.createdAt ? now - new Date(token.createdAt).getTime() : 0;
+        return now - last >= cooldownForAgeMs(ageMs);
+      });
+      if (due.length === 0) return;
+
       // Batched: one getMultipleAccountsInfo round trip per 100 tokens instead of
       // one getAccountInfo round trip per token. With thousands of tokens tracked
       // at once, the old per-token loop was thousands of serial RPC calls every
@@ -83,13 +129,14 @@ export class MigrationMonitor {
       // (still per-token, but now rare) DexScreener lookup + notify below.
       const states = await getBondingCurveStates(
         this.deps.connection,
-        candidates.map((t) => t.mint),
+        due.map((t) => t.mint),
       ).catch((err: unknown) => {
         this.deps.logger.error({ err }, 'batched bonding curve read failed during migration tick');
         return new Map<string, BondingCurveState>();
       });
 
-      for (const token of candidates) {
+      for (const token of due) {
+        this.lastCheckedAt.set(token.mint, now);
         const state = states.get(token.mint);
         if (!state || !state.complete) continue;
         await this.finishMigration(token.id, token.mint).catch((err) => {

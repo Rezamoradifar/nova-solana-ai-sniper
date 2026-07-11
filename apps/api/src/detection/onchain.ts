@@ -31,6 +31,11 @@ export interface HolderConcentration {
  * (capped at 20 by the RPC itself). Good enough as a rug-risk signal without
  * needing a full indexer.
  *
+ * `totalSupplyRaw` is the mint's raw total supply — callers already fetch this
+ * via `getMintAuthorityInfo`'s `getMint()` call (same on-chain mint account
+ * `getTokenSupply` would otherwise re-read), so it's threaded in here instead
+ * of this function issuing its own redundant `getTokenSupply` RPC call.
+ *
  * `excludeAddresses` filters out known non-holder accounts (an AMM pool's own
  * token vaults, or the pump.fun bonding curve's vault pre-migration) before
  * ranking the top 10 — without this, the pool/curve itself is usually the
@@ -42,13 +47,13 @@ export interface HolderConcentration {
 export async function getHolderConcentration(
   connection: Connection,
   mint: string,
+  totalSupplyRaw: bigint,
   excludeAddresses: string[] = [],
 ): Promise<HolderConcentration> {
   const mintPubkey = new PublicKey(mint);
   const largest = await connection.getTokenLargestAccounts(mintPubkey);
-  const supply = await connection.getTokenSupply(mintPubkey);
 
-  const totalSupply = Number(supply.value.amount);
+  const totalSupply = Number(totalSupplyRaw);
   if (totalSupply === 0) {
     return { top10HolderPercent: 0, holderCount: 0 };
   }

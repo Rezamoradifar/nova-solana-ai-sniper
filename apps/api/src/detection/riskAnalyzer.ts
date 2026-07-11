@@ -9,7 +9,8 @@ import {
   estimateBondingCurveLiquidityUsd,
   getBondingCurveState,
   getBondingCurveVaultAta,
-  SolPriceOracle,
+  sharedSolPriceOracle,
+  type SolPriceOracle,
 } from '../solana/pumpfunBondingCurve.js';
 import type { DexRegistry } from '../solana/dex/registry.js';
 
@@ -60,6 +61,33 @@ export function resolveLiquidityUsd(candidates: {
   return { liquidityUsd: 0, source: 'unavailable' };
 }
 
+export interface RecentActivity {
+  recentBuys?: number;
+  recentSells?: number;
+  recentVolumeUsd?: number;
+}
+
+/**
+ * Picks the shortest DexScreener txns/volume window that actually has any
+ * activity (m5, falling back to h1) — a brand-new token's h1/h24 windows are
+ * sparse or all-zero in its first few minutes, so they're not a useful entry
+ * signal; m5 is, when it has anything in it at all. Pure and independently
+ * tested so this fallback can't silently regress, same pattern as
+ * resolveLiquidityUsd.
+ */
+export function resolveRecentActivity(pair: DexScreenerPair | undefined): RecentActivity {
+  if (!pair) return {};
+  const m5 = pair.txns?.m5;
+  const m5HasActivity = (m5?.buys ?? 0) + (m5?.sells ?? 0) > 0;
+  const window = m5HasActivity ? m5 : pair.txns?.h1;
+  const volumeUsd = m5HasActivity ? pair.volume?.m5 : pair.volume?.h1;
+  return {
+    recentBuys: window?.buys,
+    recentSells: window?.sells,
+    recentVolumeUsd: volumeUsd,
+  };
+}
+
 /**
  * Rough constant-product liquidity estimate from a swap quote's price impact:
  * for a small probe trade, impact fraction ~= probeAmount / poolReserve, so
@@ -81,12 +109,21 @@ export function estimateLiquidityFromPriceImpact(
 
 const JUPITER_PROBE_AMOUNT_SOL = 0.5;
 
+/** A launch is sometimes reported by more than one detection source in quick
+ * succession (e.g. a pump.fun `create` log plus a near-simultaneous DEX
+ * pool-creation event for the same mint) — this dedupes the full ~7-10-call
+ * analysis for the same (mint, dex, poolAddress) tuple within the window. */
+const RISK_RESULT_TTL_MS = 60_000;
+/** Lazily swept once the cache grows past this size, rather than on a timer. */
+const RISK_RESULT_CACHE_SWEEP_THRESHOLD = 2000;
+
 /**
  * Rule-based rug/honeypot heuristics, independent of the AI score. This runs
  * fast and cheap so it can gate auto-buy before an AI call is even made.
  */
 export class RiskAnalyzer {
-  private readonly solPriceOracle = new SolPriceOracle();
+  private readonly solPriceOracle: SolPriceOracle = sharedSolPriceOracle;
+  private readonly resultCache = new Map<string, { result: RiskFlags; expiresAt: number }>();
 
   constructor(
     private readonly connection: Connection,
@@ -98,23 +135,65 @@ export class RiskAnalyzer {
   ) {}
 
   async analyze(input: RiskAnalysisInput): Promise<RiskFlags> {
+    const cacheKey = `${input.mint}|${input.dex ?? ''}|${input.poolAddress ?? ''}`;
+    const cached = this.resultCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.result;
+
+    const result = await this.analyzeUncached(input);
+
+    if (this.resultCache.size >= RISK_RESULT_CACHE_SWEEP_THRESHOLD) {
+      const now = Date.now();
+      for (const [key, entry] of this.resultCache) {
+        if (entry.expiresAt <= now) this.resultCache.delete(key);
+      }
+    }
+    this.resultCache.set(cacheKey, { result, expiresAt: Date.now() + RISK_RESULT_TTL_MS });
+
+    return result;
+  }
+
+  private async analyzeUncached(input: RiskAnalysisInput): Promise<RiskFlags> {
     const excludeAddresses = await this.resolveExcludedVaultAddresses(
       input.mint,
       input.dex,
       input.poolAddress,
     );
 
-    const [mintAuthority, holders, pair] = await Promise.all([
-      getMintAuthorityInfo(this.connection, input.mint).catch(() => ({
+    // mintAuthority is resolved first (not in the Promise.all below) because its
+    // `supply` field is exactly the total-supply figure getHolderConcentration
+    // needs — threading it through means holders no longer issues its own
+    // redundant getTokenSupply RPC call for the same mint account. Net effect:
+    // same critical-path latency as before (holders' own getTokenLargestAccounts
+    // call already ran after its getTokenSupply call, sequentially, so this just
+    // reorders which sequential pair runs first) but one fewer RPC call overall.
+    let mintAuthorityFetchFailed = false;
+    const mintAuthority = await getMintAuthorityInfo(this.connection, input.mint).catch(() => {
+      mintAuthorityFetchFailed = true;
+      return {
         mintAuthorityRevoked: false,
         freezeAuthorityRevoked: false,
         decimals: 9,
         supply: 0n,
-      })),
-      getHolderConcentration(this.connection, input.mint, excludeAddresses).catch(() => ({
-        top10HolderPercent: 100,
-        holderCount: 0,
-      })),
+      };
+    });
+
+    // If mintAuthority itself failed to fetch, its 0n supply fallback is not a
+    // real total supply — computing holder concentration against it would read
+    // as "0% concentrated" (looks safe) rather than "unknown" (should look
+    // risky), inverting the fail-conservative fallback below. Skip the call
+    // entirely in that case rather than let it run on bogus input.
+    const [holders, pair] = await Promise.all([
+      mintAuthorityFetchFailed
+        ? Promise.resolve({ top10HolderPercent: 100, holderCount: 0 })
+        : getHolderConcentration(
+            this.connection,
+            input.mint,
+            mintAuthority.supply,
+            excludeAddresses,
+          ).catch(() => ({
+            top10HolderPercent: 100,
+            holderCount: 0,
+          })),
       this.dexScreener.getBestSolanaPair(input.mint).catch((err: unknown) => {
         this.logger.debug({ mint: input.mint, err }, 'dexscreener lookup failed');
         return undefined;
@@ -123,11 +202,22 @@ export class RiskAnalyzer {
 
     this.logger.debug({ mint: input.mint, dexScreenerPair: pair }, 'raw dexscreener response');
 
+    // A token that's already disqualified by the cheap, always-fetched checks
+    // above (mint/freeze authority not revoked, or wallet-concentration already
+    // past the honeypot line) will be isHoneypotSuspected regardless of exactly
+    // what liquidity figure resolves — so it's not worth spending a live Jupiter
+    // quote (tryJupiterLiquidityEstimate, the most expensive fallback tier) just
+    // to refine a number nobody will act on differently. See resolveLiquidity's
+    // `skipJupiterEstimate` param.
+    const cheapSignalsAlreadyDisqualify =
+      !mintAuthority.mintAuthorityRevoked || holders.top10HolderPercent > 70;
+
     const { liquidityUsd, source } = await this.resolveLiquidity(
       input.mint,
       pair,
       input.dex,
       input.poolAddress,
+      cheapSignalsAlreadyDisqualify,
     );
 
     this.logger.info(
@@ -141,6 +231,8 @@ export class RiskAnalyzer {
 
     const isHoneypotSuspected =
       !mintAuthority.mintAuthorityRevoked || holders.top10HolderPercent > 70 || liquidityUsd < 500;
+
+    const recentActivity = resolveRecentActivity(pair);
 
     return {
       mintAuthorityRevoked: mintAuthority.mintAuthorityRevoked,
@@ -156,6 +248,8 @@ export class RiskAnalyzer {
       priceChangeH24: pair?.priceChange?.h24,
       holderCount: holders.holderCount,
       imageUrl: pair?.info?.imageUrl,
+      liquiditySource: source,
+      ...recentActivity,
     };
   }
 
@@ -165,6 +259,7 @@ export class RiskAnalyzer {
     pair: DexScreenerPair | undefined,
     dex: Dex | undefined,
     poolAddress: string | undefined,
+    skipJupiterEstimate: boolean,
   ): Promise<LiquidityResolution> {
     const dexScreenerLiquidityUsd = pair?.liquidity?.usd;
     if (dexScreenerLiquidityUsd !== undefined) {
@@ -196,7 +291,9 @@ export class RiskAnalyzer {
       });
     }
 
-    const jupiterEstimateLiquidityUsd = await this.tryJupiterLiquidityEstimate(mint);
+    const jupiterEstimateLiquidityUsd = skipJupiterEstimate
+      ? undefined
+      : await this.tryJupiterLiquidityEstimate(mint);
     return resolveLiquidityUsd({
       dexScreenerLiquidityUsd: undefined,
       nativeDexLiquidityUsd: undefined,

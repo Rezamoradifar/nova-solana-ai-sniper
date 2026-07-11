@@ -2,7 +2,7 @@ import type { Connection, ParsedTransactionWithMeta } from '@solana/web3.js';
 import { PublicKey } from '@solana/web3.js';
 import type { Logger } from '@nova/shared';
 import type { Dex } from '@prisma/client';
-import { SolPriceOracle } from '../pumpfunBondingCurve.js';
+import { SolPriceOracle, sharedSolPriceOracle } from '../pumpfunBondingCurve.js';
 import type { DexScreenerClient } from '../dexscreener.js';
 import {
   PUMPSWAP_PROGRAM_ID,
@@ -75,7 +75,7 @@ export class DexRegistry {
   readonly monitors: ReadonlyMap<NativeDex, DexMonitor>;
   private readonly liquidityReaders: ReadonlyMap<NativeDex, LiquidityReader>;
   private readonly executors: ReadonlyMap<NativeDex, NativeDexExecutor>;
-  private readonly solPriceOracle = new SolPriceOracle();
+  private readonly solPriceOracle: SolPriceOracle = sharedSolPriceOracle;
 
   constructor(
     private readonly connection: Connection,

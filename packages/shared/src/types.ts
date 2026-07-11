@@ -33,6 +33,19 @@ export interface RiskFlags {
   holderCount?: number;
   // DexScreener's own pair.info.imageUrl — the token logo for trade cards.
   imageUrl?: string;
+  // Real DexScreener txns/volume data, from the shortest window with any signal
+  // (m5, falling back to h1) — a brand-new token has zero/sparse h1/h24 activity
+  // in its first minutes, so those longer windows aren't useful at entry time.
+  // Undefined when DexScreener has no pair yet (same as the fields above).
+  recentBuys?: number;
+  recentSells?: number;
+  recentVolumeUsd?: number;
+  // Which fallback tier resolved liquidityUsd (see riskAnalyzer.ts's
+  // resolveLiquidityUsd) — used by entryFilter.ts to gate on confidence, not
+  // just the number itself. Same string values as apps/api's LiquiditySource;
+  // duplicated here (not imported) to keep this package app-agnostic.
+  liquiditySource?:
+    'dexscreener' | 'native_dex' | 'pumpfun_bonding_curve' | 'jupiter_estimate' | 'unavailable';
 }
 
 /** Optional exit strategy — see apps/api/src/trading/adaptiveTrailingStop.ts. */

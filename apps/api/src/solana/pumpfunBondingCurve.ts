@@ -162,3 +162,12 @@ export class SolPriceOracle {
     return undefined;
   }
 }
+
+/**
+ * Shared singleton, not a `new SolPriceOracle()` per consumer. RiskAnalyzer,
+ * DexRegistry, and PositionManager each used to construct their own instance,
+ * which defeated this class's own stated purpose (see its doc comment) — the
+ * same SOL/USD price ended up fetched independently up to 3x within the same
+ * 30s window instead of once.
+ */
+export const sharedSolPriceOracle = new SolPriceOracle();

@@ -69,4 +69,38 @@ describe('scoreToken', () => {
     const generateText = vi.fn().mockRejectedValue(new Error('network unreachable'));
     await expect(scoreToken(fakeProvider(generateText), TOKEN, RISK_FLAGS)).resolves.toBeDefined();
   });
+
+  it('includes the richer real signals (holder count, price change, buy/sell activity, liquidity confidence) in the prompt when present', async () => {
+    const generateText = vi
+      .fn()
+      .mockResolvedValue(JSON.stringify({ score: 70, summary: 'ok', flags: [] }));
+    const richFlags: RiskFlags = {
+      ...RISK_FLAGS,
+      holderCount: 42,
+      liquiditySource: 'dexscreener',
+      priceChangeH1: 12.5,
+      priceChangeH24: -3.2,
+      recentBuys: 10,
+      recentSells: 4,
+      recentVolumeUsd: 2500,
+    };
+    await scoreToken(fakeProvider(generateText), TOKEN, richFlags);
+
+    const prompt = generateText.mock.calls[0]![0] as string;
+    expect(prompt).toContain('42');
+    expect(prompt).toContain('dexscreener');
+    expect(prompt).toContain('12.5');
+    expect(prompt).toContain('10');
+    expect(prompt).toContain('2500');
+  });
+
+  it('does not crash when the newer optional fields are absent (older/minimal RiskFlags)', async () => {
+    const generateText = vi
+      .fn()
+      .mockResolvedValue(JSON.stringify({ score: 50, summary: 'ok', flags: [] }));
+    await expect(scoreToken(fakeProvider(generateText), TOKEN, RISK_FLAGS)).resolves.toMatchObject({
+      score: 50,
+    });
+    expect(generateText.mock.calls[0]![0]).toContain('unknown');
+  });
 });

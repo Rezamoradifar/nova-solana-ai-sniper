@@ -1,3 +1,8 @@
+export interface DexScreenerTxnCounts {
+  buys: number;
+  sells: number;
+}
+
 export interface DexScreenerPair {
   chainId: string;
   dexId: string;
@@ -9,8 +14,17 @@ export interface DexScreenerPair {
   fdv?: number;
   marketCap?: number;
   pairCreatedAt?: number;
-  volume?: { h24?: number; h6?: number; h1?: number };
+  volume?: { h24?: number; h6?: number; h1?: number; m5?: number };
   priceChange?: { h24?: number; h1?: number };
+  /** Buy/sell transaction counts per window — a brand-new token typically only
+   * has a real signal in the shortest window (m5); h1/h24 are sparse/zero in
+   * its first minutes. See entryFilter.ts's buy/sell-ratio check. */
+  txns?: {
+    m5?: DexScreenerTxnCounts;
+    h1?: DexScreenerTxnCounts;
+    h6?: DexScreenerTxnCounts;
+    h24?: DexScreenerTxnCounts;
+  };
   info?: { imageUrl?: string };
 }
 

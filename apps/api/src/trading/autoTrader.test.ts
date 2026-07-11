@@ -12,6 +12,7 @@ const RISK_FLAGS = {
   top10HolderPercent: 40,
   isHoneypotSuspected: false,
   liquidityUsd: 50_000,
+  liquiditySource: 'dexscreener' as const,
 };
 
 function fakeConfig(overrides: Partial<Record<string, unknown>> = {}) {
@@ -26,12 +27,17 @@ function fakeConfig(overrides: Partial<Record<string, unknown>> = {}) {
     stopLossPercent: 20,
     trailingStopPercent: 10,
     trailingStopPreset: null,
+    entryFilterEnabled: false,
+    minBuySellRatio: 0,
+    minHolderCount: 0,
+    minRecentVolumeUsd: 0,
+    maxTop10HolderPercent: 100,
     user: { wallets: [{ id: 'wallet-1', publicKey: 'Pubkey1', encryptedSecret: 'enc' }] },
     ...overrides,
   };
 }
 
-function setup(config: ReturnType<typeof fakeConfig>) {
+function setup(config: ReturnType<typeof fakeConfig>, entryFilterGloballyEnabled = false) {
   const openPosition = vi.fn().mockResolvedValue({ trade: {}, position: {} });
   const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([config]) } } as never;
   const positionManager = { openPosition } as never;
@@ -41,6 +47,7 @@ function setup(config: ReturnType<typeof fakeConfig>) {
     positionManager,
     logger: fakeLogger(),
     encryptionKey: 'key',
+    entryFilterGloballyEnabled,
   });
   return { trader, openPosition };
 }
@@ -102,5 +109,49 @@ describe('AutoTrader — trailing-stop preset wiring (optional exit strategy)', 
         trailingStopPercent: 10,
       }),
     );
+  });
+});
+
+describe('AutoTrader — Smart Entry Filter (opt-in, additive gate)', () => {
+  it('never blocks when the global flag is off, even if a config has opted in and would otherwise fail', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ entryFilterEnabled: true, maxTop10HolderPercent: 10 }),
+      false,
+    );
+
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(openPosition).toHaveBeenCalled();
+  });
+
+  it('never blocks when the config itself has not opted in, even if the global flag is on', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ entryFilterEnabled: false, maxTop10HolderPercent: 10 }),
+      true,
+    );
+
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(openPosition).toHaveBeenCalled();
+  });
+
+  it('blocks and skips the buy when both are opted in and a signal fails a configured threshold', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ entryFilterEnabled: true, maxTop10HolderPercent: 10 }),
+      true,
+    );
+
+    const results = await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(openPosition).not.toHaveBeenCalled();
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'entry_filter_blocked' }]);
+  });
+
+  it('allows the buy through when both are opted in and every signal passes', async () => {
+    const { trader, openPosition } = setup(fakeConfig({ entryFilterEnabled: true }), true);
+
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(openPosition).toHaveBeenCalled();
   });
 });

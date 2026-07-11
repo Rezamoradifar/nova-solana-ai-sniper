@@ -200,6 +200,18 @@ model SnipeConfig {
   autoBuyOnLaunch     Boolean  @default(false)
   createdAt           DateTime @default(now())
 
+  // Smart Entry Filter (apps/api/src/trading/entryFilter.ts) — opt-in, per
+  // config. Defaults reproduce today's behavior exactly (disabled, and every
+  // threshold at a value that would never add an extra rejection if somehow
+  // evaluated anyway) — enabling this is a deliberate per-user choice, not a
+  // silent global behavior change on deploy. Also gated by the global
+  // ENTRY_FILTER_ENABLED env flag (see config/env.ts).
+  entryFilterEnabled     Boolean @default(false)
+  minBuySellRatio        Float   @default(0)
+  minHolderCount         Int     @default(0)
+  minRecentVolumeUsd     Float   @default(0)
+  maxTop10HolderPercent  Float   @default(100)
+
   @@index([userId])
   @@map("snipe_configs")
 }

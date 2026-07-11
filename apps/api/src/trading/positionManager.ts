@@ -7,7 +7,7 @@ import { unsealKeypair, type Logger } from '@nova/shared';
 import type { NotificationService } from '@nova/telegram-bot';
 import { JupiterClient, SOL_MINT } from '../solana/jupiter.js';
 import type { DexScreenerClient } from '../solana/dexscreener.js';
-import { SolPriceOracle } from '../solana/pumpfunBondingCurve.js';
+import { sharedSolPriceOracle, type SolPriceOracle } from '../solana/pumpfunBondingCurve.js';
 import type { DexRegistry } from '../solana/dex/registry.js';
 import { JitoClient } from '../solana/jito.js';
 import { evaluateExit, type ExitReason } from './exitEngine.js';
@@ -120,7 +120,7 @@ function paperSignature(): string {
 }
 
 export class PositionManager {
-  private readonly solPriceOracle = new SolPriceOracle();
+  private readonly solPriceOracle: SolPriceOracle = sharedSolPriceOracle;
 
   /**
    * Guards against re-submitting a brand-new swap for a position/wallet+token

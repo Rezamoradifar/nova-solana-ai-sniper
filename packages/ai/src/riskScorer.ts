@@ -11,15 +11,22 @@ export async function scoreToken(
   token: TokenInfo,
   riskFlags: RiskFlags,
 ): Promise<AiScore> {
+  // Every field below was already computed by RiskAnalyzer for other purposes
+  // (liquidity resolution, trade cards, entryFilter.ts) and simply wasn't being
+  // shown to the model before — no new data collection, just a fuller prompt.
   const prompt = `Token: ${token.symbol ?? token.mint}
 Mint: ${token.mint}
-DEX: ${token.dex}
+DEX (current venue, migrated off pump.fun if not "pumpfun"): ${token.dex}
 Mint authority revoked: ${riskFlags.mintAuthorityRevoked}
 Freeze authority revoked: ${riskFlags.freezeAuthorityRevoked}
 LP burned/locked: ${riskFlags.lpBurnedOrLocked}
 Top 10 holder %: ${riskFlags.top10HolderPercent.toFixed(2)}
-Liquidity USD: ${riskFlags.liquidityUsd}
-Honeypot suspected (rule-based): ${riskFlags.isHoneypotSuspected}`;
+Holder count (top-20 accounts sampled, not a true total): ${riskFlags.holderCount ?? 'unknown'}
+Liquidity USD: ${riskFlags.liquidityUsd} (confidence: ${riskFlags.liquiditySource ?? 'unknown'})
+Honeypot suspected (rule-based): ${riskFlags.isHoneypotSuspected}
+Price change 1h/24h: ${riskFlags.priceChangeH1 ?? 'unknown'}% / ${riskFlags.priceChangeH24 ?? 'unknown'}%
+Recent buys/sells (shortest window with activity): ${riskFlags.recentBuys ?? 'unknown'} / ${riskFlags.recentSells ?? 'unknown'}
+Recent volume USD: ${riskFlags.recentVolumeUsd ?? 'unknown'}`;
 
   // A provider failure (timeout, rate limit, auth/API error) must fail closed to
   // score 0 just like an unparseable response below, never throw uncaught. This

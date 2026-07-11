@@ -4,6 +4,7 @@ import type { RiskFlags } from '@nova/shared';
 import { RiskAnalyzer } from '../detection/riskAnalyzer.js';
 import type { PositionManager } from './positionManager.js';
 import { SafetyCheckError } from './safety.js';
+import { evaluateEntry } from './entryFilter.js';
 import {
   resolvePresetExitParams,
   TRAILING_STOP_PRESETS,
@@ -29,6 +30,10 @@ export interface AutoTraderDeps {
   positionManager: PositionManager;
   logger: Logger;
   encryptionKey: string;
+  /** Master switch (ENTRY_FILTER_ENABLED) — a config's own entryFilterEnabled
+   * still must ALSO be true; both must opt in. Defaults to false (unchanged
+   * behavior) so existing deployments need an explicit env change to activate. */
+  entryFilterGloballyEnabled?: boolean;
 }
 
 /**
@@ -92,6 +97,38 @@ export class AutoTrader {
         results.push({ userId: config.userId, bought: false, reason: 'score_below_threshold' });
         continue;
       }
+
+      const entryDecision = evaluateEntry(
+        {
+          liquidityUsd: riskFlags.liquidityUsd,
+          liquiditySource: riskFlags.liquiditySource ?? 'unavailable',
+          top10HolderPercent: riskFlags.top10HolderPercent,
+          holderCount: riskFlags.holderCount,
+          mintAuthorityRevoked: riskFlags.mintAuthorityRevoked,
+          freezeAuthorityRevoked: riskFlags.freezeAuthorityRevoked,
+          lpBurnedOrLocked: riskFlags.lpBurnedOrLocked,
+          isHoneypotSuspected: riskFlags.isHoneypotSuspected,
+          recentBuys: riskFlags.recentBuys,
+          recentSells: riskFlags.recentSells,
+          recentVolumeUsd: riskFlags.recentVolumeUsd,
+        },
+        {
+          enabled: Boolean(this.deps.entryFilterGloballyEnabled) && config.entryFilterEnabled,
+          minBuySellRatio: config.minBuySellRatio,
+          minHolderCount: config.minHolderCount,
+          minRecentVolumeUsd: config.minRecentVolumeUsd,
+          maxTop10HolderPercent: config.maxTop10HolderPercent,
+        },
+      );
+      if (!entryDecision.allowed) {
+        this.deps.logger.debug(
+          { mint, userId: config.userId, reasons: entryDecision.reasons },
+          'Smart Entry Filter: rejected — skipping',
+        );
+        results.push({ userId: config.userId, bought: false, reason: 'entry_filter_blocked' });
+        continue;
+      }
+
       const wallet = config.user.wallets[0];
       if (!wallet) {
         this.deps.logger.debug(
