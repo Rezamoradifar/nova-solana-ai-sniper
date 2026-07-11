@@ -28,6 +28,11 @@ export interface RiskFlags {
   // DexScreener itself already reports.
   priceChangeH1?: number;
   priceChangeH24?: number;
+  // From getHolderConcentration (onchain.ts) — count of non-zero accounts among
+  // Solana's top-20-largest-accounts read, not a true total holder count.
+  holderCount?: number;
+  // DexScreener's own pair.info.imageUrl — the token logo for trade cards.
+  imageUrl?: string;
 }
 
 /** Optional exit strategy — see apps/api/src/trading/adaptiveTrailingStop.ts. */

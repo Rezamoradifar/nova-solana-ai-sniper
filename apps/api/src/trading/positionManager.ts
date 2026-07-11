@@ -110,6 +110,8 @@ export interface OpenPositionParams {
   trailingStopPercent?: number;
   /** Optional exit strategy — see adaptiveTrailingStop.ts. Frozen onto the Position at open time. */
   trailingStopPreset?: string;
+  /** Display-only, for the BUY trade card — the score that actually gated this buy. */
+  aiScore?: number;
 }
 
 /** A random-looking signature so paper trades are visually distinct from real (base58) ones. */
@@ -378,13 +380,10 @@ export class PositionManager {
     eventBus.publish('trade.created', { tradeId: trade.id, side: 'BUY', mint: params.mint });
     eventBus.publish('position.updated', { positionId: position.id, status: 'OPEN' });
 
-    // dex is notification-only enrichment (for the DEX name + buy link) — a single
+    // Notification-only enrichment (DEX name/buy link/trade card) — a single
     // indexed PK lookup, never gates or affects the trade itself, which has already
     // fully executed above.
-    const token = await this.prisma.token.findUnique({
-      where: { id: params.tokenId },
-      select: { dex: true },
-    });
+    const token = await this.prisma.token.findUnique({ where: { id: params.tokenId } });
 
     this.logger.debug(
       { positionId: position.id, hasNotifier: !!this.notifier },
@@ -400,6 +399,43 @@ export class PositionManager {
       signature,
       isPaperTrade: this.paperTrading,
     });
+
+    if (token) {
+      // Best-effort fresh momentum for the card — never blocks/risks the trade
+      // above, which has already fully executed; a failed lookup just omits it.
+      const freshPair = await this.dexScreener
+        .getBestSolanaPair(params.mint)
+        .catch(() => undefined);
+      await this.notifier?.notifyBuyCard({
+        token: {
+          mint: params.mint,
+          name: token.name ?? undefined,
+          symbol: token.symbol ?? params.symbol,
+          dex: token.dex,
+          imageUrl: token.imageUrl ?? undefined,
+          marketCapUsd: token.marketCapUsd ?? undefined,
+          liquidityUsd: token.liquidityUsd ?? undefined,
+          aiScore: params.aiScore ?? token.aiScore ?? undefined,
+          holderCount: token.holderCount ?? undefined,
+          priceChangeH1: freshPair?.priceChange?.h1,
+          isHoneypotSuspected: token.isHoneypotSuspected ?? undefined,
+          mintAuthorityRevoked: token.mintAuthorityRevoked ?? undefined,
+          freezeAuthorityRevoked: token.freezeAuthorityRevoked ?? undefined,
+          lpBurnedOrLocked: token.lpBurnedOrLocked ?? undefined,
+          top10HolderPercent: token.top10HolderPercent ?? undefined,
+        },
+        entryPriceUsd,
+        amountSol: params.amountSol,
+        estimatedUsdValue:
+          entryPriceUsd > 0
+            ? entryPriceUsd * (Number(outAmount) / 10 ** token.decimals)
+            : undefined,
+        walletPublicKey: params.walletPublicKey,
+        positionId: position.id,
+        signature,
+        timestamp: new Date(),
+      });
+    }
 
     return { trade, position };
   }
@@ -518,7 +554,15 @@ export class PositionManager {
       soldAmountToken = Number(sellAmountRaw);
     }
 
-    const realizedPnlUsd = (exit.currentPriceUsd - position.entryPriceUsd) * position.amountToken;
+    // position.amountToken is the RAW on-chain integer amount (e.g. 32678849019 for
+    // a 9-decimal token) — must be decimal-adjusted before multiplying by a USD
+    // price delta, exactly like computeTrailingStopDisplay's currentProfitUsd does.
+    // Live-verified failure: an un-adjusted calc here produced a phantom
+    // -$395,414.07 "loss" on a real ~-$0.04 close, which then tripped the daily
+    // loss safety limit and blocked every subsequent trade for the rest of the day.
+    const realizedPnlUsd =
+      (exit.currentPriceUsd - position.entryPriceUsd) *
+      (position.amountToken / 10 ** position.token.decimals);
 
     const sellTrade = await this.prisma.trade.create({
       data: {
@@ -602,6 +646,89 @@ export class PositionManager {
         athUsd: display.athUsd,
         lockedProfitPercent: display.lockedProfitPercent,
       });
+    }
+
+    // The sell already landed and the position is already CLOSED above — everything
+    // from here on is purely a notification/share-caption side effect. Wrapped in
+    // its own try/catch so a DB hiccup here (e.g. the best-effort buy-trade lookup)
+    // can never surface as a "close failed" error for a trade that in fact succeeded.
+    try {
+      if (this.notifier) {
+        // No Trade->Position FK exists (extend-only scope, not a schema
+        // rearchitecture) — best-effort match: the most recent BUY trade for this
+        // wallet+token. Correct for the common case (one open position per token,
+        // matching this app's own MAX_OPEN_POSITIONS usage); ambiguous only if the
+        // same wallet held multiple concurrent/rapid positions in the same token.
+        const buyTrade = await this.prisma.trade.findFirst({
+          where: { walletId, tokenId: position.tokenId, side: 'BUY' },
+          orderBy: { createdAt: 'desc' },
+        });
+        const holdingTimeMs =
+          (updated.closedAt ?? new Date()).getTime() - position.createdAt.getTime();
+        const pnlPercentForCard =
+          ((exit.currentPriceUsd - position.entryPriceUsd) / position.entryPriceUsd) * 100;
+        const displayForCard = computeTrailingStopDisplay({
+          entryPriceUsd: position.entryPriceUsd,
+          currentPriceUsd: exit.currentPriceUsd,
+          highWaterMarkUsd: position.highWaterMarkUsd ?? position.entryPriceUsd,
+          amountToken: position.amountToken,
+          tokenDecimals: position.token.decimals,
+          trailingStopPercent: position.trailingStopPercent,
+        });
+        const cardCaption = await this.notifier.notifySellCard({
+          token: {
+            mint: position.token.mint,
+            name: position.token.name ?? undefined,
+            symbol: position.token.symbol ?? undefined,
+            dex: position.token.dex,
+            imageUrl: position.token.imageUrl ?? undefined,
+            marketCapUsd: position.token.marketCapUsd ?? undefined,
+            liquidityUsd: position.token.liquidityUsd ?? undefined,
+            aiScore: position.token.aiScore ?? undefined,
+            holderCount: position.token.holderCount ?? undefined,
+            isHoneypotSuspected: position.token.isHoneypotSuspected ?? undefined,
+            mintAuthorityRevoked: position.token.mintAuthorityRevoked ?? undefined,
+            freezeAuthorityRevoked: position.token.freezeAuthorityRevoked ?? undefined,
+            lpBurnedOrLocked: position.token.lpBurnedOrLocked ?? undefined,
+            top10HolderPercent: position.token.top10HolderPercent ?? undefined,
+          },
+          entryPriceUsd: position.entryPriceUsd,
+          exitPriceUsd: exit.currentPriceUsd,
+          buyAmountSol: position.amountSolInvested,
+          sellAmountSol: outAmountLamports / LAMPORTS_PER_SOL,
+          profitSol: outAmountLamports / LAMPORTS_PER_SOL - position.amountSolInvested,
+          profitUsd: realizedPnlUsd,
+          roiPercent:
+            position.amountSolInvested > 0
+              ? ((outAmountLamports / LAMPORTS_PER_SOL - position.amountSolInvested) /
+                  position.amountSolInvested) *
+                100
+              : 0,
+          pnlPercent: pnlPercentForCard,
+          holdingTimeMs,
+          exitReason: exit.reason ?? 'manual',
+          highestProfitPercent: displayForCard.highestProfitPercent,
+          lockedProfitPercent: displayForCard.lockedProfitPercent,
+          walletPublicKey:
+            (
+              await this.prisma.wallet.findUnique({
+                where: { id: walletId },
+                select: { publicKey: true },
+              })
+            )?.publicKey ?? walletId,
+          positionId,
+          buySignature: buyTrade?.txSignature ?? '—',
+          sellSignature: signature,
+        });
+        if (cardCaption) {
+          await this.prisma.position.update({
+            where: { id: positionId },
+            data: { shareCaption: cardCaption },
+          });
+        }
+      }
+    } catch (err) {
+      this.logger.error({ err, positionId }, 'failed to build/send SELL trade card');
     }
 
     return { closed: true as const, position: updated, signature };

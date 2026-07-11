@@ -320,7 +320,12 @@ describe('PositionManager notification content', () => {
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn().mockResolvedValue({ dex: 'PUMPSWAP' }) },
     } as never;
-    const notifier = { notifyTrade: vi.fn(), notifyExit: vi.fn() } as never;
+    const notifier = {
+      notifyTrade: vi.fn(),
+      notifyExit: vi.fn(),
+      notifyBuyCard: vi.fn(),
+      notifySellCard: vi.fn(),
+    } as never;
 
     const manager = new PositionManager(
       prisma,
@@ -343,29 +348,111 @@ describe('PositionManager notification content', () => {
     );
   });
 
+  it("openPosition sends a BUY trade card once the token row is available, carrying the caller's aiScore", async () => {
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
+      getQuote: vi.fn(),
+    } as never;
+    const connection = {
+      sendTransaction: vi.fn().mockResolvedValue('sig123'),
+      confirmTransaction: vi.fn().mockResolvedValue(undefined),
+      getParsedTransaction: vi
+        .fn()
+        .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const dexRegistry = { getExecutor: vi.fn() } as never;
+    const prisma = {
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
+      token: {
+        findUnique: vi.fn().mockResolvedValue({
+          dex: 'PUMPSWAP',
+          decimals: 9,
+          mint: BASE_PARAMS.mint,
+          name: 'Rage Guy',
+          symbol: 'RAGEGUY',
+          aiScore: 40,
+        }),
+      },
+    } as never;
+    const notifier = {
+      notifyTrade: vi.fn(),
+      notifyExit: vi.fn(),
+      notifyBuyCard: vi.fn(),
+      notifySellCard: vi.fn(),
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      notifier,
+      false,
+      dexRegistry,
+    );
+
+    await manager.openPosition({ ...BASE_PARAMS, aiScore: 91 });
+
+    expect(
+      (notifier as { notifyBuyCard: ReturnType<typeof vi.fn> }).notifyBuyCard,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        positionId: 'position-1',
+        entryPriceUsd: expect.any(Number),
+        token: expect.objectContaining({ mint: BASE_PARAMS.mint, dex: 'PUMPSWAP', aiScore: 91 }),
+      }),
+    );
+  });
+
   function fakeClosePositionSetup() {
     const jupiter = {
       getQuote: vi.fn().mockResolvedValue({ outAmount: '20000000' }),
     } as never;
     const connection = {} as never;
     const dexScreener = { getBestSolanaPair: vi.fn() } as never;
-    const notifier = { notifyTrade: vi.fn(), notifyExit: vi.fn() } as never;
+    const notifier = {
+      notifyTrade: vi.fn(),
+      notifyExit: vi.fn(),
+      notifyBuyCard: vi.fn(),
+      notifySellCard: vi.fn().mockResolvedValue('the share caption'),
+    } as never;
+    const positionUpdate = vi.fn().mockResolvedValue({ id: 'position-1', status: 'CLOSED' });
     const prisma = {
       position: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
           id: 'position-1',
           tokenId: 'token-1',
+          walletId: 'wallet-1',
           entryPriceUsd: 0.001,
           amountToken: 1000,
+          amountSolInvested: 0.01,
+          highWaterMarkUsd: 0.001,
+          trailingStopPercent: null,
+          closedAt: null,
+          createdAt: new Date('2026-07-10T00:00:00Z'),
           token: {
             mint: 'MintAAAA1111111111111111111111111111111111',
             dex: 'PUMPFUN',
             symbol: 'FOO',
+            name: 'Foo',
+            decimals: 9,
           },
         }),
-        update: vi.fn().mockResolvedValue({ id: 'position-1', status: 'CLOSED' }),
+        update: positionUpdate,
       },
-      trade: { create: vi.fn().mockResolvedValue({ id: 'sell-trade-1' }) },
+      trade: {
+        create: vi.fn().mockResolvedValue({ id: 'sell-trade-1' }),
+        findFirst: vi.fn().mockResolvedValue({ txSignature: 'buy-sig-1' }),
+      },
+      wallet: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ publicKey: 'WalletPubkey1111111111111111111111111111' }),
+      },
     } as never;
 
     const manager = new PositionManager(
@@ -384,7 +471,10 @@ describe('PositionManager notification content', () => {
       notifier: notifier as {
         notifyTrade: ReturnType<typeof vi.fn>;
         notifyExit: ReturnType<typeof vi.fn>;
+        notifyBuyCard: ReturnType<typeof vi.fn>;
+        notifySellCard: ReturnType<typeof vi.fn>;
       },
+      positionUpdate,
     };
   }
 
@@ -421,5 +511,96 @@ describe('PositionManager notification content', () => {
         dex: 'PUMPFUN',
       }),
     );
+  });
+
+  it('closePosition sends a SELL trade card carrying the matched BUY signature, and persists the returned share caption', async () => {
+    const { manager, notifier, positionUpdate } = fakeClosePositionSetup();
+
+    await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', {
+      currentPriceUsd: 0.002,
+      reason: 'take_profit',
+    });
+
+    expect(notifier.notifySellCard).toHaveBeenCalledWith(
+      expect.objectContaining({
+        positionId: 'position-1',
+        buySignature: 'buy-sig-1',
+        sellSignature: expect.any(String),
+        exitReason: 'take_profit',
+        token: expect.objectContaining({ mint: 'MintAAAA1111111111111111111111111111111111' }),
+      }),
+    );
+    expect(positionUpdate).toHaveBeenCalledWith({
+      where: { id: 'position-1' },
+      data: { shareCaption: 'the share caption' },
+    });
+  });
+
+  it('regression: realizedPnlUsd (and therefore the sell card and Position.realizedPnlUsd) is decimal-adjusted, not raw-amountToken', async () => {
+    // Live-verified production incident: closing a real position computed
+    // realizedPnlUsd from the RAW on-chain integer token amount instead of the
+    // decimal-adjusted count, producing a phantom -$395,414.07 "loss" on a real
+    // ~-$0.04 close. Position.realizedPnlUsd feeds TradingSafety's daily-loss
+    // check directly (see safety.ts dailyRealizedPnlUsd), so this single bad
+    // write tripped the daily loss limit and blocked every subsequent trade for
+    // the rest of the day — a genuine, not just cosmetic, production bug.
+    const { manager, notifier, positionUpdate } = fakeClosePositionSetup();
+
+    await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', {
+      currentPriceUsd: 0.002,
+      reason: 'take_profit',
+    });
+
+    // Mock position: entryPriceUsd 0.001, amountToken 1000 (raw), decimals 9 ->
+    // real token count 0.000001 -> correct realizedPnlUsd = (0.002-0.001)*0.000001.
+    const expected = 0.000000001;
+    const statusUpdateCall = positionUpdate.mock.calls.find(
+      (c) => (c[0] as { data: { status?: string } }).data.status === 'CLOSED',
+    )!;
+    expect(
+      (statusUpdateCall[0] as { data: { realizedPnlUsd: number } }).data.realizedPnlUsd,
+    ).toBeCloseTo(expected, 12);
+
+    const cardCall = notifier.notifySellCard.mock.calls[0]![0];
+    expect(cardCall.profitUsd).toBeCloseTo(expected, 12);
+    expect(cardCall.profitUsd).toBeLessThan(0.01); // sanity bound against the raw-amount bug (~1)
+  });
+
+  it('closePosition maps an undefined exit reason to "manual" on the sell card', async () => {
+    const { manager, notifier } = fakeClosePositionSetup();
+
+    await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 });
+
+    expect(notifier.notifySellCard).toHaveBeenCalledWith(
+      expect.objectContaining({ exitReason: 'manual' }),
+    );
+  });
+
+  it('closePosition never persists a share caption when notifySellCard returns undefined', async () => {
+    const { manager, notifier, positionUpdate } = fakeClosePositionSetup();
+    notifier.notifySellCard.mockResolvedValueOnce(undefined);
+
+    await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 });
+
+    expect(positionUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ shareCaption: expect.anything() }),
+      }),
+    );
+  });
+
+  it('closePosition still reports success (already-executed sell is never undone) even if the card/DB lookups throw', async () => {
+    const { manager, notifier } = fakeClosePositionSetup();
+    (
+      manager as unknown as { prisma: { trade: { findFirst: ReturnType<typeof vi.fn> } } }
+    ).prisma.trade.findFirst = vi.fn().mockRejectedValue(new Error('db blip'));
+
+    const result = await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', {
+      currentPriceUsd: 0.002,
+      reason: 'take_profit',
+    });
+
+    expect(result.closed).toBe(true);
+    expect(notifier.notifySellCard).not.toHaveBeenCalled();
   });
 });

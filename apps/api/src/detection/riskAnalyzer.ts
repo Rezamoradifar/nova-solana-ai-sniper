@@ -147,6 +147,8 @@ export class RiskAnalyzer {
       marketCapUsd: pair?.marketCap,
       priceChangeH1: pair?.priceChange?.h1,
       priceChangeH24: pair?.priceChange?.h24,
+      holderCount: holders.holderCount,
+      imageUrl: pair?.info?.imageUrl,
     };
   }
 

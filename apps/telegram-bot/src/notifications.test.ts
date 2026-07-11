@@ -10,6 +10,7 @@ import {
   AI_HIGH_SCORE_THRESHOLD,
   NotificationService,
 } from './notifications.js';
+import type { BuyCardData, SellCardData } from './cards/render.js';
 
 const fakeLogger = { error: vi.fn(), warn: vi.fn(), info: vi.fn() } as unknown as Logger;
 
@@ -117,7 +118,14 @@ function fakePrisma(activeTelegramIds: string[]) {
 
 function fakeBot() {
   const sendMessage = vi.fn().mockResolvedValue(undefined);
-  return { bot: { api: { sendMessage } } as unknown as Bot, sendMessage };
+  const sendPhoto = vi.fn().mockResolvedValue(undefined);
+  const getMe = vi.fn().mockResolvedValue({ username: 'YourBot' });
+  return {
+    bot: { api: { sendMessage, sendPhoto, getMe } } as unknown as Bot,
+    sendMessage,
+    sendPhoto,
+    getMe,
+  };
 }
 
 describe('NotificationService — sniper alert fan-out (notifyTrade/notifyExit/notifyNewToken)', () => {
@@ -257,5 +265,123 @@ describe('NotificationService — operational alerts stay owner-only', () => {
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(prisma.user.findMany as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+});
+
+function buyCardData(overrides: Partial<BuyCardData> = {}): BuyCardData {
+  return {
+    token: { mint: 'MintABC', name: 'Rage Guy', symbol: 'RAGEGUY', dex: 'PUMPFUN', aiScore: 82 },
+    entryPriceUsd: 0.0000123,
+    amountSol: 0.5,
+    walletPublicKey: 'WalletPubKey1111111111111111111111',
+    positionId: 'pos_123',
+    signature: 'sig_abc123',
+    timestamp: new Date('2026-07-10T12:00:00Z'),
+    ...overrides,
+  };
+}
+
+function sellCardData(overrides: Partial<SellCardData> = {}): SellCardData {
+  return {
+    token: buyCardData().token,
+    entryPriceUsd: 0.0000123,
+    exitPriceUsd: 0.0000246,
+    buyAmountSol: 0.5,
+    sellAmountSol: 1.0,
+    profitSol: 1.84,
+    profitUsd: 250,
+    roiPercent: 245,
+    pnlPercent: 245,
+    holdingTimeMs: 3_600_000,
+    exitReason: 'take_profit',
+    walletPublicKey: 'WalletPubKey1111111111111111111111',
+    positionId: 'pos_123',
+    buySignature: 'buy_sig_abc',
+    sellSignature: 'sell_sig_xyz',
+    ...overrides,
+  };
+}
+
+describe('NotificationService — trade cards (notifyBuyCard/notifySellCard)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('notifyBuyCard sends an identical photo card to the owner and every active user', async () => {
+    const { bot, sendPhoto } = fakeBot();
+    const prisma = fakePrisma(['111', '222']);
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyBuyCard(buyCardData());
+
+    expect(sendPhoto).toHaveBeenCalledTimes(3); // owner + 111 + 222
+    const chatIds = sendPhoto.mock.calls.map((c) => c[0]);
+    expect(new Set(chatIds)).toEqual(new Set(['OWNER_CHAT', '111', '222']));
+    const captions = new Set(sendPhoto.mock.calls.map((c) => c[2].caption));
+    expect(captions.size).toBe(1); // byte-identical caption to every recipient
+    expect([...captions][0]).toContain('Nova Sniper AI');
+  });
+
+  it('notifyBuyCard never throws even when every send fails (e.g. bot blocked everywhere)', async () => {
+    const sendPhoto = vi.fn().mockRejectedValue(new Error('bot was blocked'));
+    const bot = { api: { sendPhoto } } as unknown as Bot;
+    const prisma = fakePrisma([]);
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await expect(service.notifyBuyCard(buyCardData())).resolves.toBeUndefined();
+    expect(fakeLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 'OWNER_CHAT' }),
+      'failed to send telegram trade card',
+    );
+  });
+
+  it('notifySellCard sends an identical photo card to every active user and returns the share caption', async () => {
+    const { bot, sendPhoto } = fakeBot();
+    const prisma = fakePrisma(['111', '222']);
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    const caption = await service.notifySellCard(sellCardData());
+
+    expect(sendPhoto).toHaveBeenCalledTimes(3);
+    expect(caption).toBeDefined();
+    expect(caption).toContain('Trade completed with Nova Sniper AI');
+    expect(caption).toContain('+1.84 SOL');
+    const sentCaptions = new Set(sendPhoto.mock.calls.map((c) => c[2].caption));
+    expect(sentCaptions).toEqual(new Set([caption]));
+  });
+
+  it('notifySellCard returns undefined (and logs) instead of throwing when the bot API fails', async () => {
+    const sendPhoto = vi.fn().mockRejectedValue(new Error('blocked'));
+    const getMe = vi.fn().mockResolvedValue({ username: 'YourBot' });
+    const bot = { api: { sendPhoto, getMe } } as unknown as Bot;
+    const prisma = fakePrisma([]);
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    const caption = await service.notifySellCard(sellCardData());
+
+    // sendPhotoToChat catches per-recipient failures internally, so the overall
+    // call still resolves with the caption rather than failing the whole close.
+    expect(caption).toBeDefined();
+    expect(fakeLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: 'OWNER_CHAT' }),
+      'failed to send telegram trade card',
+    );
+  });
+
+  it('notifyBuyCard/notifySellCard fan out to the same recipient set as the sniper alerts (no separate/duplicate delivery path)', async () => {
+    const { bot, sendPhoto, sendMessage } = fakeBot();
+    const prisma = fakePrisma(['111', '222']);
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyBuyCard(buyCardData());
+    await service.notifyTrade({
+      side: 'BUY',
+      symbol: 'RAGEGUY',
+      mint: 'MintABC',
+      amountSol: 0.5,
+      signature: 'sig',
+    });
+
+    const cardChatIds = new Set(sendPhoto.mock.calls.map((c) => c[0]));
+    const alertChatIds = new Set(sendMessage.mock.calls.map((c) => c[0]));
+    expect(cardChatIds).toEqual(alertChatIds);
   });
 });

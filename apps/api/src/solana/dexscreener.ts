@@ -11,6 +11,7 @@ export interface DexScreenerPair {
   pairCreatedAt?: number;
   volume?: { h24?: number; h6?: number; h1?: number };
   priceChange?: { h24?: number; h1?: number };
+  info?: { imageUrl?: string };
 }
 
 export class DexScreenerClient {

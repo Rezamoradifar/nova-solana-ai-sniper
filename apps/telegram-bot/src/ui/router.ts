@@ -149,6 +149,44 @@ async function handleAction(
   }
 }
 
+/**
+ * Trade-card button taps (`a:card:*`) are handled separately from `handleAction`:
+ * the card itself is a photo message, so `ctx.editMessageText` (used for every
+ * other `s:*`/`a:*` action) fails on it — these always reply with a fresh message.
+ */
+async function handleCardAction(
+  data: string,
+  deps: ScreenDeps,
+  user: ScreenUser,
+  ctx: Context,
+): Promise<void> {
+  // "a:card:<kind>" or "a:card:share:<positionId>"
+  const [kind, positionId] = data.slice('a:card:'.length).split(':');
+  const reply = async (result: ScreenResult) =>
+    ctx.reply(result.text, { parse_mode: 'Markdown', reply_markup: result.keyboard });
+
+  switch (kind) {
+    case 'portfolio':
+      return void (await reply(await renderPortfolio(deps, user)));
+    case 'tradeagain':
+      return void (await reply(await renderSniperStart(deps, user)));
+    case 'share': {
+      const position = positionId
+        ? await deps.prisma.position.findUnique({
+            where: { id: positionId },
+            select: { shareCaption: true, wallet: { select: { userId: true } } },
+          })
+        : null;
+      if (!position || position.wallet.userId !== user.id || !position.shareCaption) {
+        await ctx.reply('⚠️ No share caption available for this trade.');
+        return;
+      }
+      await ctx.reply(position.shareCaption);
+      return;
+    }
+  }
+}
+
 export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
   bot.command('start', async (ctx) => sendWelcomeAndHome(ctx, deps));
 
@@ -267,7 +305,11 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
       const user = await resolveOrCreateUser(deps, ctx);
       let result: ScreenResult | undefined;
 
-      if (data.startsWith('s:')) {
+      if (data.startsWith('a:card:')) {
+        await handleCardAction(data, deps, user, ctx);
+        await ctx.answerCallbackQuery();
+        return;
+      } else if (data.startsWith('s:')) {
         clearPending(ctx.chat!.id);
         result = await renderScreen(data.slice(2) as ScreenId, deps, user, ctx);
       } else if (data.startsWith('a:')) {

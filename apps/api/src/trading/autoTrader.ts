@@ -138,6 +138,7 @@ export class AutoTrader {
           amountSol: config.buyAmountSol,
           slippageBps: config.maxSlippageBps,
           trailingStopPreset: preset,
+          aiScore,
           ...exitParams,
         });
         this.deps.logger.debug(

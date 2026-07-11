@@ -1,6 +1,14 @@
-import type { Api, Bot } from 'grammy';
+import { InputFile, type Api, type Bot, type InlineKeyboard } from 'grammy';
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
+import {
+  renderBuyCardPng,
+  renderSellCardPng,
+  type BuyCardData,
+  type SellCardData,
+} from './cards/render.js';
+import { buildBuyCaption, buildShareCaption } from './cards/captions.js';
+import { buildBuyCardKeyboard, buildSellCardKeyboard } from './cards/keyboards.js';
 
 export interface TradeNotification {
   side: 'BUY' | 'SELL';
@@ -242,6 +250,89 @@ export class NotificationService {
   private async sendToActiveUsers(text: string): Promise<void> {
     const chatIds = await this.activeRecipientChatIds();
     await Promise.all(chatIds.map((chatId) => this.sendToChat(chatId, text)));
+  }
+
+  private async sendPhotoToChat(
+    chatId: string,
+    png: Buffer,
+    caption: string,
+    keyboard: InlineKeyboard,
+  ): Promise<void> {
+    try {
+      await this.bot.api.sendPhoto(chatId, new InputFile(png), {
+        caption,
+        parse_mode: 'Markdown',
+        reply_markup: keyboard,
+      });
+    } catch (err) {
+      this.logger.error({ err, chatId }, 'failed to send telegram trade card');
+    }
+  }
+
+  /** Fans a pre-rendered card photo out to the owner + every currently-active user, identical to each. */
+  private async sendPhotoToActiveUsers(
+    png: Buffer,
+    caption: string,
+    keyboard: InlineKeyboard,
+  ): Promise<void> {
+    const chatIds = await this.activeRecipientChatIds();
+    await Promise.all(
+      chatIds.map((chatId) => this.sendPhotoToChat(chatId, png, caption, keyboard)),
+    );
+  }
+
+  private cachedBotUsername: string | undefined;
+  private async getBotUsername(): Promise<string | undefined> {
+    if (this.cachedBotUsername) return this.cachedBotUsername;
+    try {
+      const me = await this.bot.api.getMe();
+      this.cachedBotUsername = me.username;
+      return me.username;
+    } catch (err) {
+      this.logger.error({ err }, 'failed to resolve bot username for share caption');
+      return undefined;
+    }
+  }
+
+  /**
+   * Institutional-style trade card, generated and sent immediately after every
+   * successful BUY — fans out identically to every active user (see class doc).
+   */
+  async notifyBuyCard(data: BuyCardData): Promise<void> {
+    try {
+      const png = await renderBuyCardPng(data);
+      const caption = buildBuyCaption(data);
+      const keyboard = buildBuyCardKeyboard(data.token.mint);
+      await this.sendPhotoToActiveUsers(png, caption, keyboard);
+    } catch (err) {
+      this.logger.error(
+        { err, positionId: data.positionId },
+        'failed to generate/send BUY trade card',
+      );
+    }
+  }
+
+  /**
+   * Institutional-style trade card, generated and sent after every close (TP/SL/
+   * trailing/manual) — fans out identically to every active user. Returns the
+   * generated share caption (or undefined on failure) so the caller can persist
+   * it onto the Position row for the 🔗 Share button to resend later.
+   */
+  async notifySellCard(data: SellCardData): Promise<string | undefined> {
+    try {
+      const png = await renderSellCardPng(data);
+      const botUsername = await this.getBotUsername();
+      const caption = buildShareCaption(data, botUsername);
+      const keyboard = buildSellCardKeyboard(data.token.mint, data.positionId);
+      await this.sendPhotoToActiveUsers(png, caption, keyboard);
+      return caption;
+    } catch (err) {
+      this.logger.error(
+        { err, positionId: data.positionId },
+        'failed to generate/send SELL trade card',
+      );
+      return undefined;
+    }
   }
 
   async notifyTrade(trade: TradeNotification): Promise<void> {

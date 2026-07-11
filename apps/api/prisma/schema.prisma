@@ -84,9 +84,15 @@ model Token {
   freezeAuthorityRevoked Boolean?
   lpBurnedOrLocked     Boolean?
   top10HolderPercent   Float?
+  // Count of non-zero accounts among Solana's top-20-largest-accounts read (see
+  // getHolderConcentration) — a real signal, but not a true total holder count;
+  // trade cards label it "Top Holders" accordingly, not "Total Holders".
+  holderCount          Int?
   isHoneypotSuspected  Boolean?
   aiScore              Float?
   aiSummary            String?
+  // DexScreener's own pair.info.imageUrl — used for the trade card's token logo.
+  imageUrl             String?
 
   trades    Trade[]
   positions Position[]
@@ -155,6 +161,11 @@ model Position {
   trailingStopPreset   String?
   highWaterMarkUsd     Float?
   realizedPnlUsd       Float?
+  // The exact ready-to-share caption generated for the SELL trade card at close
+  // time — persisted so the 🔗 Share button can resend the identical text anytime
+  // afterward without needing to reconstruct it (and without a Trade->Position
+  // link, which doesn't exist). Null for OPEN positions and any closed before this.
+  shareCaption         String?
   isPaperTrade         Boolean        @default(false)
   closedAt             DateTime?
   createdAt            DateTime       @default(now())

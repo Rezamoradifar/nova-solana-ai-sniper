@@ -230,7 +230,9 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
         freezeAuthorityRevoked: riskFlags.freezeAuthorityRevoked,
         lpBurnedOrLocked: riskFlags.lpBurnedOrLocked,
         top10HolderPercent: riskFlags.top10HolderPercent,
+        holderCount: riskFlags.holderCount,
         isHoneypotSuspected: riskFlags.isHoneypotSuspected,
+        imageUrl: riskFlags.imageUrl,
       },
       update: {
         name: riskFlags.name,
@@ -238,7 +240,9 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
         liquidityUsd: riskFlags.liquidityUsd,
         marketCapUsd: riskFlags.marketCapUsd,
         top10HolderPercent: riskFlags.top10HolderPercent,
+        holderCount: riskFlags.holderCount,
         isHoneypotSuspected: riskFlags.isHoneypotSuspected,
+        imageUrl: riskFlags.imageUrl,
       },
     });
 
