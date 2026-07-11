@@ -7,7 +7,18 @@ function fakeDeps(entries: { action: string; createdAt: Date }[]): ScreenDeps {
   const prisma = {
     auditLog: { findMany: vi.fn().mockResolvedValue(entries) },
   } as unknown as PrismaClient;
-  return { prisma, encryptionKey: 'key', logger: { error: vi.fn() } as never };
+  return {
+    prisma,
+    encryptionKey: 'key',
+    logger: { error: vi.fn() } as never,
+    telegramTrend: {
+      enabled: false,
+      channels: [],
+      minAiScore: 50,
+      pollIntervalMs: 20000,
+      metricsUrl: '',
+    },
+  };
 }
 
 const user = { id: 'user-1' } as User;

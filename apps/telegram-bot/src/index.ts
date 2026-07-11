@@ -36,8 +36,18 @@ async function main() {
     );
   }
 
+  const telegramTrend = {
+    enabled: env.TELEGRAM_TREND_SOURCE_ENABLED,
+    channels: env.TELEGRAM_TREND_CHANNELS.split(',')
+      .map((c) => c.trim())
+      .filter(Boolean),
+    minAiScore: env.TELEGRAM_TREND_MIN_AI_SCORE,
+    pollIntervalMs: env.TELEGRAM_TREND_POLL_INTERVAL_MS,
+    metricsUrl: `http://127.0.0.1:${env.API_PORT}/metrics`,
+  };
+
   registerAdminCommands(bot, prisma, adminIds, logger, redis);
-  registerUiRouter(bot, { prisma, encryptionKey: env.ENCRYPTION_KEY, logger });
+  registerUiRouter(bot, { prisma, encryptionKey: env.ENCRYPTION_KEY, logger, telegramTrend });
 
   await bot.start({
     onStart: () => logger.info('telegram bot started (long polling)'),

@@ -9,6 +9,11 @@ export const botEnvSchema = envSchema.pick({
   TELEGRAM_CHAT_ID: true,
   TELEGRAM_ADMIN_IDS: true,
   ENCRYPTION_KEY: true,
+  API_PORT: true,
+  TELEGRAM_TREND_SOURCE_ENABLED: true,
+  TELEGRAM_TREND_CHANNELS: true,
+  TELEGRAM_TREND_MIN_AI_SCORE: true,
+  TELEGRAM_TREND_POLL_INTERVAL_MS: true,
 });
 
 export function loadBotEnv() {

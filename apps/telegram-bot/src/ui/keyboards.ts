@@ -16,6 +16,11 @@ export const MENU_LABELS = {
   portfolio: '💰 Portfolio',
   referrals: '🔗 Referrals',
   help: '❓ Help',
+  trending: '🚀 Trending',
+  arbitrage: '🚧 Arbitrage',
+  liveOpportunities: '🔥 Live Opportunities',
+  telegramTrends: '📡 Telegram Trends',
+  trendSettings: '⚙️ Trend Settings',
 } as const;
 
 /** Maps each reply-keyboard label to the screen it opens. */
@@ -34,6 +39,11 @@ export const LABEL_TO_SCREEN: Record<string, ScreenId> = {
   [MENU_LABELS.portfolio]: 'portfolio',
   [MENU_LABELS.referrals]: 'referrals',
   [MENU_LABELS.help]: 'help',
+  [MENU_LABELS.trending]: 'trending',
+  [MENU_LABELS.arbitrage]: 'arbitrage',
+  [MENU_LABELS.liveOpportunities]: 'live_opportunities',
+  [MENU_LABELS.telegramTrends]: 'telegram_trends',
+  [MENU_LABELS.trendSettings]: 'trend_settings',
 };
 
 /** The persistent bottom keyboard — always visible, opens screens by label. */
@@ -59,6 +69,14 @@ export function mainMenuKeyboard(): Keyboard {
     .row()
     .text(MENU_LABELS.referrals)
     .text(MENU_LABELS.help)
+    .row()
+    .text(MENU_LABELS.trending)
+    .text(MENU_LABELS.arbitrage)
+    .row()
+    .text(MENU_LABELS.liveOpportunities)
+    .text(MENU_LABELS.telegramTrends)
+    .row()
+    .text(MENU_LABELS.trendSettings)
     .resized();
 }
 
@@ -93,5 +111,13 @@ export function homeGrid(): InlineKeyboard {
     .text(MENU_LABELS.portfolio, 's:portfolio')
     .text(MENU_LABELS.referrals, 's:referrals')
     .row()
-    .text(MENU_LABELS.help, 's:help');
+    .text(MENU_LABELS.help, 's:help')
+    .row()
+    .text(MENU_LABELS.trending, 's:trending')
+    .text(MENU_LABELS.arbitrage, 's:arbitrage')
+    .row()
+    .text(MENU_LABELS.liveOpportunities, 's:live_opportunities')
+    .text(MENU_LABELS.telegramTrends, 's:telegram_trends')
+    .row()
+    .text(MENU_LABELS.trendSettings, 's:trend_settings');
 }

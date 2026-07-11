@@ -47,6 +47,11 @@ import { renderProfile } from './screens/profile.js';
 import { renderPortfolio } from './screens/portfolio.js';
 import { renderReferrals } from './screens/referrals.js';
 import { renderHelp } from './screens/help.js';
+import { renderTrending } from './screens/trending.js';
+import { renderArbitrage } from './screens/arbitrage.js';
+import { renderLiveOpportunities } from './screens/liveOpportunities.js';
+import { renderTelegramTrends } from './screens/telegramTrends.js';
+import { renderTrendSettings } from './screens/trendSettings.js';
 
 async function renderScreen(
   screen: ScreenId,
@@ -83,6 +88,16 @@ async function renderScreen(
       return renderReferrals(deps, user, ctx);
     case 'help':
       return renderHelp(deps, user);
+    case 'trending':
+      return renderTrending(deps, user);
+    case 'arbitrage':
+      return renderArbitrage(deps, user);
+    case 'live_opportunities':
+      return renderLiveOpportunities(deps, user);
+    case 'telegram_trends':
+      return renderTelegramTrends(deps, user);
+    case 'trend_settings':
+      return renderTrendSettings(deps, user);
   }
 }
 

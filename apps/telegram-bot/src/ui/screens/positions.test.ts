@@ -10,7 +10,18 @@ function fakeDeps(open: (Position & { token: Token })[], closedCount = 0): Scree
       count: vi.fn().mockResolvedValue(closedCount),
     },
   } as unknown as PrismaClient;
-  return { prisma, encryptionKey: 'key', logger: { error: vi.fn() } as never };
+  return {
+    prisma,
+    encryptionKey: 'key',
+    logger: { error: vi.fn() } as never,
+    telegramTrend: {
+      enabled: false,
+      channels: [],
+      minAiScore: 50,
+      pollIntervalMs: 20000,
+      metricsUrl: '',
+    },
+  };
 }
 
 const user = { id: 'user-1' } as User;

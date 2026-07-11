@@ -21,7 +21,18 @@ function fakeDeps(configs: ReturnType<typeof makeConfig>[]) {
   const prisma = {
     snipeConfig: { create, count, findMany },
   } as unknown as PrismaClient;
-  const deps = { prisma, encryptionKey: 'key', logger: { error: vi.fn() } as never } as ScreenDeps;
+  const deps = {
+    prisma,
+    encryptionKey: 'key',
+    logger: { error: vi.fn() } as never,
+    telegramTrend: {
+      enabled: false,
+      channels: [],
+      minAiScore: 50,
+      pollIntervalMs: 20000,
+      metricsUrl: '',
+    },
+  } as ScreenDeps;
   return { deps, create, count, findMany };
 }
 
