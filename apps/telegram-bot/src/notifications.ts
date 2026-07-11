@@ -9,6 +9,7 @@ import {
 } from './cards/render.js';
 import { buildBuyCaption, buildShareCaption } from './cards/captions.js';
 import { buildBuyCardKeyboard, buildSellCardKeyboard } from './cards/keyboards.js';
+import { escapeMd } from './ui/format.js';
 
 export interface TradeNotification {
   side: 'BUY' | 'SELL';
@@ -100,9 +101,15 @@ function linksLine(mint: string, dex?: string): string {
  */
 export function formatNewTokenMessage(token: NewTokenNotification): string {
   const riskEmoji = token.isHoneypotSuspected ? '🚨' : '🆕';
+  // token.name/token.symbol are on-chain SPL token metadata — anyone can mint a
+  // token with a "_"/"*"/"`" in its name/symbol, which would otherwise break
+  // Telegram's legacy Markdown parser and silently kill this alert (same bug
+  // class as captions.ts's buildShareCaption and alerts.ts's action labels).
+  const name = token.name ? escapeMd(token.name) : undefined;
+  const symbol = token.symbol ? escapeMd(token.symbol) : undefined;
   const nameLine =
-    token.name || token.symbol
-      ? `\n${token.name ?? ''}${token.name && token.symbol ? ' — ' : ''}${token.symbol ? `$${token.symbol}` : ''}`
+    name || symbol
+      ? `\n${name ?? ''}${name && symbol ? ' — ' : ''}${symbol ? `$${symbol}` : ''}`
       : '';
   const liquidityLine =
     token.liquidityUsd !== undefined ? `\nLiquidity: $${token.liquidityUsd.toFixed(0)}` : '';
@@ -130,7 +137,7 @@ export function formatNewTokenMessage(token: NewTokenNotification): string {
       : '';
   const honeypotLine = token.isHoneypotSuspected ? '\n⚠️ Honeypot/rug risk flagged' : '';
   return (
-    `${riskEmoji} *New ${token.dex} launch*${nameLine}\n` +
+    `${riskEmoji} *New ${escapeMd(token.dex)} launch*${nameLine}\n` +
     `\`${token.mint}\`${liquidityLine}${marketCapLine}${scoreLine}${riskLine}${momentumLine}${honeypotLine}\n` +
     linksLine(token.mint, token.dex)
   );
@@ -146,15 +153,17 @@ export function formatNewTokenMessage(token: NewTokenNotification): string {
 export const AI_HIGH_SCORE_THRESHOLD = 85;
 
 export function formatAiHighScoreMessage(token: AiHighScoreNotification): string {
+  const name = token.name ? escapeMd(token.name) : undefined;
+  const symbol = token.symbol ? escapeMd(token.symbol) : undefined;
   const nameLine =
-    token.name || token.symbol
-      ? ` ${token.name ?? ''}${token.name && token.symbol ? ' — ' : ''}${token.symbol ? `$${token.symbol}` : ''}`
+    name || symbol
+      ? ` ${name ?? ''}${name && symbol ? ' — ' : ''}${symbol ? `$${symbol}` : ''}`
       : '';
   const liquidityLine =
     token.liquidityUsd !== undefined ? `\nLiquidity: $${token.liquidityUsd.toFixed(0)}` : '';
   return (
     `⭐ *AI High Score* (${token.aiScore.toFixed(0)}/100)${nameLine}\n` +
-    `${token.dex}\n` +
+    `${escapeMd(token.dex)}\n` +
     `\`${token.mint}\`${liquidityLine}\n` +
     linksLine(token.mint, token.dex)
   );
@@ -169,7 +178,7 @@ function formatTradeMessage(trade: TradeNotification): string {
     : `\n[Tx](https://solscan.io/tx/${trade.signature})`;
   const linkLine = `\n${linksLine(trade.mint, trade.dex)}`;
   return (
-    `${emoji} *${trade.side}*${paperTag} \`${trade.symbol}\`\n` +
+    `${emoji} *${trade.side}*${paperTag} \`${escapeMd(trade.symbol)}\`\n` +
     `Amount: ${trade.amountSol} SOL${priceLine}${txLine}${linkLine}`
   );
 }
@@ -187,7 +196,7 @@ function formatExitMessage(exit: PositionExitNotification): string {
       : '';
   const linkLine = exit.mint ? `\n${linksLine(exit.mint, exit.dex)}` : '';
   return (
-    `${emoji}${paperTag} Position closed: \`${exit.symbol}\`\n` +
+    `${emoji}${paperTag} Position closed: \`${escapeMd(exit.symbol)}\`\n` +
     `Reason: ${reasonLabel}\n` +
     `PnL: ${exit.pnlPercent.toFixed(2)}%${entryLine}${athLine}${lockedLine}${linkLine}`
   );
@@ -353,12 +362,17 @@ export class NotificationService {
   }
 
   async notifyError(context: string, message: string): Promise<void> {
-    await this.sendToOwner(`🚨 *Error* in ${context}\n${message}`);
+    // `message` is an arbitrary caught error/exception message from anywhere in the
+    // app — stack traces and error text routinely contain "_"/"*"/"`", which would
+    // otherwise break Telegram's legacy Markdown parser and silently swallow the
+    // one alert an operator relies on to notice something is broken.
+    await this.sendToOwner(`🚨 *Error* in ${escapeMd(context)}\n${escapeMd(message)}`);
   }
 
   async notifySocialMention(text: string, tweetId: string): Promise<void> {
     await this.sendToOwner(
-      `🐦 *X mention*\n${text.slice(0, 300)}\n` + `[View](https://x.com/i/web/status/${tweetId})`,
+      `🐦 *X mention*\n${escapeMd(text.slice(0, 300))}\n` +
+        `[View](https://x.com/i/web/status/${tweetId})`,
     );
   }
 
@@ -373,8 +387,8 @@ export class NotificationService {
   async notifyMigration(migration: MigrationNotification): Promise<void> {
     const label = migration.symbol ?? migration.mint.slice(0, 8);
     await this.sendToActiveUsers(
-      `🚀 *Migration detected*: \`${label}\`\n` +
-        `${migration.fromDex} → ${migration.toDex}\n` +
+      `🚀 *Migration detected*: \`${escapeMd(label)}\`\n` +
+        `${escapeMd(migration.fromDex)} → ${escapeMd(migration.toDex)}\n` +
         `${linksLine(migration.mint, migration.toDex)}`,
     );
   }

@@ -31,8 +31,12 @@ function formatPositionSummary(p: Position & { token: Token }): string {
       ? ((trailingStopPriceUsd - p.entryPriceUsd) / p.entryPriceUsd) * 100
       : undefined;
 
+  // trailingStopPreset is an app-controlled enum (see TRAILING_STOP_PRESETS), but
+  // 'meme_coin' itself contains "_" — unescaped, that reliably broke this exact
+  // line's Markdown parsing for every user on the Meme Coin Mode preset.
+  const preset = escapeMd(p.trailingStopPreset ?? '');
   const lines = [
-    `🪙 ${symbol} [${p.trailingStopPreset}] — ${sol(p.amountSolInvested)} invested`,
+    `🪙 ${symbol} [${preset}] — ${sol(p.amountSolInvested)} invested`,
     `Entry: $${p.entryPriceUsd.toFixed(8)} · ATH: $${athUsd.toFixed(8)}`,
     `Highest profit: ${highestProfitPercent.toFixed(2)}%`,
   ];

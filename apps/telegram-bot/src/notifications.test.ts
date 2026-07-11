@@ -87,6 +87,19 @@ describe('formatNewTokenMessage', () => {
     expect(down).toContain('📉');
     expect(down).toContain('-8.2%');
   });
+
+  it('regression: escapes an on-chain token name/symbol containing "_" so Telegram Markdown parsing never breaks', () => {
+    const text = formatNewTokenMessage({
+      mint: 'MintABC',
+      dex: 'PUMPFUN',
+      name: 'Rage_Guy',
+      symbol: 'RAGE_GUY',
+    });
+    expect(text).toContain('Rage\\_Guy');
+    expect(text).toContain('$RAGE\\_GUY');
+    expect(text).not.toContain('Rage_Guy');
+    expect(text).not.toContain('$RAGE_GUY');
+  });
 });
 
 describe('formatAiHighScoreMessage', () => {
@@ -105,6 +118,20 @@ describe('formatAiHighScoreMessage', () => {
     expect(text).toContain('MintABC');
     expect(text).toContain('Liquidity: $50000');
     expect(text).toContain('[Buy](https://pump.fun/coin/MintABC)');
+  });
+
+  it('regression: escapes an on-chain token name/symbol containing "_" so Telegram Markdown parsing never breaks', () => {
+    const text = formatAiHighScoreMessage({
+      mint: 'MintABC',
+      dex: 'PUMPFUN',
+      name: 'Rage_Guy',
+      symbol: 'RAGE_GUY',
+      aiScore: 90,
+    });
+    expect(text).toContain('Rage\\_Guy');
+    expect(text).toContain('$RAGE\\_GUY');
+    expect(text).not.toContain('Rage_Guy');
+    expect(text).not.toContain('$RAGE_GUY');
   });
 });
 
@@ -239,6 +266,53 @@ describe('NotificationService — sniper alert fan-out (notifyTrade/notifyExit/n
     const chatIds = sendMessage.mock.calls.map((c) => c[0]);
     expect(new Set(chatIds)).toEqual(new Set(['OWNER_CHAT', '111', '222']));
   });
+
+  it('regression: notifyTrade escapes a symbol containing "_" so Telegram Markdown parsing never breaks', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = fakePrisma([]);
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyTrade({
+      side: 'BUY',
+      symbol: 'RAGE_GUY',
+      mint: 'MintABC',
+      amountSol: 0.1,
+      signature: 'sig',
+    });
+
+    const text = sendMessage.mock.calls[0]![1] as string;
+    expect(text).toContain('RAGE\\_GUY');
+    expect(text).not.toContain('`RAGE_GUY`');
+  });
+
+  it('regression: notifyExit escapes a symbol containing "_" so Telegram Markdown parsing never breaks', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = fakePrisma([]);
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyExit({ symbol: 'RAGE_GUY', reason: 'stop_loss', pnlPercent: -5 });
+
+    const text = sendMessage.mock.calls[0]![1] as string;
+    expect(text).toContain('RAGE\\_GUY');
+    expect(text).not.toContain('`RAGE_GUY`');
+  });
+
+  it('regression: notifyMigration escapes a symbol containing "_" so Telegram Markdown parsing never breaks', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = fakePrisma([]);
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyMigration({
+      mint: 'MintABC',
+      symbol: 'RAGE_GUY',
+      fromDex: 'PUMPFUN',
+      toDex: 'PUMPSWAP',
+    });
+
+    const text = sendMessage.mock.calls[0]![1] as string;
+    expect(text).toContain('RAGE\\_GUY');
+    expect(text).not.toContain('`RAGE_GUY`');
+  });
 });
 
 describe('NotificationService — operational alerts stay owner-only', () => {
@@ -265,6 +339,31 @@ describe('NotificationService — operational alerts stay owner-only', () => {
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(prisma.user.findMany as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it('regression: notifyError escapes an arbitrary caught error message so a "_" never breaks the one alert an operator relies on', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = { user: { findMany: vi.fn() } } as unknown as PrismaClient;
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyError('worker', 'admin.snipe_paused_for_safety threw unexpected_error');
+
+    const text = sendMessage.mock.calls[0]![1] as string;
+    expect(text).toContain('admin.snipe\\_paused\\_for\\_safety');
+    expect(text).toContain('unexpected\\_error');
+    expect(text).not.toContain('snipe_paused');
+  });
+
+  it('regression: notifySocialMention escapes raw tweet text so a "_" never breaks the alert', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = { user: { findMany: vi.fn() } } as unknown as PrismaClient;
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifySocialMention('gm to_the_moon anon', 'tweet-1');
+
+    const text = sendMessage.mock.calls[0]![1] as string;
+    expect(text).toContain('to\\_the\\_moon');
+    expect(text).not.toContain('to_the_moon');
   });
 });
 

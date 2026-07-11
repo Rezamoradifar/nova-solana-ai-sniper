@@ -1,6 +1,7 @@
 import type { Bot } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { Logger } from '@nova/shared';
+import { escapeMd } from '../ui/format.js';
 
 export interface PublishablePost {
   id: string;
@@ -33,7 +34,10 @@ export async function publishPost(
   post: PublishablePost,
   logger: Logger,
 ): Promise<void> {
-  const caption = `*${post.title}*\n\n${post.body}`;
+  // title/body are AI-generated marketing copy, not literal Markdown source — a
+  // stray "_"/"*"/"`" (e.g. "50%_off") would otherwise break Telegram's legacy
+  // Markdown parser and fail the whole scheduled post.
+  const caption = `*${escapeMd(post.title)}*\n\n${escapeMd(post.body)}`;
   const keyboard = buildKeyboard(post.buttons);
 
   try {
