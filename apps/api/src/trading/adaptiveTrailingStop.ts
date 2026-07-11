@@ -98,6 +98,25 @@ export function resolvePresetExitParams(
   };
 }
 
+/**
+ * Last-resort exit strategy for a position that would otherwise open with no
+ * TP/SL/trailing at all (no preset selected, no manual values set) — the
+ * 'balanced' preset's fixed base values, without the liquidity/concentration
+ * adaptive adjustment, since risk-signal data isn't available at every call
+ * site that needs this guarantee (e.g. PositionManager's own safety net).
+ * Live-verified 2026-07-11: SnipeConfigs with no preset and no manual TP/SL/
+ * trailing produced positions that could never be closed by PriceMonitor
+ * (evaluateExit has nothing to compare against when all three are null) and
+ * had no manual-close path either — see PositionManager.openPosition.
+ */
+export function defaultExitParams(): PresetExitParams {
+  return {
+    takeProfitPercent: undefined,
+    stopLossPercent: BASE_STOP_LOSS_PERCENT.balanced,
+    trailingStopPercent: BASE_TRAILING_PERCENT.balanced,
+  };
+}
+
 export interface TrailingStopDisplay {
   entryPriceUsd: number;
   currentPriceUsd: number;

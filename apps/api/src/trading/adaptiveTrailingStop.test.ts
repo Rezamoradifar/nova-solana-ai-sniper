@@ -3,6 +3,7 @@ import { evaluateExit } from './exitEngine.js';
 import {
   computeAdaptiveTrailingStopPercent,
   computeTrailingStopDisplay,
+  defaultExitParams,
   resolvePresetExitParams,
   stopLossPercentForPreset,
   TRAILING_STOP_PRESETS,
@@ -81,6 +82,20 @@ describe('resolvePresetExitParams', () => {
   it("applies the preset's stop-loss floor", () => {
     expect(stopLossPercentForPreset('conservative')).toBe(15);
     expect(stopLossPercentForPreset('meme_coin')).toBe(40);
+  });
+});
+
+describe('defaultExitParams', () => {
+  it("returns the 'balanced' preset's fixed base values, with no take-profit cap", () => {
+    const params = defaultExitParams();
+    expect(params.takeProfitPercent).toBeUndefined();
+    expect(params.stopLossPercent).toBe(25); // BASE_STOP_LOSS_PERCENT.balanced
+    expect(params.trailingStopPercent).toBe(15); // BASE_TRAILING_PERCENT.balanced
+  });
+
+  it('never returns a fully-empty exit strategy, so it always satisfies "never allow no exit strategy"', () => {
+    const params = defaultExitParams();
+    expect(params.stopLossPercent != null || params.trailingStopPercent != null).toBe(true);
   });
 });
 

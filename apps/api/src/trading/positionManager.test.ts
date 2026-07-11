@@ -251,6 +251,150 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
   });
 });
 
+describe('PositionManager guaranteed exit strategy (regression: live incident 2026-07-11 — positions opened with no TP/SL/trailing at all could never close)', () => {
+  it('applies the balanced-preset default when the caller supplies no TP/SL/trailing at all', async () => {
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
+      getQuote: vi.fn(),
+    } as never;
+    const connection = {
+      sendTransaction: vi.fn().mockResolvedValue('sig123'),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi
+        .fn()
+        .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const positionCreate = vi.fn().mockResolvedValue({ id: 'position-1' });
+    const prisma = {
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      position: { create: positionCreate },
+      token: { findUnique: vi.fn().mockResolvedValue(undefined) },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    // Deliberately omits takeProfitPercent/stopLossPercent/trailingStopPercent/
+    // trailingStopPreset — mirrors copyTrading.ts and any SnipeConfig with no
+    // preset and no manual values set (132/135 of them, live-verified 2026-07-11).
+    await manager.openPosition(BASE_PARAMS);
+
+    expect(positionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          takeProfitPercent: undefined,
+          stopLossPercent: 25,
+          trailingStopPercent: 15,
+          trailingStopPreset: 'balanced',
+        }),
+      }),
+    );
+  });
+
+  it('never overrides an explicit exit strategy (preset-resolved or manual) with the default', async () => {
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
+      getQuote: vi.fn(),
+    } as never;
+    const connection = {
+      sendTransaction: vi.fn().mockResolvedValue('sig123'),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi
+        .fn()
+        .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const positionCreate = vi.fn().mockResolvedValue({ id: 'position-1' });
+    const prisma = {
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      position: { create: positionCreate },
+      token: { findUnique: vi.fn().mockResolvedValue(undefined) },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    await manager.openPosition({
+      ...BASE_PARAMS,
+      stopLossPercent: 10,
+      trailingStopPercent: 8,
+      trailingStopPreset: 'meme_coin',
+    });
+
+    expect(positionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          takeProfitPercent: undefined,
+          stopLossPercent: 10,
+          trailingStopPercent: 8,
+          trailingStopPreset: 'meme_coin',
+        }),
+      }),
+    );
+  });
+
+  it('respects a partial manual exit strategy (only one field set) without pulling in the default', async () => {
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
+      getQuote: vi.fn(),
+    } as never;
+    const connection = {
+      sendTransaction: vi.fn().mockResolvedValue('sig123'),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi
+        .fn()
+        .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const positionCreate = vi.fn().mockResolvedValue({ id: 'position-1' });
+    const prisma = {
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      position: { create: positionCreate },
+      token: { findUnique: vi.fn().mockResolvedValue(undefined) },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    await manager.openPosition({ ...BASE_PARAMS, takeProfitPercent: 25 });
+
+    expect(positionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          takeProfitPercent: 25,
+          stopLossPercent: undefined,
+          trailingStopPercent: undefined,
+        }),
+      }),
+    );
+  });
+});
+
 describe('PositionManager Jito bundle broadcast', () => {
   it('sends via a Jito bundle (tip + swap) when configured, and confirms by the swap tx signature', async () => {
     const fakeTx = fakeSignedVersionedTx();

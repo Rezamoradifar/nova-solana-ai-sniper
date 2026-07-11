@@ -11,7 +11,7 @@ import { SolPriceOracle } from '../solana/pumpfunBondingCurve.js';
 import type { DexRegistry } from '../solana/dex/registry.js';
 import { JitoClient } from '../solana/jito.js';
 import { evaluateExit, type ExitReason } from './exitEngine.js';
-import { computeTrailingStopDisplay } from './adaptiveTrailingStop.js';
+import { computeTrailingStopDisplay, defaultExitParams } from './adaptiveTrailingStop.js';
 import { eventBus } from '../lib/eventBus.js';
 import { TradingSafety, SafetyCheckError } from './safety.js';
 
@@ -489,6 +489,26 @@ export class PositionManager {
       },
     });
 
+    // Never allow a position to be created with no exit strategy at all — a
+    // position with every TP/SL/trailing field null can only ever be closed
+    // manually (evaluateExit has nothing to compare against), and no caller in
+    // this app currently exposes a manual-close action either. Falls back to
+    // defaultExitParams() only when the caller supplied none of the three
+    // fields; any explicit configuration (a preset's resolved params, or a
+    // user's own manual custom values) is always respected as-is and never
+    // overridden here.
+    const hasExitStrategy =
+      params.takeProfitPercent != null ||
+      params.stopLossPercent != null ||
+      params.trailingStopPercent != null;
+    const fallbackExit = hasExitStrategy ? undefined : defaultExitParams();
+    if (fallbackExit) {
+      this.logger.warn(
+        { walletId: params.walletId, tokenId: params.tokenId, mint: params.mint },
+        'openPosition: caller supplied no exit strategy — applying the balanced-preset default so this position is never unclosable',
+      );
+    }
+
     const position = await this.prisma.position.create({
       data: {
         walletId: params.walletId,
@@ -497,10 +517,10 @@ export class PositionManager {
         amountToken: Number(outAmount),
         amountSolInvested: params.amountSol,
         highWaterMarkUsd: entryPriceUsd,
-        takeProfitPercent: params.takeProfitPercent,
-        stopLossPercent: params.stopLossPercent,
-        trailingStopPercent: params.trailingStopPercent,
-        trailingStopPreset: params.trailingStopPreset,
+        takeProfitPercent: params.takeProfitPercent ?? fallbackExit?.takeProfitPercent,
+        stopLossPercent: params.stopLossPercent ?? fallbackExit?.stopLossPercent,
+        trailingStopPercent: params.trailingStopPercent ?? fallbackExit?.trailingStopPercent,
+        trailingStopPreset: params.trailingStopPreset ?? (fallbackExit ? 'balanced' : undefined),
         isPaperTrade: this.paperTrading,
       },
     });
