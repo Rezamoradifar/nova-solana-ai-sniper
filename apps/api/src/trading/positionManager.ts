@@ -691,6 +691,49 @@ export class PositionManager {
         'Sell Executor: sending live swap',
       );
 
+      // Live-verified 2026-07-11: a position recorded OPEN with a real, confirmed
+      // buy on file can still have a wallet balance of exactly 0 — the tokens left
+      // the wallet through some path this bot never recorded (most plausibly an
+      // out-of-band/manual transfer or sale, since the buy tx itself was verified
+      // on-chain and no sell ever landed through this codebase). Submitting a sell
+      // for 0 tokens isn't a retryable failure — the PumpSwap program rejects a
+      // zero-amount swap outright — so every future price tick would repeat this
+      // exact failed attempt forever, burning an RPC/simulation call each time with
+      // no possible resolution. Reconcile immediately instead: close the position
+      // (no realizedPnlUsd — what actually happened to the tokens is unknown, so a
+      // number here would just be a guess) and flag it for manual review.
+      if (sellAmountRaw <= 0n) {
+        this.logger.error(
+          {
+            positionId,
+            walletPublicKey: keypair.publicKey.toBase58(),
+            mint: position.token.mint,
+            recordedAmount: recordedAmount.toString(),
+          },
+          'closePosition: wallet holds 0 of this token for a position recorded OPEN — closing for manual reconciliation instead of retrying forever',
+        );
+        await this.recordFailedTrade({
+          walletId,
+          tokenId: position.tokenId,
+          side: 'SELL',
+          amountSol: 0,
+          amountToken: 0,
+          err: new Error(
+            'Wallet balance is 0 for this open position — tokens left the wallet outside this bot; closed for manual reconciliation, no realized PnL recorded',
+          ),
+        });
+        const reconciled = await this.prisma.position.update({
+          where: { id: positionId },
+          data: { status: 'CLOSED', closedAt: new Date() },
+        });
+        eventBus.publish('position.updated', { positionId: reconciled.id, status: 'CLOSED' });
+        await this.notifier?.notifyError(
+          'closePosition zero-balance reconciliation',
+          `Position ${positionId} (${position.token.symbol ?? position.token.mint}) was recorded OPEN with ${recordedAmount} tokens on file, but the wallet holds 0. Closed automatically to stop the retry loop — no realized PnL was recorded since the actual disposition of the tokens is unknown. Manual reconciliation required.`,
+        );
+        return { closed: true as const, position: reconciled, signature: null };
+      }
+
       try {
         signature = await this.sendSwap(
           keypair,

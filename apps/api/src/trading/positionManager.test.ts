@@ -999,3 +999,84 @@ describe('PositionManager unverified-swap lock (regression: live incident 2026-0
     expect(sendTransaction).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('PositionManager zero-balance reconciliation (regression: live incident 2026-07-11)', () => {
+  // Live-verified: a position recorded OPEN with a confirmed, on-chain-verified buy
+  // on file had a wallet balance of exactly 0 for that mint — the tokens left the
+  // wallet through a path this bot never recorded (no sell had ever landed through
+  // this codebase). Before this fix, PriceMonitor retried the sell every tick
+  // forever: sellAmountRaw resolved to 0 each time, the PumpSwap program rejected
+  // the zero-amount swap outright, and the position stayed OPEN indefinitely with
+  // no path to resolution. This proves that case is now detected before any swap
+  // is even attempted, and the position is closed (no realized PnL guessed) rather
+  // than retried.
+  it('closes the position and never attempts a swap when the real wallet balance is 0', async () => {
+    const jupiter = { prepareSwap: vi.fn(), getQuote: vi.fn() } as never;
+    const sendTransaction = vi.fn();
+    const connection = {
+      // Empty token account list — real on-chain balance is 0 for this mint.
+      getParsedTokenAccountsByOwner: vi.fn().mockResolvedValue({ value: [] }),
+      sendTransaction,
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-1' });
+    const positionUpdate = vi.fn().mockResolvedValue({ id: 'position-1', status: 'CLOSED' });
+    const notifyError = vi.fn();
+    const prisma = {
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: 'position-1',
+          tokenId: 'token-1',
+          walletId: 'wallet-1',
+          entryPriceUsd: 0.0006949,
+          amountToken: 11169682606,
+          amountSolInvested: 0.1,
+          highWaterMarkUsd: 0.0007101,
+          trailingStopPercent: 15,
+          closedAt: null,
+          createdAt: new Date('2026-07-11T15:45:57Z'),
+          token: {
+            mint: 'GnM6XZ7DN9KSPW2ZVMNqCggsxjnxHMGb2t4kiWrUpump',
+            dex: 'PUMPSWAP',
+            poolAddress: 'DW6rLxPNi9nH42jinmToY8ii13UaeeDmC9sanLu2zUxD',
+            symbol: 'WAGMI',
+            name: 'WAGMI',
+            decimals: 9,
+          },
+        }),
+        update: positionUpdate,
+      },
+      trade: { create: tradeCreate },
+    } as never;
+    const notifier = { notifyError } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      notifier,
+      false, // live trading
+    );
+
+    const result = await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', {
+      currentPriceUsd: 0.0005859,
+    });
+
+    expect(result.closed).toBe(true);
+    expect(sendTransaction).not.toHaveBeenCalled();
+    expect(positionUpdate).toHaveBeenCalledWith({
+      where: { id: 'position-1' },
+      data: { status: 'CLOSED', closedAt: expect.any(Date) },
+    });
+    // No realizedPnlUsd is ever passed — a guessed number would be worse than none.
+    expect(positionUpdate.mock.calls[0]![0].data).not.toHaveProperty('realizedPnlUsd');
+    expect(tradeCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ side: 'SELL', status: 'FAILED', amountToken: 0 }),
+    });
+    expect(notifyError).toHaveBeenCalledTimes(1);
+    expect(notifyError.mock.calls[0]![1]).toMatch(/wallet holds 0/);
+  });
+});
