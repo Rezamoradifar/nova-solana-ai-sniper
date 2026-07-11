@@ -4,6 +4,7 @@ import {
   calculatePerformanceFee,
   calculateReferralRewards,
   getOrCreateBusinessSettings,
+  isEligibleForFeeProcessing,
   resolveReferralChain,
 } from '@nova/shared';
 import { createBot, NotificationService, type TradeReportData } from '@nova/telegram-bot';
@@ -101,6 +102,22 @@ export async function processProfitableClose(
   });
   if (!position) return;
 
+  // Backward-compatibility guarantee, checked before any further work: a
+  // position is only eligible if it closed at or after the fee system's own
+  // activation timestamp — see isEligibleForFeeProcessing's doc comment.
+  // Deliberately independent of the user's own account age (User.createdAt
+  // is never read here or anywhere in this file) — an existing user from
+  // before this feature shipped is charged exactly like a new one on any
+  // trade that closes from now on, with no migration step of their own.
+  const settings = await getOrCreateBusinessSettings(deps.prisma);
+  if (!isEligibleForFeeProcessing(position.closedAt, settings.feeSystemActivatedAt)) {
+    deps.log.debug(
+      { positionId, closedAt: position.closedAt, activatedAt: settings.feeSystemActivatedAt },
+      'fee system: position closed before activation — skipping (never reprocess history)',
+    );
+    return;
+  }
+
   // Best-effort lookback, mirroring the exact same strategy positionManager.ts
   // already uses to match a BUY trade to a position (no Trade->Position FK
   // exists) — same convention, not a new join strategy.
@@ -136,7 +153,6 @@ export async function processProfitableClose(
     }
   }
 
-  const settings = await getOrCreateBusinessSettings(deps.prisma);
   const feeResult = calculatePerformanceFee({
     grossProfitUsd,
     actualNetProfitUsd,

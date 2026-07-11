@@ -4,6 +4,7 @@ import {
   calculatePerformanceFee,
   calculateReferralRewards,
   getOrCreateBusinessSettings,
+  isEligibleForFeeProcessing,
   resolveReferralChain,
   type ReferralLevelInput,
 } from './fee.js';
@@ -258,5 +259,35 @@ describe('getOrCreateBusinessSettings', () => {
         data: expect.objectContaining({ performanceFeeBps: 2000, maxReferralDepth: 2 }),
       }),
     );
+  });
+});
+
+describe('isEligibleForFeeProcessing', () => {
+  const activatedAt = new Date('2026-07-11T22:56:38Z');
+
+  it('is eligible when the position closed after activation (the normal case going forward)', () => {
+    const closedAt = new Date('2026-07-12T09:00:00Z');
+    expect(isEligibleForFeeProcessing(closedAt, activatedAt)).toBe(true);
+  });
+
+  it('is eligible at the exact activation instant (inclusive boundary)', () => {
+    expect(isEligibleForFeeProcessing(new Date(activatedAt), activatedAt)).toBe(true);
+  });
+
+  it('is NOT eligible for a position that closed before activation — the historical-replay guard', () => {
+    const closedAt = new Date('2026-07-10T12:00:00Z'); // before the fee system existed
+    expect(isEligibleForFeeProcessing(closedAt, activatedAt)).toBe(false);
+  });
+
+  it('is NOT eligible when closedAt is null (never trust an unknown close time as "charge anyway")', () => {
+    expect(isEligibleForFeeProcessing(null, activatedAt)).toBe(false);
+  });
+
+  it('does not depend on the user account age at all — only the trade close time', () => {
+    // An "existing user" (old account) and a "new user" (fresh account) both
+    // closing a trade after activation are equally eligible — this function
+    // never even takes a user/account-age parameter, by design.
+    const closedAt = new Date('2026-07-12T00:00:00Z');
+    expect(isEligibleForFeeProcessing(closedAt, activatedAt)).toBe(true);
   });
 });

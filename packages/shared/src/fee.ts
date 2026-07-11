@@ -60,6 +60,27 @@ export function calculatePerformanceFee(
   };
 }
 
+/**
+ * The hard, explicit backward-compatibility guarantee: a position is only
+ * ever eligible for fee processing if it closed at or after the moment the
+ * fee system was activated (BusinessSettings.feeSystemActivatedAt — see the
+ * migration's own doc comment for why this is always "the deployment
+ * moment," not something requiring manual backfill). Deliberately checks
+ * ONLY the trade's own close time — never the user's own createdAt/account
+ * age — so an existing user from before this feature shipped is charged
+ * exactly like a brand-new one on any trade that closes from now on, with
+ * zero migration step of their own. A null closedAt (shouldn't happen for a
+ * CLOSED position, but never trust that blindly) is treated as ineligible,
+ * not as "unknown, charge anyway."
+ */
+export function isEligibleForFeeProcessing(
+  positionClosedAt: Date | null,
+  feeSystemActivatedAt: Date,
+): boolean {
+  if (!positionClosedAt) return false;
+  return positionClosedAt.getTime() >= feeSystemActivatedAt.getTime();
+}
+
 export interface ReferralChainLink {
   userId: string;
 }
@@ -157,6 +178,7 @@ export interface BusinessSettingsWithLevels {
   performanceFeeBps: number;
   referralProgramEnabled: boolean;
   maxReferralDepth: number;
+  feeSystemActivatedAt: Date;
   referralLevels: ReferralLevelInput[];
 }
 
