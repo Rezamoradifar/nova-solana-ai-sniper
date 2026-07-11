@@ -1,9 +1,10 @@
 import { PublicKey } from '@solana/web3.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   decodeBondingCurveAccount,
   estimateBondingCurveLiquidityUsd,
   getBondingCurvePda,
+  getBondingCurveStates,
 } from './pumpfunBondingCurve.js';
 
 function buildAccountData(fields: {
@@ -116,5 +117,62 @@ describe('estimateBondingCurveLiquidityUsd', () => {
       }),
     );
     expect(estimateBondingCurveLiquidityUsd(state, 77.91)).toBe(0);
+  });
+});
+
+describe('getBondingCurveStates', () => {
+  const mintA = '8Jexwtd8Py1g2bkjhQXPXoSztf5WEBAHvdLb7gUmpump';
+  const mintB = 'GrNhoFEfsfvgir93SY9eBSokvxw9aDCtWD5Rodthpump';
+
+  it('decodes only the mints whose account exists, batched into one call', async () => {
+    const dataA = buildAccountData({
+      virtualTokenReserves: 1n,
+      virtualSolReserves: 2n,
+      realTokenReserves: 3n,
+      realSolReserves: 4n,
+      tokenTotalSupply: 5n,
+      complete: false,
+    });
+    const getMultipleAccountsInfo = vi
+      .fn()
+      .mockResolvedValue([{ data: dataA }, null /* mintB: no account found */]);
+    const connection = { getMultipleAccountsInfo } as never;
+
+    const states = await getBondingCurveStates(connection, [mintA, mintB]);
+
+    expect(getMultipleAccountsInfo).toHaveBeenCalledTimes(1);
+    expect(states.get(mintA)?.realSolReserves).toBe(4n);
+    expect(states.has(mintB)).toBe(false);
+  });
+
+  it('skips an undecodable account instead of throwing and aborting the batch', async () => {
+    const getMultipleAccountsInfo = vi
+      .fn()
+      .mockResolvedValue([{ data: Buffer.alloc(3) /* too short */ }]);
+    const connection = { getMultipleAccountsInfo } as never;
+
+    const states = await getBondingCurveStates(connection, [mintA]);
+    expect(states.size).toBe(0);
+  });
+
+  it('returns an empty map without any RPC call for an empty mint list', async () => {
+    const getMultipleAccountsInfo = vi.fn();
+    const connection = { getMultipleAccountsInfo } as never;
+
+    const states = await getBondingCurveStates(connection, []);
+    expect(states.size).toBe(0);
+    expect(getMultipleAccountsInfo).not.toHaveBeenCalled();
+  });
+
+  it('splits more than 100 mints into multiple batched calls', async () => {
+    // Duplicates are fine here — this only exercises the chunking, not decoding.
+    const mints = Array.from({ length: 150 }, () => mintA);
+    const getMultipleAccountsInfo = vi
+      .fn()
+      .mockImplementation(async (pdas: unknown[]) => pdas.map(() => null));
+    const connection = { getMultipleAccountsInfo } as never;
+
+    await getBondingCurveStates(connection, mints);
+    expect(getMultipleAccountsInfo).toHaveBeenCalledTimes(2);
   });
 });

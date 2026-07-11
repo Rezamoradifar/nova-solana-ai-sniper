@@ -105,14 +105,21 @@ describe('DexRegistry', () => {
       };
     });
 
-    const getAccountInfo = vi.fn().mockImplementation(async (pubkey: PublicKey) => {
-      if (pubkey.toBase58() === poolAddress) {
-        return { owner: PUMPSWAP_PROGRAM_ID, data: Buffer.alloc(10) };
-      }
-      return { owner: new PublicKey('11111111111111111111111111111111'), data: Buffer.alloc(10) };
-    });
+    const getMultipleAccountsInfo = vi
+      .fn()
+      .mockImplementation(async (pubkeys: PublicKey[]) =>
+        pubkeys.map((pubkey) =>
+          pubkey.toBase58() === poolAddress
+            ? { owner: PUMPSWAP_PROGRAM_ID, data: Buffer.alloc(10) }
+            : { owner: new PublicKey('11111111111111111111111111111111'), data: Buffer.alloc(10) },
+        ),
+      );
 
-    const registry = new DexRegistry({ getAccountInfo } as never, {} as never, fakeLogger());
+    const registry = new DexRegistry(
+      { getMultipleAccountsInfo } as never,
+      {} as never,
+      fakeLogger(),
+    );
 
     const tx = {
       transaction: {
@@ -137,8 +144,12 @@ describe('DexRegistry', () => {
 
   it('resolveNewPool returns undefined when no candidate account matches', async () => {
     vi.mocked(getPumpSwapLiquidity).mockResolvedValue(undefined);
-    const getAccountInfo = vi.fn().mockResolvedValue(null);
-    const registry = new DexRegistry({ getAccountInfo } as never, {} as never, fakeLogger());
+    const getMultipleAccountsInfo = vi.fn().mockResolvedValue([null]);
+    const registry = new DexRegistry(
+      { getMultipleAccountsInfo } as never,
+      {} as never,
+      fakeLogger(),
+    );
     const tx = {
       transaction: {
         message: {

@@ -1,5 +1,12 @@
+import type { Connection } from '@solana/web3.js';
 import type { FastifyInstance } from 'fastify';
 import { getConnection } from './solana/connection.js';
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    solanaConnection?: Connection;
+  }
+}
 import { PumpFunMonitor } from './solana/pumpfun.js';
 import { JupiterClient } from './solana/jupiter.js';
 import { DexScreenerClient } from './solana/dexscreener.js';
@@ -29,11 +36,24 @@ import { TwitterMonitor } from './social/twitterMonitor.js';
  * is the one hard requirement here.
  */
 export async function startBackgroundWorkers(app: FastifyInstance) {
-  const connection = getConnection({
-    rpcUrl: app.config.SOLANA_RPC_URL,
-    wsUrl: app.config.SOLANA_WS_URL,
-    heliusApiKey: app.config.HELIUS_API_KEY,
-  });
+  const connection = getConnection(
+    {
+      rpcUrl: app.config.SOLANA_RPC_URL,
+      wsUrl: app.config.SOLANA_WS_URL,
+      heliusApiKey: app.config.HELIUS_API_KEY,
+      quicknodeRpcUrl: app.config.QUICKNODE_RPC_URL,
+      chainstackRpcUrl: app.config.CHAINSTACK_RPC_URL,
+      additionalRpcUrls: app.config.ADDITIONAL_RPC_URLS,
+    },
+    app.log as never,
+  );
+  // Exposed for the /health/ready check — decorating here (before app.listen(),
+  // see server.ts) rather than via a plugin since the connection only exists once
+  // background workers actually start (not guaranteed — see this function's own
+  // doc comment on being the one hard requirement).
+  if (!app.hasDecorator('solanaConnection')) {
+    app.decorate('solanaConnection', connection);
+  }
 
   const dexScreener = new DexScreenerClient(app.config.DEXSCREENER_API_BASE);
   const jupiter = new JupiterClient({ apiBase: app.config.JUPITER_API_BASE });
@@ -337,6 +357,16 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
           { signature: event.signature },
           'could not confidently resolve the mint for a detected pump.fun create — skipping rather than guessing',
         );
+        return;
+      }
+      // Same guard the DEX-registry path below already has: connection.onLogs can
+      // redeliver the same signature on reconnect/resubscribe, which would
+      // otherwise re-run the full pipeline (RPC calls, AI scoring cost, a second
+      // Telegram alert, and — before TradingSafety's own duplicate-position check
+      // — a real risk of a second live buy for a mint already tracked).
+      const existing = await app.prisma.token.findUnique({ where: { mint } });
+      if (existing) {
+        app.log.debug({ mint }, 'token already tracked — skipping duplicate pump.fun launch event');
         return;
       }
       await handleNewTokenLaunch(mint, 'PUMPFUN', event.detectedAt);

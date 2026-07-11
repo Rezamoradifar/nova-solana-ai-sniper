@@ -1,8 +1,13 @@
 import type { FastifyInstance } from 'fastify';
+import { Dex } from '@prisma/client';
 import { z } from 'zod';
 
-const listQuerySchema = z.object({
-  dex: z.enum(['PUMPFUN', 'RAYDIUM', 'ORCA', 'JUPITER']).optional(),
+// Derived from the real Prisma Dex enum (not a hand-copied literal list) so this
+// filter can never drift out of sync again — it was previously missing PUMPSWAP
+// and METEORA, silently 400ing valid `/tokens?dex=PUMPSWAP` requests. A new DEX
+// added to schema.prisma's Dex enum is automatically accepted here too.
+export const listQuerySchema = z.object({
+  dex: z.nativeEnum(Dex).optional(),
   limit: z.coerce.number().min(1).max(100).default(50),
 });
 

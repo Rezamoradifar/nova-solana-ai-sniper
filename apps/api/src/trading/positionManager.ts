@@ -157,7 +157,12 @@ export class PositionManager {
         const { blockhash } = await this.connection.getLatestBlockhash();
         const tipTx = JitoClient.buildTipTransaction(signer, JITO_TIP_LAMPORTS, blockhash);
         await this.jito.sendBundle([tipTx, transaction]);
-        await this.connection.confirmTransaction(signature, 'confirmed');
+        const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
+        if (confirmation.value.err) {
+          throw new Error(
+            `Transaction ${signature} landed but reverted on-chain: ${JSON.stringify(confirmation.value.err)}`,
+          );
+        }
         return signature;
       } catch (err) {
         this.logger.warn({ err }, 'Jito bundle submission failed — falling back to a direct send');
@@ -165,8 +170,57 @@ export class PositionManager {
     }
 
     await this.connection.sendTransaction(transaction);
-    await this.connection.confirmTransaction(signature, 'confirmed');
+    // A confirmed transaction can still have landed with an on-chain error (e.g.
+    // slippage exceeded, a program-level revert) — confirmTransaction only rejects
+    // on timeout/expiry, never on this. Live-verified gap: without this check, a
+    // reverted swap was recorded as a successful buy/sell (a Position "opened"
+    // with 0 tokens actually received, or "closed" with a fabricated PnL) since
+    // getActualTokenDelta/getActualSolDelta both computed a real delta of 0/refund
+    // rather than surfacing the revert itself.
+    const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
+    if (confirmation.value.err) {
+      throw new Error(
+        `Transaction ${signature} landed but reverted on-chain: ${JSON.stringify(confirmation.value.err)}`,
+      );
+    }
     return signature;
+  }
+
+  /**
+   * Best-effort durability record for a live swap attempt that never reached (or
+   * was reverted after) broadcastTransaction — previously such attempts left no
+   * Trade row at all, only a log line, so a failed buy/sell was invisible in Trade
+   * History. Never throws itself: a DB hiccup while recording a failure must not
+   * mask the original error from the caller.
+   */
+  private async recordFailedTrade(params: {
+    walletId: string;
+    tokenId: string;
+    side: 'BUY' | 'SELL';
+    amountSol: number;
+    amountToken?: number;
+    slippageBps?: number;
+    err: unknown;
+  }): Promise<void> {
+    try {
+      await this.prisma.trade.create({
+        data: {
+          walletId: params.walletId,
+          tokenId: params.tokenId,
+          side: params.side,
+          status: 'FAILED',
+          amountSol: params.amountSol,
+          amountToken: params.amountToken,
+          slippageBps: params.slippageBps ?? 100,
+          isPaperTrade: false,
+        },
+      });
+    } catch (recordErr) {
+      this.logger.error(
+        { recordErr, originalErr: params.err, side: params.side, tokenId: params.tokenId },
+        'failed to record a FAILED trade attempt',
+      );
+    }
   }
 
   /**
@@ -276,6 +330,7 @@ export class PositionManager {
         walletId: params.walletId,
         walletPublicKey: params.walletPublicKey,
         amountSol: params.amountSol,
+        tokenId: params.tokenId,
       },
       { isLive: !this.paperTrading },
     );
@@ -313,28 +368,40 @@ export class PositionManager {
         { walletPublicKey: keypair.publicKey.toBase58(), mint: params.mint },
         'Buy Executor: sending live swap',
       );
-      signature = await this.sendSwap(
-        keypair,
-        {
-          inputMint: SOL_MINT,
-          outputMint: params.mint,
-          amountLamports,
+      try {
+        signature = await this.sendSwap(
+          keypair,
+          {
+            inputMint: SOL_MINT,
+            outputMint: params.mint,
+            amountLamports,
+            slippageBps: params.slippageBps,
+          },
+          async () => {
+            const token = await this.prisma.token.findUnique({ where: { id: params.tokenId } });
+            return token ? { dex: token.dex, poolAddress: token.poolAddress } : undefined;
+          },
+        );
+        // The quote is only an estimate — record what actually landed in the wallet,
+        // since a later sell has to work with the real balance, not the estimate.
+        const actualReceived = await getActualTokenDelta(
+          this.connection,
+          signature,
+          keypair.publicKey.toBase58(),
+          params.mint,
+        );
+        outAmount = actualReceived.toString();
+      } catch (err) {
+        await this.recordFailedTrade({
+          walletId: params.walletId,
+          tokenId: params.tokenId,
+          side: 'BUY',
+          amountSol: params.amountSol,
           slippageBps: params.slippageBps,
-        },
-        async () => {
-          const token = await this.prisma.token.findUnique({ where: { id: params.tokenId } });
-          return token ? { dex: token.dex, poolAddress: token.poolAddress } : undefined;
-        },
-      );
-      // The quote is only an estimate — record what actually landed in the wallet,
-      // since a later sell has to work with the real balance, not the estimate.
-      const actualReceived = await getActualTokenDelta(
-        this.connection,
-        signature,
-        keypair.publicKey.toBase58(),
-        params.mint,
-      );
-      outAmount = actualReceived.toString();
+          err,
+        });
+        throw err;
+      }
     }
 
     const entryPriceUsd = await this.resolveEntryPriceUsd(
@@ -535,23 +602,38 @@ export class PositionManager {
         'Sell Executor: sending live swap',
       );
 
-      signature = await this.sendSwap(
-        keypair,
-        {
-          inputMint: position.token.mint,
-          outputMint: SOL_MINT,
-          amountLamports: sellAmountRaw,
-          slippageBps: 300,
-        },
-        async () => ({ dex: position.token.dex, poolAddress: position.token.poolAddress }),
-      );
-      const actualSolReceived = await getActualSolDelta(
-        this.connection,
-        signature,
-        keypair.publicKey.toBase58(),
-      );
-      outAmountLamports = Number(actualSolReceived);
-      soldAmountToken = Number(sellAmountRaw);
+      try {
+        signature = await this.sendSwap(
+          keypair,
+          {
+            inputMint: position.token.mint,
+            outputMint: SOL_MINT,
+            amountLamports: sellAmountRaw,
+            slippageBps: 300,
+          },
+          async () => ({ dex: position.token.dex, poolAddress: position.token.poolAddress }),
+        );
+        const actualSolReceived = await getActualSolDelta(
+          this.connection,
+          signature,
+          keypair.publicKey.toBase58(),
+        );
+        outAmountLamports = Number(actualSolReceived);
+        soldAmountToken = Number(sellAmountRaw);
+      } catch (err) {
+        // Position deliberately stays OPEN here — nothing below this point runs,
+        // so status/realizedPnlUsd are never touched. The caller (checkAndMaybeClose
+        // via priceMonitor, or a manual sell) retries on its own next pass.
+        await this.recordFailedTrade({
+          walletId,
+          tokenId: position.tokenId,
+          side: 'SELL',
+          amountSol: 0,
+          amountToken: Number(sellAmountRaw),
+          err,
+        });
+        throw err;
+      }
     }
 
     // position.amountToken is the RAW on-chain integer amount (e.g. 32678849019 for

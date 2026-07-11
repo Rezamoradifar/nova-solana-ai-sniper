@@ -21,6 +21,12 @@ async function main() {
 
   const prisma = new PrismaClient();
   const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3 });
+  // ioredis emits 'error' on every connection failure (not just explicit calls);
+  // with zero listeners that's an unhandled EventEmitter error, which crashes the
+  // whole process on a transient Redis blip rather than just logging and letting
+  // ioredis's own reconnect logic (and TradingSafety's fail-closed kill-switch
+  // check) handle it.
+  redis.on('error', (err) => logger.error({ err }, 'redis client error'));
   const bot = createBot(env.TELEGRAM_BOT_TOKEN, logger);
   const adminIds = parseAdminIds(env.TELEGRAM_ADMIN_IDS);
 

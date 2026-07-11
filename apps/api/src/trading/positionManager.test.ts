@@ -43,7 +43,7 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
     const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
     const connection = {
       sendTransaction: vi.fn().mockResolvedValue('sig123'),
-      confirmTransaction: vi.fn().mockResolvedValue(undefined),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
       getParsedTransaction: vi.fn().mockResolvedValue({
         meta: { preTokenBalances: [], postTokenBalances: [] },
       }),
@@ -90,7 +90,7 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
     const connection = {
       simulateTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
       sendTransaction: vi.fn().mockResolvedValue('native-sig-456'),
-      confirmTransaction: vi.fn().mockResolvedValue(undefined),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
       getParsedTransaction: vi.fn().mockResolvedValue({
         meta: { preTokenBalances: [], postTokenBalances: [] },
       }),
@@ -174,6 +174,49 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
+  it('regression: a transaction that lands but reverts on-chain is never recorded as a successful buy', async () => {
+    // Live gap: confirmTransaction only rejects on timeout/expiry — a landed-but-
+    // reverted swap (slippage exceeded, program error) resolved normally with no
+    // err check, so a reverted buy was previously recorded as CONFIRMED with the
+    // real money spent but zero tokens actually received.
+    const prepareSwap = vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const connection = {
+      sendTransaction: vi.fn().mockResolvedValue('sig123'),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: { InstructionError: [] } } }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const dexRegistry = { getExecutor: vi.fn() } as never;
+    const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-failed-1' });
+    const prisma = {
+      trade: { create: tradeCreate },
+      position: { create: vi.fn() },
+      token: { findUnique: vi.fn() },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+      dexRegistry,
+    );
+
+    await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow(/reverted on-chain/);
+    // No Position was ever created for a buy that never actually landed tokens.
+    expect(
+      (prisma as { position: { create: ReturnType<typeof vi.fn> } }).position.create,
+    ).not.toHaveBeenCalled();
+    // The failed attempt is still durably recorded in Trade History.
+    expect(tradeCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ side: 'BUY', status: 'FAILED', walletId: 'wallet-1' }),
+    });
+  });
+
   it('rethrows the original Jupiter error when no native executor is available for the token', async () => {
     const jupiterErr = new Error('no route found');
     const jupiter = {
@@ -212,7 +255,7 @@ describe('PositionManager Jito bundle broadcast', () => {
     const sendBundle = vi.fn().mockResolvedValue('bundle-id-123');
     const jito = { sendBundle } as never;
     const sendTransaction = vi.fn();
-    const confirmTransaction = vi.fn().mockResolvedValue(undefined);
+    const confirmTransaction = vi.fn().mockResolvedValue({ value: { err: null } });
     const connection = {
       getLatestBlockhash: vi
         .fn()
@@ -268,7 +311,7 @@ describe('PositionManager Jito bundle broadcast', () => {
         .fn()
         .mockResolvedValue({ blockhash: 'So11111111111111111111111111111111111111112' }),
       sendTransaction,
-      confirmTransaction: vi.fn().mockResolvedValue(undefined),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
       getParsedTransaction: vi
         .fn()
         .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),
@@ -300,6 +343,72 @@ describe('PositionManager Jito bundle broadcast', () => {
   });
 });
 
+describe('PositionManager live sell failure handling', () => {
+  it('regression: a sell that reverts on-chain leaves the position OPEN and records a FAILED trade, never a fabricated CLOSE', async () => {
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
+      getQuote: vi.fn(),
+    } as never;
+    const connection = {
+      getParsedTokenAccountsByOwner: vi.fn().mockResolvedValue({
+        value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: '1000' } } } } } }],
+      }),
+      sendTransaction: vi.fn().mockResolvedValue('sig-revert'),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: { InstructionError: [] } } }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const positionUpdate = vi.fn();
+    const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-failed-sell-1' });
+    const prisma = {
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: 'position-1',
+          tokenId: 'token-1',
+          walletId: 'wallet-1',
+          entryPriceUsd: 0.001,
+          amountToken: 1000,
+          amountSolInvested: 0.01,
+          highWaterMarkUsd: 0.001,
+          trailingStopPercent: null,
+          closedAt: null,
+          createdAt: new Date('2026-07-10T00:00:00Z'),
+          token: {
+            mint: 'CkWryeENpbbz6Lj4LFQ1ya6U7bJoAbtBkAnSzaeaXCP5',
+            dex: 'PUMPFUN',
+            poolAddress: null,
+            symbol: 'FOO',
+            name: 'Foo',
+            decimals: 9,
+          },
+        }),
+        update: positionUpdate,
+      },
+      trade: { create: tradeCreate },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false, // live trading
+    );
+
+    await expect(
+      manager.closePosition('position-1', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 }),
+    ).rejects.toThrow(/reverted on-chain/);
+
+    // Position must never be marked CLOSED for a sell that didn't actually happen.
+    expect(positionUpdate).not.toHaveBeenCalled();
+    expect(tradeCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ side: 'SELL', status: 'FAILED', walletId: 'wallet-1' }),
+    });
+  });
+});
+
 describe('PositionManager notification content', () => {
   it('openPosition looks up the token dex and includes it on the BUY notification', async () => {
     const jupiter = {
@@ -308,7 +417,7 @@ describe('PositionManager notification content', () => {
     } as never;
     const connection = {
       sendTransaction: vi.fn().mockResolvedValue('sig123'),
-      confirmTransaction: vi.fn().mockResolvedValue(undefined),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
       getParsedTransaction: vi
         .fn()
         .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),
@@ -355,7 +464,7 @@ describe('PositionManager notification content', () => {
     } as never;
     const connection = {
       sendTransaction: vi.fn().mockResolvedValue('sig123'),
-      confirmTransaction: vi.fn().mockResolvedValue(undefined),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
       getParsedTransaction: vi
         .fn()
         .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),

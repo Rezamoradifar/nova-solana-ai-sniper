@@ -30,6 +30,16 @@ export interface HolderConcentration {
  * Approximates holder concentration using the largest-token-accounts RPC call
  * (capped at 20 by the RPC itself). Good enough as a rug-risk signal without
  * needing a full indexer.
+ *
+ * KNOWN LIMITATION (audited, not fixed here): this does not exclude the LP/pool
+ * vault token account from the top-10 sum, which inflates concentration for any
+ * token with real on-chain liquidity — the pool's own vault is usually one of the
+ * largest holders by construction. A correct fix needs each DEX's actual vault
+ * address (e.g. Raydium CPMM's token0Vault/token1Vault, decoded in
+ * solana/dex/raydium.ts but not currently exposed past DexPoolInfo.poolAddress,
+ * which is the pool *state* account, not the vault) threaded through per-DEX from
+ * registry.ts — a real but DEX-layout-specific change, not a safe one to improvise
+ * across 4+ different account layouts without dedicated verification per DEX.
  */
 export async function getHolderConcentration(
   connection: Connection,

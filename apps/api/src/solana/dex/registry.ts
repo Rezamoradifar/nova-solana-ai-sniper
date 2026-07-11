@@ -126,11 +126,20 @@ export class DexRegistry {
     const candidates = tx.transaction.message.accountKeys.filter(
       (k) => k.writable && !k.signer && !NEVER_A_POOL_ACCOUNT.has(k.pubkey.toBase58()),
     );
+    if (candidates.length === 0) return undefined;
 
-    for (const candidate of candidates) {
-      const address = candidate.pubkey.toBase58();
-      const info = await this.connection.getAccountInfo(candidate.pubkey).catch(() => null);
+    // One getMultipleAccountsInfo round trip for every candidate account key in
+    // the transaction, instead of one getAccountInfo round trip per candidate —
+    // a bundled/Jito-routed launch tx can carry dozens of account keys, all
+    // previously fetched serially just to find the one owned by this DEX's program.
+    const infos = await this.connection
+      .getMultipleAccountsInfo(candidates.map((c) => c.pubkey))
+      .catch(() => []);
+
+    for (let i = 0; i < candidates.length; i++) {
+      const info = infos[i];
       if (!info || !info.owner.equals(programId)) continue;
+      const address = candidates[i]!.pubkey.toBase58();
       const pool = await reader(
         this.connection,
         this.dexScreener,

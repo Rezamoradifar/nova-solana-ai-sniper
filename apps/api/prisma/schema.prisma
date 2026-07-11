@@ -172,6 +172,10 @@ model Position {
   updatedAt            DateTime       @updatedAt
 
   @@index([walletId, status])
+  // Also DB-enforced: at most one OPEN position per (walletId, tokenId) via a
+  // partial unique index (migration 20260711033928_position_one_open_per_token)
+  // — not expressible here since Prisma's schema DSL has no WHERE-clause index
+  // support, so it won't show up as a diff/drift warning by design.
   @@map("positions")
 }
 

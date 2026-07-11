@@ -65,6 +65,48 @@ export async function getBondingCurveState(
   return decodeBondingCurveAccount(info.data);
 }
 
+// Solana's getMultipleAccountsInfo caps out at 100 accounts per call.
+const MAX_ACCOUNTS_PER_BATCH = 100;
+
+/**
+ * Batched form of getBondingCurveState for many mints at once — one
+ * getMultipleAccountsInfo round trip per 100 mints instead of one
+ * getAccountInfo round trip per mint. Exists because MigrationMonitor.tick()
+ * previously polled every recently-seen pump.fun token's bonding curve
+ * individually and sequentially: with thousands of tokens tracked at once (live
+ * production count: 4000+), that was thousands of serial RPC calls every tick —
+ * the single largest contributor to sustained Helius rate-limit saturation
+ * observed live. Returns a Map so callers can look up by mint; a mint missing
+ * from the result (account not found / undecodable) is simply absent, matching
+ * getBondingCurveState's `undefined` return for the same cases.
+ */
+export async function getBondingCurveStates(
+  connection: Connection,
+  mints: string[],
+): Promise<Map<string, BondingCurveState>> {
+  const result = new Map<string, BondingCurveState>();
+  if (mints.length === 0) return result;
+
+  const pdas = mints.map((mint) => getBondingCurvePda(new PublicKey(mint)));
+
+  for (let i = 0; i < pdas.length; i += MAX_ACCOUNTS_PER_BATCH) {
+    const batchMints = mints.slice(i, i + MAX_ACCOUNTS_PER_BATCH);
+    const batchPdas = pdas.slice(i, i + MAX_ACCOUNTS_PER_BATCH);
+    const infos = await connection.getMultipleAccountsInfo(batchPdas);
+    infos.forEach((info, idx) => {
+      if (!info) return;
+      try {
+        result.set(batchMints[idx]!, decodeBondingCurveAccount(info.data));
+      } catch {
+        // Not a decodable bonding-curve account — same as getBondingCurveState
+        // treating it as absent rather than throwing and aborting the batch.
+      }
+    });
+  }
+
+  return result;
+}
+
 /**
  * Estimates the USD liquidity backing a pre-migration bonding curve from its real
  * (non-virtual) SOL reserves. Doubled to match the convention DexScreener/AMM UIs use

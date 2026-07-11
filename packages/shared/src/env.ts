@@ -54,6 +54,16 @@ export const envSchema = z.object({
   SOLANA_RPC_URL: z.string().url().optional(),
   SOLANA_WS_URL: z.string().url().optional(),
   HELIUS_API_KEY: z.string().optional(),
+  // Additional RPC providers, all optional — when set, each becomes one more
+  // provider in the load-balanced/failover pool (see solana/connection.ts and
+  // solana/resilientConnection.ts). Same graceful-no-op pattern as every other
+  // optional integration in this codebase: unset simply means one less provider
+  // in the rotation, not a startup error.
+  QUICKNODE_RPC_URL: z.string().url().optional(),
+  CHAINSTACK_RPC_URL: z.string().url().optional(),
+  // Comma-separated list of any further RPC endpoints an operator wants in the
+  // rotation (e.g. a self-hosted node, Ankr, Triton) without a dedicated env var each.
+  ADDITIONAL_RPC_URLS: z.string().optional(),
   JITO_BLOCK_ENGINE_URL: z.string().url().optional(),
   JITO_AUTH_KEYPAIR: z.string().optional(),
   // Ceiling passed to Jupiter's dynamic/tiered priority-fee estimation — an

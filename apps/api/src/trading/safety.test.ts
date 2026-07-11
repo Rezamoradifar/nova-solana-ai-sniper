@@ -5,6 +5,7 @@ import {
   evaluatePerTradeLimit,
   evaluateDailyLossLimit,
   evaluateMaxOpenPositions,
+  evaluateDuplicateOpenPosition,
   evaluateWalletBalance,
   evaluateSafetyConfig,
   verifySafetySystemReady,
@@ -62,6 +63,17 @@ describe('evaluateMaxOpenPositions', () => {
   });
   it('blocks at the max', () => {
     expect(evaluateMaxOpenPositions(5, 5).allowed).toBe(false);
+  });
+});
+
+describe('evaluateDuplicateOpenPosition', () => {
+  it('allows when no OPEN position exists for this token', () => {
+    expect(evaluateDuplicateOpenPosition(false).allowed).toBe(true);
+  });
+  it('blocks when an OPEN position already exists for this token', () => {
+    const result = evaluateDuplicateOpenPosition(true);
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/already exists/i);
   });
 });
 
@@ -179,7 +191,11 @@ describe('TradingSafety.checkBeforeOpen orchestration', () => {
   function makeSafety(
     overrides: {
       prisma?: {
-        position: { findMany: ReturnType<typeof vi.fn>; count: ReturnType<typeof vi.fn> };
+        position: {
+          findMany: ReturnType<typeof vi.fn>;
+          count: ReturnType<typeof vi.fn>;
+          findFirst?: ReturnType<typeof vi.fn>;
+        };
       };
       connection?: { getBalance: ReturnType<typeof vi.fn> };
       config?: Partial<SafetyConfig>;
@@ -189,8 +205,12 @@ describe('TradingSafety.checkBeforeOpen orchestration', () => {
       position: {
         findMany: vi.fn().mockResolvedValue([]),
         count: vi.fn().mockResolvedValue(0),
+        findFirst: vi.fn().mockResolvedValue(null),
       },
     };
+    if (!prisma.position.findFirst) {
+      prisma.position.findFirst = vi.fn().mockResolvedValue(null);
+    }
     const connection = overrides.connection ?? {
       getBalance: vi.fn().mockResolvedValue(2_000_000_000),
     };
@@ -208,7 +228,13 @@ describe('TradingSafety.checkBeforeOpen orchestration', () => {
   it('allows a normal trade with everything healthy', async () => {
     const safety = makeSafety();
     const result = await safety.checkBeforeOpen(
-      { userId: 'u1', walletId: 'w1', walletPublicKey: VALID_PUBKEY, amountSol: 0.5 },
+      {
+        userId: 'u1',
+        walletId: 'w1',
+        walletPublicKey: VALID_PUBKEY,
+        amountSol: 0.5,
+        tokenId: 't1',
+      },
       { isLive: true },
     );
     expect(result.allowed).toBe(true);
@@ -218,7 +244,13 @@ describe('TradingSafety.checkBeforeOpen orchestration', () => {
     const prisma = { position: { findMany: vi.fn(), count: vi.fn() } };
     const safety = makeSafety({ prisma, config: { killSwitchEnv: true } });
     const result = await safety.checkBeforeOpen(
-      { userId: 'u1', walletId: 'w1', walletPublicKey: VALID_PUBKEY, amountSol: 0.1 },
+      {
+        userId: 'u1',
+        walletId: 'w1',
+        walletPublicKey: VALID_PUBKEY,
+        amountSol: 0.1,
+        tokenId: 't1',
+      },
       { isLive: true },
     );
     expect(result.allowed).toBe(false);
@@ -230,7 +262,7 @@ describe('TradingSafety.checkBeforeOpen orchestration', () => {
   it('blocks a trade above the per-trade limit', async () => {
     const safety = makeSafety({ config: { maxTradeSol: 0.1 } });
     const result = await safety.checkBeforeOpen(
-      { userId: 'u1', walletId: 'w1', walletPublicKey: VALID_PUBKEY, amountSol: 5 },
+      { userId: 'u1', walletId: 'w1', walletPublicKey: VALID_PUBKEY, amountSol: 5, tokenId: 't1' },
       { isLive: false },
     );
     expect(result.allowed).toBe(false);
@@ -245,7 +277,13 @@ describe('TradingSafety.checkBeforeOpen orchestration', () => {
     };
     const safety = makeSafety({ prisma, config: { maxDailyLossUsd: 50 } });
     const result = await safety.checkBeforeOpen(
-      { userId: 'u1', walletId: 'w1', walletPublicKey: VALID_PUBKEY, amountSol: 0.1 },
+      {
+        userId: 'u1',
+        walletId: 'w1',
+        walletPublicKey: VALID_PUBKEY,
+        amountSol: 0.1,
+        tokenId: 't1',
+      },
       { isLive: false },
     );
     expect(result.allowed).toBe(false);
@@ -261,18 +299,82 @@ describe('TradingSafety.checkBeforeOpen orchestration', () => {
     };
     const safety = makeSafety({ prisma, config: { maxOpenPositions: 5 } });
     const result = await safety.checkBeforeOpen(
-      { userId: 'u1', walletId: 'w1', walletPublicKey: VALID_PUBKEY, amountSol: 0.1 },
+      {
+        userId: 'u1',
+        walletId: 'w1',
+        walletPublicKey: VALID_PUBKEY,
+        amountSol: 0.1,
+        tokenId: 't1',
+      },
       { isLive: false },
     );
     expect(result.allowed).toBe(false);
     expect(result.reason).toMatch(/max open positions/i);
   });
 
+  it('regression: blocks a second buy for a token that already has an OPEN position in this wallet', async () => {
+    // Live-money double-spend guard: two detection events for the same mint
+    // (a redelivered websocket log, or two independent detection sources) must
+    // not both pass this check and open two real positions in the same token.
+    const prisma = {
+      position: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+        findFirst: vi.fn().mockResolvedValue({ id: 'existing-open-position' }),
+      },
+    };
+    const safety = makeSafety({ prisma });
+    const result = await safety.checkBeforeOpen(
+      {
+        userId: 'u1',
+        walletId: 'w1',
+        walletPublicKey: VALID_PUBKEY,
+        amountSol: 0.1,
+        tokenId: 't1',
+      },
+      { isLive: false },
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/already exists/i);
+    expect(prisma.position.findFirst).toHaveBeenCalledWith({
+      where: { walletId: 'w1', tokenId: 't1', status: 'OPEN' },
+      select: { id: true },
+    });
+  });
+
+  it('allows the buy when no OPEN position exists yet for this token', async () => {
+    const prisma = {
+      position: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const safety = makeSafety({ prisma });
+    const result = await safety.checkBeforeOpen(
+      {
+        userId: 'u1',
+        walletId: 'w1',
+        walletPublicKey: VALID_PUBKEY,
+        amountSol: 0.1,
+        tokenId: 't1',
+      },
+      { isLive: false },
+    );
+    expect(result.allowed).toBe(true);
+  });
+
   it('checks wallet balance only when isLive is true', async () => {
     const liveConnection = { getBalance: vi.fn().mockResolvedValue(0) };
     const safetyLive = makeSafety({ connection: liveConnection });
     const liveResult = await safetyLive.checkBeforeOpen(
-      { userId: 'u1', walletId: 'w1', walletPublicKey: VALID_PUBKEY, amountSol: 0.5 },
+      {
+        userId: 'u1',
+        walletId: 'w1',
+        walletPublicKey: VALID_PUBKEY,
+        amountSol: 0.5,
+        tokenId: 't1',
+      },
       { isLive: true },
     );
     expect(liveResult.allowed).toBe(false);
@@ -281,7 +383,13 @@ describe('TradingSafety.checkBeforeOpen orchestration', () => {
     const paperConnection = { getBalance: vi.fn().mockResolvedValue(0) };
     const safetyPaper = makeSafety({ connection: paperConnection });
     const paperResult = await safetyPaper.checkBeforeOpen(
-      { userId: 'u1', walletId: 'w1', walletPublicKey: VALID_PUBKEY, amountSol: 0.5 },
+      {
+        userId: 'u1',
+        walletId: 'w1',
+        walletPublicKey: VALID_PUBKEY,
+        amountSol: 0.5,
+        tokenId: 't1',
+      },
       { isLive: false },
     );
     expect(paperResult.allowed).toBe(true);

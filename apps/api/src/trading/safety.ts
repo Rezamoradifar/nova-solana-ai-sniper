@@ -74,6 +74,23 @@ export function evaluateMaxOpenPositions(
   return { allowed: true };
 }
 
+/**
+ * Two detection events for the same token (e.g. a redelivered websocket log, or
+ * two independent detection sources both reaching evaluateAndMaybeBuy around the
+ * same moment) could otherwise both pass every other check and open two real,
+ * independent positions in the same token for the same wallet — a live-money
+ * double-spend, not just noise.
+ */
+export function evaluateDuplicateOpenPosition(alreadyOpenForToken: boolean): SafetyCheckResult {
+  if (alreadyOpenForToken) {
+    return {
+      allowed: false,
+      reason: 'An OPEN position already exists for this token in this wallet',
+    };
+  }
+  return { allowed: true };
+}
+
 export function evaluateWalletBalance(
   balanceSol: number,
   tradeAmountSol: number,
@@ -135,6 +152,7 @@ export interface CheckOpenParams {
   walletId: string;
   walletPublicKey: string;
   amountSol: number;
+  tokenId: string;
 }
 
 export class TradingSafety {
@@ -172,6 +190,14 @@ export class TradingSafety {
     return this.prisma.position.count({ where: { walletId, status: 'OPEN' } });
   }
 
+  private async hasOpenPositionForToken(walletId: string, tokenId: string): Promise<boolean> {
+    const existing = await this.prisma.position.findFirst({
+      where: { walletId, tokenId, status: 'OPEN' },
+      select: { id: true },
+    });
+    return existing !== null;
+  }
+
   private async walletBalanceSol(publicKey: string): Promise<number> {
     const lamports = await this.connection.getBalance(new PublicKey(publicKey));
     return lamports / LAMPORTS_PER_SOL;
@@ -198,6 +224,10 @@ export class TradingSafety {
     const openCount = await this.openPositionCount(params.walletId);
     const maxPositions = evaluateMaxOpenPositions(openCount, this.config.maxOpenPositions);
     if (!maxPositions.allowed) return maxPositions;
+
+    const alreadyOpenForToken = await this.hasOpenPositionForToken(params.walletId, params.tokenId);
+    const duplicate = evaluateDuplicateOpenPosition(alreadyOpenForToken);
+    if (!duplicate.allowed) return duplicate;
 
     if (isLive) {
       const balance = await this.walletBalanceSol(params.walletPublicKey);

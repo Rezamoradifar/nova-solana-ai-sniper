@@ -2,7 +2,11 @@ import type { Connection } from '@solana/web3.js';
 import type { PrismaClient, Dex } from '@prisma/client';
 import type { Logger } from '@nova/shared';
 import type { NotificationService } from '@nova/telegram-bot';
-import { getBondingCurveState } from '../solana/pumpfunBondingCurve.js';
+import {
+  getBondingCurveState,
+  getBondingCurveStates,
+  type BondingCurveState,
+} from '../solana/pumpfunBondingCurve.js';
 import type { DexScreenerClient } from '../solana/dexscreener.js';
 import { eventBus } from '../lib/eventBus.js';
 
@@ -70,8 +74,25 @@ export class MigrationMonitor {
       const candidates = await this.deps.prisma.token.findMany({
         where: { dex: 'PUMPFUN', createdAt: { gt: new Date(Date.now() - MAX_TOKEN_AGE_MS) } },
       });
+
+      // Batched: one getMultipleAccountsInfo round trip per 100 tokens instead of
+      // one getAccountInfo round trip per token. With thousands of tokens tracked
+      // at once, the old per-token loop was thousands of serial RPC calls every
+      // tick — the dominant contributor to sustained RPC rate-limit saturation
+      // observed live. Only tokens whose curve reports `complete` go on to the
+      // (still per-token, but now rare) DexScreener lookup + notify below.
+      const states = await getBondingCurveStates(
+        this.deps.connection,
+        candidates.map((t) => t.mint),
+      ).catch((err: unknown) => {
+        this.deps.logger.error({ err }, 'batched bonding curve read failed during migration tick');
+        return new Map<string, BondingCurveState>();
+      });
+
       for (const token of candidates) {
-        await this.checkOne(token.id, token.mint).catch((err) => {
+        const state = states.get(token.mint);
+        if (!state || !state.complete) continue;
+        await this.finishMigration(token.id, token.mint).catch((err) => {
           this.deps.logger.error({ err, mint: token.mint }, 'migration check failed');
         });
       }
@@ -91,6 +112,11 @@ export class MigrationMonitor {
     // could just be a transient RPC hiccup, not proof the curve is gone.
     if (!state || !state.complete) return false;
 
+    return this.finishMigration(tokenId, mint);
+  }
+
+  /** Shared tail end of a confirmed migration, once the bonding curve's `complete` flag is known true. */
+  private async finishMigration(tokenId: string, mint: string): Promise<boolean> {
     const pair = await this.deps.dexScreener.getBestSolanaPair(mint).catch(() => undefined);
     const newDex = mapDexIdToDex(pair?.dexId);
     if (!newDex || newDex === 'PUMPFUN') {

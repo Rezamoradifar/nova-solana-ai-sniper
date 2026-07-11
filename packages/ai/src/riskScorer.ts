@@ -21,7 +21,25 @@ Top 10 holder %: ${riskFlags.top10HolderPercent.toFixed(2)}
 Liquidity USD: ${riskFlags.liquidityUsd}
 Honeypot suspected (rule-based): ${riskFlags.isHoneypotSuspected}`;
 
-  const raw = await provider.generateText(prompt, { system: SYSTEM_PROMPT, maxTokens: 300 });
+  // A provider failure (timeout, rate limit, auth/API error) must fail closed to
+  // score 0 just like an unparseable response below, never throw uncaught. This
+  // was previously unguarded — only JSON.parse had a try/catch — so a provider-
+  // level error unwound straight out of scoreToken and aborted the entire calling
+  // handleNewTokenLaunch pipeline: no token notification, no auto-buy evaluation,
+  // nothing — a launch was silently dropped instead of degrading gracefully.
+  // Kept as its own try/catch (distinct from the parse one below) so the flag/
+  // summary still tells the two failure modes apart in logs/DB.
+  let raw: string;
+  try {
+    raw = await provider.generateText(prompt, { system: SYSTEM_PROMPT, maxTokens: 300 });
+  } catch {
+    return {
+      score: 0,
+      summary: 'AI scoring failed (provider error); treat as high risk until re-checked.',
+      flags: ['ai_call_error'],
+      provider: provider.name,
+    };
+  }
 
   try {
     const parsed = JSON.parse(raw) as { score: number; summary: string; flags: string[] };

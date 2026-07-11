@@ -29,9 +29,10 @@ describe('mapDexIdToDex', () => {
 
 vi.mock('../solana/pumpfunBondingCurve.js', () => ({
   getBondingCurveState: vi.fn(),
+  getBondingCurveStates: vi.fn().mockResolvedValue(new Map()),
 }));
 
-import { getBondingCurveState } from '../solana/pumpfunBondingCurve.js';
+import { getBondingCurveState, getBondingCurveStates } from '../solana/pumpfunBondingCurve.js';
 
 describe('MigrationMonitor.checkOne', () => {
   it('does nothing when the bonding curve is not complete', async () => {
@@ -130,33 +131,65 @@ describe('MigrationMonitor.checkOne', () => {
 });
 
 describe('MigrationMonitor.tick', () => {
-  it('checks every candidate token and swallows a single failure without aborting the batch', async () => {
-    vi.mocked(getBondingCurveState)
-      .mockRejectedValueOnce(new Error('rpc blip'))
-      .mockResolvedValueOnce({
-        virtualTokenReserves: 0n,
-        virtualSolReserves: 0n,
-        realTokenReserves: 0n,
-        realSolReserves: 0n,
-        tokenTotalSupply: 0n,
-        complete: false,
-      });
+  it('batches bonding-curve reads for every candidate in one call, then only finishes migration for the ones reporting complete', async () => {
+    vi.mocked(getBondingCurveStates).mockResolvedValueOnce(
+      new Map([
+        [
+          'MintB',
+          {
+            virtualTokenReserves: 0n,
+            virtualSolReserves: 0n,
+            realTokenReserves: 0n,
+            realSolReserves: 0n,
+            tokenTotalSupply: 0n,
+            complete: true,
+          },
+        ],
+        // MintA absent — same as an unreadable/not-found account, treated as not migrated.
+      ]),
+    );
 
     const findMany = vi.fn().mockResolvedValue([
       { id: 't1', mint: 'MintA' },
       { id: 't2', mint: 'MintB' },
     ]);
+    const update = vi.fn().mockResolvedValue({ id: 't2', symbol: 'BAR' });
+    const getBestSolanaPair = vi
+      .fn()
+      .mockResolvedValue({ dexId: 'raydium', pairAddress: 'PoolAddr222' });
     const monitor = new MigrationMonitor({
-      prisma: { token: { findMany, update: vi.fn() } } as never,
+      prisma: { token: { findMany, update } } as never,
+      connection: {} as never,
+      dexScreener: { getBestSolanaPair } as never,
+      logger: fakeLogger(),
+    });
+
+    await expect(monitor.tick()).resolves.toBeUndefined();
+    expect(getBondingCurveStates).toHaveBeenCalledWith(expect.anything(), ['MintA', 'MintB']);
+    // Only the token whose batched state came back `complete` goes on to the
+    // per-mint DexScreener lookup + update — not every candidate.
+    expect(getBestSolanaPair).toHaveBeenCalledTimes(1);
+    expect(getBestSolanaPair).toHaveBeenCalledWith('MintB');
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 't2' },
+      data: { dex: 'RAYDIUM', poolAddress: 'PoolAddr222' },
+    });
+  });
+
+  it('swallows a batch-wide read failure without throwing, and records no migrations that tick', async () => {
+    vi.mocked(getBondingCurveStates).mockRejectedValueOnce(new Error('rpc blip'));
+
+    const findMany = vi.fn().mockResolvedValue([{ id: 't1', mint: 'MintA' }]);
+    const update = vi.fn();
+    const monitor = new MigrationMonitor({
+      prisma: { token: { findMany, update } } as never,
       connection: {} as never,
       dexScreener: { getBestSolanaPair: vi.fn() } as never,
       logger: fakeLogger(),
     });
 
     await expect(monitor.tick()).resolves.toBeUndefined();
-    expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ dex: 'PUMPFUN' }) }),
-    );
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('ignores overlapping ticks while one is already in flight', async () => {
