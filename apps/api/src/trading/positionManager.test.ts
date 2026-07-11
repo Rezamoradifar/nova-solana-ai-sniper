@@ -1,4 +1,5 @@
 import { Keypair, VersionedTransaction } from '@solana/web3.js';
+import bs58 from 'bs58';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@nova/shared', async (importOriginal) => {
@@ -22,6 +23,11 @@ function fakeSignedVersionedTx(): VersionedTransaction {
     signatures: [new Uint8Array(64).fill(1)],
   }) as VersionedTransaction;
 }
+
+/** The exact signature broadcastTransaction derives from fakeSignedVersionedTx()'s
+ *  fixed signature bytes — sendTransaction's own mocked return value is never used
+ *  as the signature (broadcastTransaction reads it from the transaction itself). */
+const FAKE_TX_SIGNATURE = bs58.encode(new Uint8Array(64).fill(1));
 
 const BASE_PARAMS = {
   userId: 'user-1',
@@ -711,5 +717,141 @@ describe('PositionManager notification content', () => {
 
     expect(result.closed).toBe(true);
     expect(notifier.notifySellCard).not.toHaveBeenCalled();
+  });
+});
+
+describe('PositionManager unverified-swap lock (regression: live incident 2026-07-11)', () => {
+  // Live-verified: a sell landed on-chain successfully, but the follow-up RPC call
+  // that reads back the actual SOL received (getActualSolDelta) failed. Before this
+  // guard, the position was left OPEN with its original amountToken untouched, so
+  // the next PriceMonitor tick saw the same still-open position and submitted a
+  // SECOND real sell of the same recorded amount — succeeding again because the
+  // wallet held unrelated tokens of the same mint, draining them too. A third tick
+  // did it again. This test proves a second closePosition call for the same
+  // position is refused outright, with zero further swap calls, once that happens.
+  it('closePosition refuses to resubmit a sell for a position whose previous swap landed but failed verification', async () => {
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
+      getQuote: vi.fn(),
+    } as never;
+    const sendTransaction = vi.fn().mockResolvedValue('sig-verify-fail-1');
+    const connection = {
+      getParsedTokenAccountsByOwner: vi.fn().mockResolvedValue({
+        value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: '1000' } } } } } }],
+      }),
+      sendTransaction,
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      // Simulates the exact live failure: the swap confirmed, but reading it back
+      // to compute the actual SOL received fails (e.g. an RPC outage right after).
+      getParsedTransaction: vi.fn().mockRejectedValue(new Error('429 Too Many Requests')),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-1' });
+    const notifyError = vi.fn();
+    const prisma = {
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: 'position-1',
+          tokenId: 'token-1',
+          walletId: 'wallet-1',
+          entryPriceUsd: 0.001,
+          amountToken: 1000,
+          amountSolInvested: 0.01,
+          highWaterMarkUsd: 0.001,
+          trailingStopPercent: null,
+          closedAt: null,
+          createdAt: new Date('2026-07-10T00:00:00Z'),
+          token: {
+            mint: 'CkWryeENpbbz6Lj4LFQ1ya6U7bJoAbtBkAnSzaeaXCP5',
+            dex: 'PUMPFUN',
+            poolAddress: null,
+            symbol: 'FOO',
+            name: 'Foo',
+            decimals: 9,
+          },
+        }),
+        update: vi.fn(),
+      },
+      trade: { create: tradeCreate },
+    } as never;
+    const notifier = { notifyError } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      notifier,
+      false, // live trading
+    );
+
+    // First attempt: swap lands, verification fails.
+    await expect(
+      manager.closePosition('position-1', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 }),
+    ).rejects.toThrow();
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    expect(tradeCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        side: 'SELL',
+        status: 'FAILED',
+        txSignature: FAKE_TX_SIGNATURE,
+      }),
+    });
+    expect(notifyError).toHaveBeenCalledTimes(1);
+
+    // Second attempt (e.g. the next PriceMonitor tick): must be refused outright,
+    // with no new swap ever submitted — this is the actual fix.
+    await expect(
+      manager.closePosition('position-1', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 }),
+    ).rejects.toThrow(/could not be verified/);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('openPosition refuses to resubmit a buy for a wallet+token whose previous swap landed but failed verification', async () => {
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
+      getQuote: vi.fn(),
+    } as never;
+    const sendTransaction = vi.fn().mockResolvedValue('sig-buy-verify-fail-1');
+    const connection = {
+      sendTransaction,
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi.fn().mockRejectedValue(new Error('429 Too Many Requests')),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-1' });
+    const notifyError = vi.fn();
+    const prisma = {
+      trade: { create: tradeCreate },
+      position: { create: vi.fn() },
+      token: { findUnique: vi.fn().mockResolvedValue(undefined) },
+    } as never;
+    const notifier = { notifyError } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      notifier,
+      false, // live trading
+    );
+
+    await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow();
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    expect(tradeCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        side: 'BUY',
+        status: 'FAILED',
+        txSignature: FAKE_TX_SIGNATURE,
+      }),
+    });
+
+    await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow(/could not be verified/);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
   });
 });
