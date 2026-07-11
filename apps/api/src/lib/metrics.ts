@@ -16,6 +16,13 @@ export interface MetricsSnapshot {
   /** Estimated Helius RPC calls avoided by rejecting a candidate before the
    * full RiskAnalyzer.analyze() (mint-authority + holder-concentration) runs. */
   rpcCallsSavedEstimate: number;
+  /** Notify gate (notifyGate.ts) — applied to every detection source, on-chain
+   * and Telegram alike, in worker.ts's shared notifyAndAutoTrade.
+   * launchNotificationsSuppressed is the direct "before vs after" number for
+   * this fix: it's exactly how many New Launch/AI High Score alerts would
+   * have gone out under the old unconditional-notify behavior but didn't. */
+  launchNotificationsSent: number;
+  launchNotificationsSuppressed: number;
 }
 
 type Counter = keyof MetricsSnapshot;
@@ -31,6 +38,8 @@ class Metrics {
     qualifiedOpportunities: 0,
     executedTrades: 0,
     rpcCallsSavedEstimate: 0,
+    launchNotificationsSent: 0,
+    launchNotificationsSuppressed: 0,
   };
 
   increment(counter: Counter, by = 1): void {

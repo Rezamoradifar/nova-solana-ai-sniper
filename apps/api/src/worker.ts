@@ -27,6 +27,7 @@ import { createBot, NotificationService, AI_HIGH_SCORE_THRESHOLD } from '@nova/t
 import { eventBus } from './lib/eventBus.js';
 import { metrics } from './lib/metrics.js';
 import { TtlCache } from './lib/ttlCache.js';
+import { evaluateHardRiskGate, evaluateNotifyGate } from './notify/notifyGate.js';
 import { TwitterClient } from './social/twitter.js';
 import { TwitterMonitor } from './social/twitterMonitor.js';
 import { TelegramTrendClient } from './social/telegramTrend.js';
@@ -280,7 +281,16 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
     let aiScoreValue = ruleScore;
 
-    if (aiProvider) {
+    // Skip the paid AI provider call when the token already fails the hard
+    // risk gate (liquidity/honeypot/freeze/mint/LP) — no AI score can change
+    // that outcome (see notifyGate.ts's evaluateNotifyGate: it's additive on
+    // top of these, never a rescue), so there's no reason to spend on a
+    // verdict that can't affect whether this token gets notified about.
+    const hardGatePassed = evaluateHardRiskGate(riskFlags, {
+      minLiquidityUsd: app.config.NOTIFY_MIN_LIQUIDITY_USD,
+    }).allowed;
+
+    if (aiProvider && hardGatePassed) {
       const aiScore = await scoreToken(
         aiProvider,
         { mint, decimals: 9, createdAt: detectedAt, dex: dex.toLowerCase() as Dex },
@@ -297,12 +307,16 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   }
 
   /**
-   * Shared by every path that has already decided a token is worth surfacing
-   * (on-chain detection unconditionally; the Telegram trend source only after
-   * its own liquidity + AI gates pass — see handleTelegramSignal below):
-   * fires the New Launch / AI High Score alerts and evaluates every active
-   * SnipeConfig for an auto-buy. Extracted verbatim from handleNewTokenLaunch's
-   * previous tail — same fields, same order, same behavior.
+   * Shared by every detection source (on-chain + the Telegram trend source):
+   * gates the New Launch / AI High Score alerts behind the notify gate
+   * (notifyGate.ts — liquidity, honeypot, freeze authority, mint risk, LP
+   * lock, and AI/rule score, ALL must pass) and evaluates every active
+   * SnipeConfig for an auto-buy. The notify gate never affects auto-buying —
+   * AutoTrader.evaluateAndMaybeBuy always runs, exactly as before; it has its
+   * own independent, per-user, already-correct gates for that decision. This
+   * is the one place a "New Launch" alert can be produced, so gating here
+   * closes the bug for both detection sources at once, regardless of what
+   * upstream shortcuts either path already takes.
    */
   async function notifyAndAutoTrade(
     mint: string,
@@ -311,36 +325,60 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     riskFlags: RiskFlags,
     aiScoreValue: number,
   ): Promise<{ boughtCount: number }> {
-    // NotificationService.notifyNewToken fans this out to the owner chat plus every
-    // user with a live snipe config (isActive + autoBuyOnLaunch — the exact set
-    // AutoTrader.evaluateAndMaybeBuy is about to query below) — see notifications.ts.
-    await notifier?.notifyNewToken({
-      mint,
-      dex,
-      name: riskFlags.name,
-      symbol: riskFlags.symbol,
-      liquidityUsd: riskFlags.liquidityUsd,
-      marketCapUsd: riskFlags.marketCapUsd,
-      aiScore: aiScoreValue,
-      isHoneypotSuspected: riskFlags.isHoneypotSuspected,
-      mintAuthorityRevoked: riskFlags.mintAuthorityRevoked,
-      freezeAuthorityRevoked: riskFlags.freezeAuthorityRevoked,
-      lpBurnedOrLocked: riskFlags.lpBurnedOrLocked,
-      top10HolderPercent: riskFlags.top10HolderPercent,
-      priceChangeH1: riskFlags.priceChangeH1,
-    });
+    const notifyGate = evaluateNotifyGate(
+      {
+        liquidityUsd: riskFlags.liquidityUsd,
+        isHoneypotSuspected: riskFlags.isHoneypotSuspected,
+        freezeAuthorityRevoked: riskFlags.freezeAuthorityRevoked,
+        mintAuthorityRevoked: riskFlags.mintAuthorityRevoked,
+        lpBurnedOrLocked: riskFlags.lpBurnedOrLocked,
+        aiScore: aiScoreValue,
+      },
+      {
+        minLiquidityUsd: app.config.NOTIFY_MIN_LIQUIDITY_USD,
+        minAiScore: app.config.NOTIFY_MIN_AI_SCORE,
+      },
+    );
 
-    // Distinct alert type, in addition to the New Launch alert above — only for
-    // the top slice of launches (see AI_HIGH_SCORE_THRESHOLD's own doc comment).
-    if (aiScoreValue >= AI_HIGH_SCORE_THRESHOLD) {
-      await notifier?.notifyAiHighScore({
+    if (notifyGate.allowed) {
+      metrics.increment('launchNotificationsSent');
+      // NotificationService.notifyNewToken fans this out to the owner chat plus every
+      // user with a live snipe config (isActive + autoBuyOnLaunch — the exact set
+      // AutoTrader.evaluateAndMaybeBuy is about to query below) — see notifications.ts.
+      await notifier?.notifyNewToken({
         mint,
         dex,
         name: riskFlags.name,
         symbol: riskFlags.symbol,
-        aiScore: aiScoreValue,
         liquidityUsd: riskFlags.liquidityUsd,
+        marketCapUsd: riskFlags.marketCapUsd,
+        aiScore: aiScoreValue,
+        isHoneypotSuspected: riskFlags.isHoneypotSuspected,
+        mintAuthorityRevoked: riskFlags.mintAuthorityRevoked,
+        freezeAuthorityRevoked: riskFlags.freezeAuthorityRevoked,
+        lpBurnedOrLocked: riskFlags.lpBurnedOrLocked,
+        top10HolderPercent: riskFlags.top10HolderPercent,
+        priceChangeH1: riskFlags.priceChangeH1,
       });
+
+      // Distinct alert type, in addition to the New Launch alert above — only for
+      // the top slice of launches (see AI_HIGH_SCORE_THRESHOLD's own doc comment).
+      if (aiScoreValue >= AI_HIGH_SCORE_THRESHOLD) {
+        await notifier?.notifyAiHighScore({
+          mint,
+          dex,
+          name: riskFlags.name,
+          symbol: riskFlags.symbol,
+          aiScore: aiScoreValue,
+          liquidityUsd: riskFlags.liquidityUsd,
+        });
+      }
+    } else {
+      metrics.increment('launchNotificationsSuppressed');
+      app.log.debug(
+        { mint, dex, reasons: notifyGate.reasons },
+        'Notify Gate: rejected — no Telegram notification sent',
+      );
     }
 
     const results = await autoTrader.evaluateAndMaybeBuy(mint, tokenId, riskFlags, aiScoreValue);

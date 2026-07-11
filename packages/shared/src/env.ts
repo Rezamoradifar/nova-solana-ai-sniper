@@ -121,6 +121,18 @@ export const envSchema = z.object({
   // the Launch Feed/notifications before a user-level config is even consulted.
   TELEGRAM_TREND_MIN_AI_SCORE: z.coerce.number().min(0).max(100).default(50),
 
+  // Notify gate (apps/api/src/notify/notifyGate.ts) — the "is this token worth
+  // a Telegram notification at all" bar, applied uniformly to every detection
+  // source (on-chain scanners + the Telegram trend source) in worker.ts's
+  // shared notifyAndAutoTrade. Independent of any per-user SnipeConfig
+  // buy-gate: this only decides whether the New Launch/AI High Score alert
+  // fires, never whether AutoTrader buys (that has its own, unaffected gates).
+  // minLiquidityUsd defaults to 500 to match the exact bar already baked into
+  // RiskAnalyzer's own isHoneypotSuspected heuristic; minAiScore defaults to
+  // 50 to match TELEGRAM_TREND_MIN_AI_SCORE's precedent.
+  NOTIFY_MIN_LIQUIDITY_USD: z.coerce.number().min(0).default(500),
+  NOTIFY_MIN_AI_SCORE: z.coerce.number().min(0).max(100).default(50),
+
   // Third-party market data
   DEXSCREENER_API_BASE: z.string().url().default('https://api.dexscreener.com'),
   JUPITER_API_BASE: z.string().url().default('https://lite-api.jup.ag'),
