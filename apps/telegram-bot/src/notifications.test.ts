@@ -6,6 +6,8 @@ import {
   buildBuyLink,
   buildDexScreenerLink,
   formatNewTokenMessage,
+  formatAiHighScoreMessage,
+  AI_HIGH_SCORE_THRESHOLD,
   NotificationService,
 } from './notifications.js';
 
@@ -73,6 +75,35 @@ describe('formatNewTokenMessage', () => {
     expect(text).not.toContain('AI Score:');
     expect(text).not.toContain('Risk:');
     expect(text).toContain('[Buy](https://jup.ag/swap/SOL-MintXYZ)');
+  });
+
+  it('includes real momentum (DexScreener priceChange), not an invented formula', () => {
+    const up = formatNewTokenMessage({ mint: 'M', dex: 'PUMPFUN', priceChangeH1: 12.5 });
+    expect(up).toContain('📈');
+    expect(up).toContain('12.5%');
+
+    const down = formatNewTokenMessage({ mint: 'M', dex: 'PUMPFUN', priceChangeH1: -8.2 });
+    expect(down).toContain('📉');
+    expect(down).toContain('-8.2%');
+  });
+});
+
+describe('formatAiHighScoreMessage', () => {
+  it('renders the score, dex, mint, and links', () => {
+    const text = formatAiHighScoreMessage({
+      mint: 'MintABC',
+      dex: 'PUMPFUN',
+      name: 'Rage Guy',
+      symbol: 'RAGEGUY',
+      aiScore: 92,
+      liquidityUsd: 50000,
+    });
+    expect(text).toContain('AI High Score');
+    expect(text).toContain('92/100');
+    expect(text).toContain('PUMPFUN');
+    expect(text).toContain('MintABC');
+    expect(text).toContain('Liquidity: $50000');
+    expect(text).toContain('[Buy](https://pump.fun/coin/MintABC)');
   });
 });
 
@@ -172,6 +203,34 @@ describe('NotificationService — sniper alert fan-out (notifyTrade/notifyExit/n
       select: { telegramId: true },
     });
   });
+
+  it('notifyMigration also fans out — migration is the dominant real-world path a token reaches a non-Pump.fun DEX', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = fakePrisma(['111', '222']);
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyMigration({ mint: 'MintABC', fromDex: 'PUMPFUN', toDex: 'PUMPSWAP' });
+
+    expect(sendMessage).toHaveBeenCalledTimes(3); // owner + 111 + 222
+    const chatIds = sendMessage.mock.calls.map((c) => c[0]);
+    expect(new Set(chatIds)).toEqual(new Set(['OWNER_CHAT', '111', '222']));
+  });
+
+  it('notifyAiHighScore fans out the same way as the other sniper alert types', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = fakePrisma(['111', '222']);
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyAiHighScore({
+      mint: 'MintABC',
+      dex: 'PUMPFUN',
+      aiScore: AI_HIGH_SCORE_THRESHOLD,
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(3);
+    const chatIds = sendMessage.mock.calls.map((c) => c[0]);
+    expect(new Set(chatIds)).toEqual(new Set(['OWNER_CHAT', '111', '222']));
+  });
 });
 
 describe('NotificationService — operational alerts stay owner-only', () => {
@@ -195,17 +254,6 @@ describe('NotificationService — operational alerts stay owner-only', () => {
     const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
 
     await service.notifySocialMention('gm', 'tweet-1');
-
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(prisma.user.findMany as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
-  });
-
-  it('notifyMigration never queries active users or fans out', async () => {
-    const { bot, sendMessage } = fakeBot();
-    const prisma = { user: { findMany: vi.fn() } } as unknown as PrismaClient;
-    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
-
-    await service.notifyMigration({ mint: 'MintABC', fromDex: 'PUMPFUN', toDex: 'PUMPSWAP' });
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(prisma.user.findMany as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();

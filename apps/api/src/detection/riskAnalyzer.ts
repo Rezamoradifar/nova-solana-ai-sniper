@@ -145,6 +145,8 @@ export class RiskAnalyzer {
       name: pair?.baseToken?.name,
       symbol: pair?.baseToken?.symbol,
       marketCapUsd: pair?.marketCap,
+      priceChangeH1: pair?.priceChange?.h1,
+      priceChangeH24: pair?.priceChange?.h24,
     };
   }
 

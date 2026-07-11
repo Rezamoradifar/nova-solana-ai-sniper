@@ -16,7 +16,7 @@ import { TradingSafety, verifySafetySystemReady, type SafetyConfig } from './tra
 import { PriceMonitor } from './trading/priceMonitor.js';
 import { hasAnyAiProvider, resolveAiProvider, scoreToken } from '@nova/ai';
 import type { Dex } from '@nova/shared';
-import { createBot, NotificationService } from '@nova/telegram-bot';
+import { createBot, NotificationService, AI_HIGH_SCORE_THRESHOLD } from '@nova/telegram-bot';
 import { eventBus } from './lib/eventBus.js';
 import { TwitterClient } from './social/twitter.js';
 import { TwitterMonitor } from './social/twitterMonitor.js';
@@ -209,6 +209,11 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     detectedAt: string,
     poolAddress?: string,
   ) {
+    // Pipeline checkpoint: Scanner reached. Every detection source (pump.fun's own
+    // monitor and dexRegistry.startAll's per-DEX pool-creation watchers) funnels
+    // through this one function, so this line firing confirms a scanner actually
+    // produced a launch event for this mint, before any filtering happens.
+    app.log.debug({ mint, dex, poolAddress }, 'Scanner: handleNewTokenLaunch reached');
     const riskFlags = await riskAnalyzer.analyze({ mint, dex, poolAddress });
 
     const token = await app.prisma.token.upsert({
@@ -271,7 +276,21 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       freezeAuthorityRevoked: riskFlags.freezeAuthorityRevoked,
       lpBurnedOrLocked: riskFlags.lpBurnedOrLocked,
       top10HolderPercent: riskFlags.top10HolderPercent,
+      priceChangeH1: riskFlags.priceChangeH1,
     });
+
+    // Distinct alert type, in addition to the New Launch alert above — only for
+    // the top slice of launches (see AI_HIGH_SCORE_THRESHOLD's own doc comment).
+    if (aiScoreValue >= AI_HIGH_SCORE_THRESHOLD) {
+      await notifier?.notifyAiHighScore({
+        mint,
+        dex,
+        name: riskFlags.name,
+        symbol: riskFlags.symbol,
+        aiScore: aiScoreValue,
+        liquidityUsd: riskFlags.liquidityUsd,
+      });
+    }
 
     await autoTrader.evaluateAndMaybeBuy(mint, token.id, riskFlags, aiScoreValue);
   }

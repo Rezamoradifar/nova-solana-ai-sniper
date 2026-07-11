@@ -24,7 +24,18 @@ export async function buildApp() {
   // trustProxy: the API only ever receives real client traffic via the Nginx
   // reverse proxy (docker-compose), which sets X-Forwarded-For — without this,
   // rate limiting would key off Nginx's own IP and apply to all users at once.
-  const app = Fastify({ logger: true, trustProxy: true });
+  //
+  // logger.level: `logger: true` alone defaults Fastify's internal pino instance
+  // to 'info' regardless of the LOG_LEVEL env var — every logger.debug(...) call
+  // anywhere in this app (worker.ts, positionManager.ts, autoTrader.ts all log via
+  // this same app.log instance) was silently unreachable no matter how LOG_LEVEL
+  // was set. Read directly from process.env here (not the config plugin, which
+  // isn't registered yet) — matches the same process.env.LOG_LEVEL read
+  // packages/shared's own createLogger() already does.
+  const app = Fastify({
+    logger: { level: process.env.LOG_LEVEL ?? 'info' },
+    trustProxy: true,
+  });
 
   await app.register(configPlugin);
   await app.register(helmet);

@@ -23,6 +23,11 @@ export interface RiskFlags {
   name?: string;
   symbol?: string;
   marketCapUsd?: number;
+  // Real DexScreener market data (pair.priceChange), same free-ride as the fields
+  // above — not a computed/invented "momentum" formula, just the raw % change
+  // DexScreener itself already reports.
+  priceChangeH1?: number;
+  priceChangeH24?: number;
 }
 
 /** Optional exit strategy — see apps/api/src/trading/adaptiveTrailingStop.ts. */

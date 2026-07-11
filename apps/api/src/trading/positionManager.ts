@@ -284,6 +284,10 @@ export class PositionManager {
       );
       throw new SafetyCheckError(check.reason ?? 'unknown safety violation');
     }
+    this.logger.debug(
+      { walletId: params.walletId, mint: params.mint, paperTrading: this.paperTrading },
+      'Wallet: safety check passed — Buy Executor starting',
+    );
 
     const amountLamports = BigInt(Math.floor(params.amountSol * LAMPORTS_PER_SOL));
 
@@ -303,6 +307,10 @@ export class PositionManager {
       signature = paperSignature();
     } else {
       const keypair = unsealKeypair(params.encryptedSecret, params.encryptionKey);
+      this.logger.debug(
+        { walletPublicKey: keypair.publicKey.toBase58(), mint: params.mint },
+        'Buy Executor: sending live swap',
+      );
       signature = await this.sendSwap(
         keypair,
         {
@@ -378,6 +386,10 @@ export class PositionManager {
       select: { dex: true },
     });
 
+    this.logger.debug(
+      { positionId: position.id, hasNotifier: !!this.notifier },
+      'Telegram Notification: dispatching BUY notifyTrade',
+    );
     await this.notifier?.notifyTrade({
       side: 'BUY',
       symbol: params.symbol ?? params.mint.slice(0, 8),
@@ -413,6 +425,16 @@ export class PositionManager {
       stopLossPercent: position.stopLossPercent,
       trailingStopPercent: position.trailingStopPercent,
     });
+    this.logger.debug(
+      {
+        positionId,
+        currentPriceUsd,
+        pnlPercent: decision.pnlPercent,
+        shouldExit: decision.shouldExit,
+        reason: decision.reason,
+      },
+      'Sell Executor checkpoint: evaluateExit result',
+    );
 
     if (!decision.shouldExit) {
       await this.prisma.position.update({
@@ -466,6 +488,16 @@ export class PositionManager {
       );
       const recordedAmount = BigInt(Math.floor(position.amountToken));
       const sellAmountRaw = realBalance < recordedAmount ? realBalance : recordedAmount;
+      this.logger.debug(
+        {
+          walletPublicKey: keypair.publicKey.toBase58(),
+          mint: position.token.mint,
+          realBalance: realBalance.toString(),
+          recordedAmount: recordedAmount.toString(),
+          sellAmountRaw: sellAmountRaw.toString(),
+        },
+        'Sell Executor: sending live swap',
+      );
 
       signature = await this.sendSwap(
         keypair,
@@ -532,6 +564,10 @@ export class PositionManager {
     // additional to the TP/SL/trailing-specific alert below, not a replacement for
     // it — before this, a manual close (exit.reason undefined) had no alert path at
     // all, since notifyExit only ever fired when a reason was set.
+    this.logger.debug(
+      { positionId, hasNotifier: !!this.notifier },
+      'Telegram Notification: dispatching SELL notifyTrade',
+    );
     await this.notifier?.notifyTrade({
       side: 'SELL',
       symbol: position.token.symbol ?? position.token.mint.slice(0, 8),

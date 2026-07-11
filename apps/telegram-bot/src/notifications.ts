@@ -41,6 +41,17 @@ export interface NewTokenNotification {
   freezeAuthorityRevoked?: boolean;
   lpBurnedOrLocked?: boolean;
   top10HolderPercent?: number;
+  // Real DexScreener priceChange %, not a computed/invented formula.
+  priceChangeH1?: number;
+}
+
+export interface AiHighScoreNotification {
+  mint: string;
+  dex: string;
+  name?: string;
+  symbol?: string;
+  aiScore: number;
+  liquidityUsd?: number;
 }
 
 export interface MigrationNotification {
@@ -105,10 +116,38 @@ export function formatNewTokenMessage(token: NewTokenNotification): string {
     riskParts.push(`Top10 ${token.top10HolderPercent.toFixed(0)}%`);
   }
   const riskLine = riskParts.length > 0 ? `\nRisk: ${riskParts.join(' | ')}` : '';
+  const momentumLine =
+    token.priceChangeH1 !== undefined
+      ? `\nMomentum (1h): ${token.priceChangeH1 >= 0 ? '📈' : '📉'} ${token.priceChangeH1.toFixed(1)}%`
+      : '';
   const honeypotLine = token.isHoneypotSuspected ? '\n⚠️ Honeypot/rug risk flagged' : '';
   return (
     `${riskEmoji} *New ${token.dex} launch*${nameLine}\n` +
-    `\`${token.mint}\`${liquidityLine}${marketCapLine}${scoreLine}${riskLine}${honeypotLine}\n` +
+    `\`${token.mint}\`${liquidityLine}${marketCapLine}${scoreLine}${riskLine}${momentumLine}${honeypotLine}\n` +
+    linksLine(token.mint, token.dex)
+  );
+}
+
+/**
+ * 85/100 — chosen as a clearly "exceptional, not just passing" bar: SnipeConfig's
+ * own minAiScore default is 60 (a buy-gate, not an alert threshold), so 85 flags
+ * only the top slice of launches as distinctly alert-worthy, not everything that
+ * would already pass a typical auto-buy filter. A reasonable starting point, not
+ * a backtested value — tune via AI_HIGH_SCORE_THRESHOLD if it fires too often/rarely.
+ */
+export const AI_HIGH_SCORE_THRESHOLD = 85;
+
+export function formatAiHighScoreMessage(token: AiHighScoreNotification): string {
+  const nameLine =
+    token.name || token.symbol
+      ? ` ${token.name ?? ''}${token.name && token.symbol ? ' — ' : ''}${token.symbol ? `$${token.symbol}` : ''}`
+      : '';
+  const liquidityLine =
+    token.liquidityUsd !== undefined ? `\nLiquidity: $${token.liquidityUsd.toFixed(0)}` : '';
+  return (
+    `⭐ *AI High Score* (${token.aiScore.toFixed(0)}/100)${nameLine}\n` +
+    `${token.dex}\n` +
+    `\`${token.mint}\`${liquidityLine}\n` +
     linksLine(token.mint, token.dex)
   );
 }
@@ -148,12 +187,15 @@ function formatExitMessage(exit: PositionExitNotification): string {
 
 /**
  * All Telegram alert delivery goes through this one class — the owner's configured
- * broadcast chat, plus (for the sniper alert types: trade/exit/new-token) every
- * other user whose own SnipeConfig is currently live, so a referral-reward-activated
- * user sees exactly the same alerts as the owner, not a lesser or absent feed.
- * notifyError/notifySocialMention/notifyMigration stay owner-only — they're
- * operational/ops signals, not one of the requested sniper alert types, and nobody
- * asked to have system errors or Twitter mentions pushed to every active user.
+ * broadcast chat, plus (for the sniper alert types: trade/exit/new-token/migration)
+ * every other user whose own SnipeConfig is currently live, so a referral-reward-
+ * activated user sees exactly the same alerts as the owner, not a lesser or absent
+ * feed. notifyMigration fans out too — migration is the dominant real-world path a
+ * token ever reaches PumpSwap/Raydium/Orca/Meteora, not a fresh pool creation, so
+ * treating it as owner-only was why active users effectively only ever saw Pump.fun
+ * alerts. notifyError/notifySocialMention stay owner-only — genuine operational/ops
+ * signals, not a DEX/trading alert type, and nobody asked to have system errors or
+ * Twitter mentions pushed to every active user.
  * Every send is best-effort per recipient (logged, not thrown) so one blocked chat,
  * or a Telegram outage entirely, never breaks the caller (worker/API request path).
  */
@@ -214,6 +256,11 @@ export class NotificationService {
     await this.sendToActiveUsers(formatNewTokenMessage(token));
   }
 
+  /** Distinct alert type, fired in addition to the regular New Launch alert when aiScore crosses AI_HIGH_SCORE_THRESHOLD. */
+  async notifyAiHighScore(token: AiHighScoreNotification): Promise<void> {
+    await this.sendToActiveUsers(formatAiHighScoreMessage(token));
+  }
+
   async notifyError(context: string, message: string): Promise<void> {
     await this.sendToOwner(`🚨 *Error* in ${context}\n${message}`);
   }
@@ -224,12 +271,20 @@ export class NotificationService {
     );
   }
 
+  /**
+   * Fans out like the other DEX-relevant alerts (not owner-only): migration from
+   * pump.fun's bonding curve is the dominant real-world path a token ever reaches
+   * PumpSwap/Raydium/Orca/Meteora — direct pool creation on those DEXs is far
+   * rarer. Treating this as owner-only was the actual reason active users only
+   * ever saw Pump.fun alerts: most non-Pump.fun tokens they'd want to know about
+   * arrive via this exact path, not a fresh launch on that DEX.
+   */
   async notifyMigration(migration: MigrationNotification): Promise<void> {
     const label = migration.symbol ?? migration.mint.slice(0, 8);
-    await this.sendToOwner(
+    await this.sendToActiveUsers(
       `🚀 *Migration detected*: \`${label}\`\n` +
         `${migration.fromDex} → ${migration.toDex}\n` +
-        `[Chart](${buildDexScreenerLink(migration.mint)})`,
+        `${linksLine(migration.mint, migration.toDex)}`,
     );
   }
 }
