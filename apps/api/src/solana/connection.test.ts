@@ -1,14 +1,37 @@
 import { describe, expect, it } from 'vitest';
-import { resolveAllRpcEndpoints, resolveRpcUrl } from './connection.js';
+import { resolveAllRpcEndpoints, resolveRpcUrl, resolveWsUrl } from './connection.js';
 
 describe('resolveAllRpcEndpoints', () => {
-  it('puts Helius first when configured, and always ends with the public endpoint', () => {
+  it('puts Helius first (with its wss endpoint) when it is the only provider configured', () => {
     const config = { heliusApiKey: 'key123' };
     const endpoints = resolveAllRpcEndpoints(config);
-    expect(endpoints[0]).toEqual({ label: 'helius', url: resolveRpcUrl(config) });
+    expect(endpoints[0]).toEqual({
+      label: 'helius',
+      url: resolveRpcUrl(config),
+      wsUrl: resolveWsUrl(config),
+    });
     expect(endpoints[endpoints.length - 1]).toEqual({
       label: 'public',
       url: 'https://api.mainnet-beta.solana.com',
+    });
+  });
+
+  it('puts QuickNode first (as primary) with Helius as a fallback when both are configured', () => {
+    const config = {
+      heliusApiKey: 'key123',
+      quicknodeRpcUrl: 'https://quicknode.example.com',
+      quicknodeWsUrl: 'wss://quicknode.example.com',
+    };
+    const endpoints = resolveAllRpcEndpoints(config);
+    expect(endpoints[0]).toEqual({
+      label: 'quicknode',
+      url: 'https://quicknode.example.com',
+      wsUrl: 'wss://quicknode.example.com',
+    });
+    expect(endpoints[1]).toEqual({
+      label: 'helius',
+      url: resolveRpcUrl(config),
+      wsUrl: resolveWsUrl(config),
     });
   });
 
@@ -23,7 +46,7 @@ describe('resolveAllRpcEndpoints', () => {
     expect(endpoints.map((e) => e.url)).toContain('https://custom-rpc.example.com');
   });
 
-  it('includes QuickNode, Chainstack, and comma-separated ADDITIONAL_RPC_URLS when configured', () => {
+  it('includes QuickNode, Chainstack, and comma-separated ADDITIONAL_RPC_URLS when configured, QuickNode first', () => {
     const endpoints = resolveAllRpcEndpoints({
       heliusApiKey: 'key123',
       quicknodeRpcUrl: 'https://quicknode.example.com',
@@ -31,8 +54,8 @@ describe('resolveAllRpcEndpoints', () => {
       additionalRpcUrls: 'https://a.example.com, https://b.example.com',
     });
     expect(endpoints.map((e) => e.label)).toEqual([
-      'helius',
       'quicknode',
+      'helius',
       'chainstack',
       'custom-1',
       'custom-2',

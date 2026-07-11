@@ -42,6 +42,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       wsUrl: app.config.SOLANA_WS_URL,
       heliusApiKey: app.config.HELIUS_API_KEY,
       quicknodeRpcUrl: app.config.QUICKNODE_RPC_URL,
+      quicknodeWsUrl: app.config.QUICKNODE_WS_URL,
       chainstackRpcUrl: app.config.CHAINSTACK_RPC_URL,
       additionalRpcUrls: app.config.ADDITIONAL_RPC_URLS,
     },

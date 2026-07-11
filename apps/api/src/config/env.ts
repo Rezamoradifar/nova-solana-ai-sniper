@@ -21,6 +21,7 @@ export const apiEnvSchema = envSchema.pick({
   SOLANA_WS_URL: true,
   HELIUS_API_KEY: true,
   QUICKNODE_RPC_URL: true,
+  QUICKNODE_WS_URL: true,
   CHAINSTACK_RPC_URL: true,
   ADDITIONAL_RPC_URLS: true,
   JITO_BLOCK_ENGINE_URL: true,

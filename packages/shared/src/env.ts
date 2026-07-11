@@ -60,6 +60,9 @@ export const envSchema = z.object({
   // optional integration in this codebase: unset simply means one less provider
   // in the rotation, not a startup error.
   QUICKNODE_RPC_URL: z.string().url().optional(),
+  // QuickNode's WSS endpoint (same host as QUICKNODE_RPC_URL) — only used for
+  // subscriptions when QuickNode ends up as the primary (first) provider.
+  QUICKNODE_WS_URL: z.string().url().optional(),
   CHAINSTACK_RPC_URL: z.string().url().optional(),
   // Comma-separated list of any further RPC endpoints an operator wants in the
   // rotation (e.g. a self-hosted node, Ankr, Triton) without a dedicated env var each.
