@@ -411,6 +411,23 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       poolAddress: cheapLiquidity.poolAddress,
     });
     const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
+
+    // AI Filter, part 1: min(ruleScore, aiScore) can never exceed ruleScore, so if
+    // the rule score alone is already below this source's minimum, no AI score can
+    // rescue it — skip the AI provider call entirely rather than paying for a
+    // verdict that cannot change the outcome. Reject before ever creating a Token
+    // row, publishing to the Launch Feed, or notifying. 5-minute cooldown so a
+    // channel repeating the same low-quality mint doesn't re-run this every tick.
+    if (ruleScore < app.config.TELEGRAM_TREND_MIN_AI_SCORE) {
+      metrics.increment('aiRejected');
+      telegramAiCooldownCache.add(mint);
+      app.log.debug(
+        { mint, channel, ruleScore },
+        'AI Filter: rule score alone already below minimum — skipping AI call entirely, 5 min cooldown',
+      );
+      return;
+    }
+
     let aiScoreValue = ruleScore;
     let aiSummary: string | undefined;
     if (aiProvider) {
@@ -428,16 +445,15 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       aiSummary = aiScore.summary;
     }
 
-    // AI Filter: below this source's own minimum (default 50, separate from any
-    // per-user SnipeConfig.minAiScore) — reject before ever creating a Token row,
-    // publishing to the Launch Feed, or notifying. 5-minute cooldown so a channel
-    // repeating the same low-quality mint doesn't re-run this every poll tick.
+    // AI Filter, part 2: the AI score itself (when a provider is configured) can
+    // still drag the combined score below threshold even though ruleScore alone
+    // passed above.
     if (Math.min(ruleScore, aiScoreValue) < app.config.TELEGRAM_TREND_MIN_AI_SCORE) {
       metrics.increment('aiRejected');
       telegramAiCooldownCache.add(mint);
       app.log.debug(
         { mint, channel, ruleScore, aiScoreValue },
-        'AI Filter: below Telegram-source minimum — skipping, 5 min cooldown',
+        'AI Filter: combined score below Telegram-source minimum — skipping, 5 min cooldown',
       );
       return;
     }
