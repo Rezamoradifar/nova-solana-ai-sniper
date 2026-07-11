@@ -17,6 +17,39 @@ export interface ExitDecision {
 }
 
 /**
+ * A single price-feed read more than this multiple away from the last known
+ * reference price is treated as a bad tick, not a real move — rejected before
+ * it can corrupt highWaterMarkUsd (which is monotonic and never self-corrects)
+ * or fire a bogus take-profit/trailing-stop off a phantom price. Live-verified
+ * 2026-07-11: a single DexScreener read for a mint recorded ~5000x its real
+ * trading price and got persisted as that position's all-time-high with
+ * nothing to catch it, since PriceMonitor had no plausibility check at all.
+ * 20x is deliberately generous — real memecoin moves of that scale do happen,
+ * but essentially never within one ~15s poll tick; a true multi-day 20x is
+ * always the sum of many smaller tick-to-tick deltas, none of which would
+ * individually trip this.
+ */
+export const MAX_PRICE_TICK_MULTIPLIER = 20;
+
+/**
+ * Pure so it's independently unit-tested and so PriceMonitor can check a raw
+ * price read before ever handing it to evaluateExit/persisting it as a new
+ * high-water mark. referencePriceUsd should be the position's current
+ * highWaterMarkUsd (falling back to entryPriceUsd) — the highest-confidence
+ * "last known real price" already on file.
+ */
+export function isPlausiblePriceUpdate(
+  referencePriceUsd: number,
+  candidatePriceUsd: number,
+  maxMultiplier: number = MAX_PRICE_TICK_MULTIPLIER,
+): boolean {
+  if (!Number.isFinite(candidatePriceUsd) || candidatePriceUsd <= 0) return false;
+  if (referencePriceUsd <= 0) return true; // nothing to compare against yet — can't reject
+  const ratio = candidatePriceUsd / referencePriceUsd;
+  return ratio <= maxMultiplier && ratio >= 1 / maxMultiplier;
+}
+
+/**
  * Pure function so TP/SL/trailing-stop logic can be exhaustively unit tested
  * without touching the DB or an RPC connection. Called on every price tick.
  */

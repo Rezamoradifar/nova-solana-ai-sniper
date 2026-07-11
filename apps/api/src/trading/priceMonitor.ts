@@ -2,6 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
 import type { DexScreenerClient } from '../solana/dexscreener.js';
 import type { PositionManager } from './positionManager.js';
+import { isPlausiblePriceUpdate } from './exitEngine.js';
 
 export interface PriceMonitorDeps {
   prisma: PrismaClient;
@@ -47,6 +48,24 @@ export class PriceMonitor {
           const pair = await this.deps.dexScreener.getBestSolanaPair(position.token.mint);
           const currentPriceUsd = pair?.priceUsd ? Number(pair.priceUsd) : undefined;
           if (currentPriceUsd === undefined || !Number.isFinite(currentPriceUsd)) continue;
+
+          // Reject an implausible single-tick outlier before it can corrupt this
+          // position's (monotonic, self-reinforcing) high-water mark or fire a
+          // bogus exit off a phantom price — see exitEngine.ts's
+          // isPlausiblePriceUpdate doc comment for the live-verified incident.
+          const referencePriceUsd = position.highWaterMarkUsd ?? position.entryPriceUsd;
+          if (!isPlausiblePriceUpdate(referencePriceUsd, currentPriceUsd)) {
+            this.deps.logger.warn(
+              {
+                positionId: position.id,
+                mint: position.token.mint,
+                referencePriceUsd,
+                currentPriceUsd,
+              },
+              'price tick rejected as implausible outlier — skipping this position this tick',
+            );
+            continue;
+          }
 
           await this.deps.positionManager.checkAndMaybeClose(
             position.id,

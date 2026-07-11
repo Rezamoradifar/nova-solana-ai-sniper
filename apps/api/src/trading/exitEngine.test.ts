@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateExit } from './exitEngine.js';
+import { evaluateExit, isPlausiblePriceUpdate } from './exitEngine.js';
 
 describe('evaluateExit', () => {
   it('triggers take profit when pnl exceeds threshold', () => {
@@ -85,5 +85,37 @@ describe('evaluateExit', () => {
       trailingStopPercent: 50,
     });
     expect(result.newHighWaterMarkUsd).toBe(1.3);
+  });
+});
+
+describe('isPlausiblePriceUpdate', () => {
+  it('accepts a normal tick-to-tick price move', () => {
+    expect(isPlausiblePriceUpdate(0.0000041, 0.0000042)).toBe(true);
+    expect(isPlausiblePriceUpdate(0.0000041, 0.0000038)).toBe(true);
+  });
+
+  it('rejects the live-verified BONK incident: a ~5000x single-tick outlier', () => {
+    expect(isPlausiblePriceUpdate(0.000004079, 0.02151)).toBe(false);
+  });
+
+  it('rejects an implausible single-tick crash toward zero', () => {
+    expect(isPlausiblePriceUpdate(1, 0.0001)).toBe(false);
+  });
+
+  it('accepts a genuinely large but real multi-day move (called across many ticks, not one)', () => {
+    // A real 10x over a day happens as many small per-tick deltas, each well
+    // under the 20x ceiling — this checks the ceiling itself isn't so tight
+    // it would reject a single legitimately large but plausible tick.
+    expect(isPlausiblePriceUpdate(1, 10)).toBe(true);
+  });
+
+  it('rejects a non-finite or non-positive candidate price', () => {
+    expect(isPlausiblePriceUpdate(1, NaN)).toBe(false);
+    expect(isPlausiblePriceUpdate(1, 0)).toBe(false);
+    expect(isPlausiblePriceUpdate(1, -5)).toBe(false);
+  });
+
+  it('accepts anything when there is no reference price yet (nothing to compare against)', () => {
+    expect(isPlausiblePriceUpdate(0, 12345)).toBe(true);
   });
 });
