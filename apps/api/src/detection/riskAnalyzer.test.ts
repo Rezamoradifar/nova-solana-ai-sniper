@@ -1,9 +1,11 @@
+import { PublicKey } from '@solana/web3.js';
 import { describe, expect, it, vi } from 'vitest';
 import {
   estimateLiquidityFromPriceImpact,
   resolveLiquidityUsd,
   RiskAnalyzer,
 } from './riskAnalyzer.js';
+import { getBondingCurveVaultAta } from '../solana/pumpfunBondingCurve.js';
 
 function fakeLogger() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
@@ -139,6 +141,28 @@ describe('RiskAnalyzer.analyze liquidity fallback chain', () => {
       (dexRegistry as { getLiquidity: ReturnType<typeof vi.fn> }).getLiquidity,
     ).toHaveBeenCalledWith('RAYDIUM', 'Pool1111111111111111111111111111111111111');
     expect((jupiter as { getQuote: ReturnType<typeof vi.fn> }).getQuote).not.toHaveBeenCalled();
+  });
+
+  it('passes the bonding curve vault plus the native pool vaults to getHolderConcentration, excluding both from the count', async () => {
+    const { getHolderConcentration } = await import('./onchain.js');
+    const mint = '8Jexwtd8Py1g2bkjhQXPXoSztf5WEBAHvdLb7gUmpump';
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const jupiter = { getQuote: vi.fn() } as never;
+    const connection = { getAccountInfo: vi.fn().mockResolvedValue(null) } as never;
+    const dexRegistry = {
+      getLiquidity: vi.fn().mockResolvedValue(undefined),
+      getVaultAddresses: vi.fn().mockResolvedValue(['PoolVaultA', 'PoolVaultB']),
+    } as never;
+
+    const analyzer = new RiskAnalyzer(connection, dexScreener, jupiter, fakeLogger(), dexRegistry);
+    await analyzer.analyze({ mint, dex: 'RAYDIUM', poolAddress: 'Pool111' });
+
+    const expectedBondingCurveVault = getBondingCurveVaultAta(new PublicKey(mint)).toBase58();
+    expect(vi.mocked(getHolderConcentration)).toHaveBeenCalledWith(connection, mint, [
+      expectedBondingCurveVault,
+      'PoolVaultA',
+      'PoolVaultB',
+    ]);
   });
 
   it('skips the native DEX reader when no dexRegistry was injected, falling through to the next source', async () => {

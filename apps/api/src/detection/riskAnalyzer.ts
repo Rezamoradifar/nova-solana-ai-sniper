@@ -1,4 +1,4 @@
-import type { Connection } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';
 import type { RiskFlags, Logger } from '@nova/shared';
 import type { Dex } from '@prisma/client';
 import { getHolderConcentration, getMintAuthorityInfo } from './onchain.js';
@@ -8,6 +8,7 @@ import { SOL_MINT } from '../solana/jupiter.js';
 import {
   estimateBondingCurveLiquidityUsd,
   getBondingCurveState,
+  getBondingCurveVaultAta,
   SolPriceOracle,
 } from '../solana/pumpfunBondingCurve.js';
 import type { DexRegistry } from '../solana/dex/registry.js';
@@ -97,6 +98,12 @@ export class RiskAnalyzer {
   ) {}
 
   async analyze(input: RiskAnalysisInput): Promise<RiskFlags> {
+    const excludeAddresses = await this.resolveExcludedVaultAddresses(
+      input.mint,
+      input.dex,
+      input.poolAddress,
+    );
+
     const [mintAuthority, holders, pair] = await Promise.all([
       getMintAuthorityInfo(this.connection, input.mint).catch(() => ({
         mintAuthorityRevoked: false,
@@ -104,7 +111,7 @@ export class RiskAnalyzer {
         decimals: 9,
         supply: 0n,
       })),
-      getHolderConcentration(this.connection, input.mint).catch(() => ({
+      getHolderConcentration(this.connection, input.mint, excludeAddresses).catch(() => ({
         top10HolderPercent: 100,
         holderCount: 0,
       })),
@@ -196,6 +203,36 @@ export class RiskAnalyzer {
       bondingCurveLiquidityUsd: undefined,
       jupiterEstimateLiquidityUsd,
     });
+  }
+
+  /**
+   * Addresses to exclude from holder-concentration ranking — the bonding curve's
+   * own vault (always, cheap to derive, no RPC call) plus the native AMM pool's
+   * vaults when we already know the pool (post-migration or DEX-registry-detected
+   * launch). See onchain.ts's getHolderConcentration doc comment.
+   */
+  private async resolveExcludedVaultAddresses(
+    mint: string,
+    dex: Dex | undefined,
+    poolAddress: string | undefined,
+  ): Promise<string[]> {
+    const addresses: string[] = [];
+
+    try {
+      addresses.push(getBondingCurveVaultAta(new PublicKey(mint)).toBase58());
+    } catch (err) {
+      this.logger.debug({ mint, err }, 'bonding curve vault derivation failed');
+    }
+
+    if (this.dexRegistry && dex && poolAddress) {
+      try {
+        addresses.push(...(await this.dexRegistry.getVaultAddresses(dex, poolAddress)));
+      } catch (err) {
+        this.logger.debug({ mint, dex, poolAddress, err }, 'native DEX vault lookup failed');
+      }
+    }
+
+    return addresses;
   }
 
   private async tryNativeDexLiquidity(

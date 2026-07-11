@@ -1,4 +1,5 @@
 import { Connection, PublicKey } from '@solana/web3.js';
+import { getAssociatedTokenAddressSync } from '@solana/spl-token';
 import { PUMPFUN_PROGRAM_ID } from './pumpfun.js';
 import type { DexScreenerClient } from './dexscreener.js';
 import { SOL_MINT } from './jupiter.js';
@@ -26,6 +27,18 @@ export function getBondingCurvePda(mint: PublicKey): PublicKey {
     PUMPFUN_PROGRAM_ID,
   );
   return pda;
+}
+
+/**
+ * The bonding curve PDA's own associated token account — where the curve holds
+ * the entire not-yet-sold token supply pre-migration. Same "not a real holder"
+ * case as an AMM pool's vault (see DexRegistry.getVaultAddresses): before this
+ * was excluded, a pre-migration token's holder-concentration check counted the
+ * curve itself as by far the largest "whale," inflating top10HolderPercent for
+ * every single pump.fun token that hasn't graduated yet.
+ */
+export function getBondingCurveVaultAta(mint: PublicKey): PublicKey {
+  return getAssociatedTokenAddressSync(mint, getBondingCurvePda(mint), true);
 }
 
 export function decodeBondingCurveAccount(data: Buffer): BondingCurveState {

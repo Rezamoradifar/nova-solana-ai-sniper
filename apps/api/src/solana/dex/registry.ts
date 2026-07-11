@@ -4,14 +4,30 @@ import type { Logger } from '@nova/shared';
 import type { Dex } from '@prisma/client';
 import { SolPriceOracle } from '../pumpfunBondingCurve.js';
 import type { DexScreenerClient } from '../dexscreener.js';
-import { PUMPSWAP_PROGRAM_ID, PumpSwapMonitor, getPumpSwapLiquidity } from './pumpswap.js';
-import { RAYDIUM_CPMM_PROGRAM_ID, RaydiumCpmmMonitor, getRaydiumCpmmLiquidity } from './raydium.js';
+import {
+  PUMPSWAP_PROGRAM_ID,
+  PumpSwapMonitor,
+  getPumpSwapLiquidity,
+  getPumpSwapPoolState,
+} from './pumpswap.js';
+import {
+  RAYDIUM_CPMM_PROGRAM_ID,
+  RaydiumCpmmMonitor,
+  getRaydiumCpmmLiquidity,
+  getRaydiumCpmmPoolState,
+} from './raydium.js';
 import {
   ORCA_WHIRLPOOL_PROGRAM_ID,
   OrcaWhirlpoolMonitor,
   getOrcaWhirlpoolLiquidity,
+  getOrcaWhirlpoolState,
 } from './orca.js';
-import { METEORA_DLMM_PROGRAM_ID, MeteoraDlmmMonitor, getMeteoraDlmmLiquidity } from './meteora.js';
+import {
+  METEORA_DLMM_PROGRAM_ID,
+  MeteoraDlmmMonitor,
+  getMeteoraDlmmLiquidity,
+  getMeteoraDlmmPoolState,
+} from './meteora.js';
 import {
   NotImplementedNativeExecutor,
   type DexMonitor,
@@ -99,6 +115,41 @@ export class DexRegistry {
     const reader = this.liquidityReaders.get(dex as NativeDex);
     if (!reader) return undefined;
     return reader(this.connection, this.dexScreener, this.solPriceOracle, poolAddress);
+  }
+
+  /**
+   * The pool's own token-vault accounts — each DEX's pool-state decoder already
+   * reads these (to compute reserves), just not exposed until now. Used to
+   * exclude the pool itself from holder-concentration counts (see
+   * detection/onchain.ts's getHolderConcentration): the vault is usually one of
+   * the largest holders by construction, which previously inflated "top 10
+   * holder %" for any token with real on-chain liquidity.
+   */
+  async getVaultAddresses(dex: Dex, poolAddress: string): Promise<string[]> {
+    try {
+      switch (dex as NativeDex) {
+        case 'PUMPSWAP': {
+          const state = await getPumpSwapPoolState(this.connection, poolAddress);
+          return state ? [state.poolBaseTokenAccount, state.poolQuoteTokenAccount] : [];
+        }
+        case 'RAYDIUM': {
+          const state = await getRaydiumCpmmPoolState(this.connection, poolAddress);
+          return state ? [state.token0Vault, state.token1Vault] : [];
+        }
+        case 'ORCA': {
+          const state = await getOrcaWhirlpoolState(this.connection, poolAddress);
+          return state ? [state.tokenVaultA, state.tokenVaultB] : [];
+        }
+        case 'METEORA': {
+          const state = await getMeteoraDlmmPoolState(this.connection, poolAddress);
+          return state ? [state.reserveX, state.reserveY] : [];
+        }
+        default:
+          return [];
+      }
+    } catch {
+      return [];
+    }
   }
 
   getExecutor(dex: Dex): NativeDexExecutor | undefined {

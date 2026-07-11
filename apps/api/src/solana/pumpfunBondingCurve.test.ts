@@ -5,6 +5,7 @@ import {
   estimateBondingCurveLiquidityUsd,
   getBondingCurvePda,
   getBondingCurveStates,
+  getBondingCurveVaultAta,
 } from './pumpfunBondingCurve.js';
 
 function buildAccountData(fields: {
@@ -43,6 +44,26 @@ describe('getBondingCurvePda', () => {
   it('is deterministic for the same mint', () => {
     const mint = new PublicKey('GrNhoFEfsfvgir93SY9eBSokvxw9aDCtWD5Rodthpump');
     expect(getBondingCurvePda(mint).equals(getBondingCurvePda(mint))).toBe(true);
+  });
+});
+
+describe('getBondingCurveVaultAta', () => {
+  it('is deterministic and distinct from the bonding curve PDA itself', () => {
+    const mint = new PublicKey('8Jexwtd8Py1g2bkjhQXPXoSztf5WEBAHvdLb7gUmpump');
+    const ata1 = getBondingCurveVaultAta(mint);
+    const ata2 = getBondingCurveVaultAta(mint);
+    expect(ata1.equals(ata2)).toBe(true);
+    expect(ata1.equals(getBondingCurvePda(mint))).toBe(false);
+  });
+
+  it('differs per mint', () => {
+    const ataA = getBondingCurveVaultAta(
+      new PublicKey('8Jexwtd8Py1g2bkjhQXPXoSztf5WEBAHvdLb7gUmpump'),
+    );
+    const ataB = getBondingCurveVaultAta(
+      new PublicKey('GrNhoFEfsfvgir93SY9eBSokvxw9aDCtWD5Rodthpump'),
+    );
+    expect(ataA.equals(ataB)).toBe(false);
   });
 });
 

@@ -31,19 +31,18 @@ export interface HolderConcentration {
  * (capped at 20 by the RPC itself). Good enough as a rug-risk signal without
  * needing a full indexer.
  *
- * KNOWN LIMITATION (audited, not fixed here): this does not exclude the LP/pool
- * vault token account from the top-10 sum, which inflates concentration for any
- * token with real on-chain liquidity — the pool's own vault is usually one of the
- * largest holders by construction. A correct fix needs each DEX's actual vault
- * address (e.g. Raydium CPMM's token0Vault/token1Vault, decoded in
- * solana/dex/raydium.ts but not currently exposed past DexPoolInfo.poolAddress,
- * which is the pool *state* account, not the vault) threaded through per-DEX from
- * registry.ts — a real but DEX-layout-specific change, not a safe one to improvise
- * across 4+ different account layouts without dedicated verification per DEX.
+ * `excludeAddresses` filters out known non-holder accounts (an AMM pool's own
+ * token vaults, or the pump.fun bonding curve's vault pre-migration) before
+ * ranking the top 10 — without this, the pool/curve itself is usually the
+ * single largest "holder" by construction, inflating top10HolderPercent for
+ * every token with real on-chain liquidity. Callers resolve these via
+ * `DexRegistry.getVaultAddresses` (post-migration) or
+ * `getBondingCurveVaultAta` (pre-migration) — see riskAnalyzer.ts.
  */
 export async function getHolderConcentration(
   connection: Connection,
   mint: string,
+  excludeAddresses: string[] = [],
 ): Promise<HolderConcentration> {
   const mintPubkey = new PublicKey(mint);
   const largest = await connection.getTokenLargestAccounts(mintPubkey);
@@ -54,10 +53,13 @@ export async function getHolderConcentration(
     return { top10HolderPercent: 0, holderCount: 0 };
   }
 
-  const top10 = largest.value.slice(0, 10).reduce((sum, acc) => sum + Number(acc.amount), 0);
+  const excluded = new Set(excludeAddresses);
+  const realHolders = largest.value.filter((a) => !excluded.has(a.address.toBase58()));
+
+  const top10 = realHolders.slice(0, 10).reduce((sum, acc) => sum + Number(acc.amount), 0);
 
   return {
     top10HolderPercent: (top10 / totalSupply) * 100,
-    holderCount: largest.value.filter((a) => Number(a.amount) > 0).length,
+    holderCount: realHolders.filter((a) => Number(a.amount) > 0).length,
   };
 }

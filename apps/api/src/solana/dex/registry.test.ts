@@ -12,6 +12,7 @@ vi.mock('./pumpswap.js', async (importOriginal) => {
     ...actual,
     PumpSwapMonitor: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),
     getPumpSwapLiquidity: vi.fn(),
+    getPumpSwapPoolState: vi.fn(),
   };
 });
 vi.mock('./raydium.js', async (importOriginal) => {
@@ -20,6 +21,7 @@ vi.mock('./raydium.js', async (importOriginal) => {
     ...actual,
     RaydiumCpmmMonitor: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),
     getRaydiumCpmmLiquidity: vi.fn(),
+    getRaydiumCpmmPoolState: vi.fn(),
   };
 });
 vi.mock('./orca.js', async (importOriginal) => {
@@ -28,6 +30,7 @@ vi.mock('./orca.js', async (importOriginal) => {
     ...actual,
     OrcaWhirlpoolMonitor: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),
     getOrcaWhirlpoolLiquidity: vi.fn(),
+    getOrcaWhirlpoolState: vi.fn(),
   };
 });
 vi.mock('./meteora.js', async (importOriginal) => {
@@ -36,11 +39,13 @@ vi.mock('./meteora.js', async (importOriginal) => {
     ...actual,
     MeteoraDlmmMonitor: vi.fn().mockImplementation(() => ({ start: vi.fn(), stop: vi.fn() })),
     getMeteoraDlmmLiquidity: vi.fn(),
+    getMeteoraDlmmPoolState: vi.fn(),
   };
 });
 
 import { DexRegistry } from './registry.js';
-import { getPumpSwapLiquidity } from './pumpswap.js';
+import { getPumpSwapLiquidity, getPumpSwapPoolState } from './pumpswap.js';
+import { getRaydiumCpmmPoolState } from './raydium.js';
 
 describe('DexRegistry', () => {
   it('starts and stops every registered monitor', () => {
@@ -164,5 +169,35 @@ describe('DexRegistry', () => {
       },
     } as never;
     expect(await registry.resolveNewPool('PUMPSWAP', tx)).toBeUndefined();
+  });
+
+  describe('getVaultAddresses', () => {
+    it('dispatches to the right DEX decoder and returns its vault addresses', async () => {
+      vi.mocked(getPumpSwapPoolState).mockResolvedValue({
+        poolAddress: 'PoolA',
+        poolBaseTokenAccount: 'VaultBase',
+        poolQuoteTokenAccount: 'VaultQuote',
+      } as never);
+      const registry = new DexRegistry({} as never, {} as never, fakeLogger());
+
+      expect(await registry.getVaultAddresses('PUMPSWAP', 'PoolA')).toEqual([
+        'VaultBase',
+        'VaultQuote',
+      ]);
+    });
+
+    it('returns an empty array when the pool account cannot be decoded', async () => {
+      vi.mocked(getRaydiumCpmmPoolState).mockResolvedValue(undefined);
+      const registry = new DexRegistry({} as never, {} as never, fakeLogger());
+
+      expect(await registry.getVaultAddresses('RAYDIUM', 'PoolB')).toEqual([]);
+    });
+
+    it('returns an empty array instead of throwing when the decoder rejects', async () => {
+      vi.mocked(getPumpSwapPoolState).mockRejectedValue(new Error('rpc blip'));
+      const registry = new DexRegistry({} as never, {} as never, fakeLogger());
+
+      expect(await registry.getVaultAddresses('PUMPSWAP', 'PoolA')).toEqual([]);
+    });
   });
 });
