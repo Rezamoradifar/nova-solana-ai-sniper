@@ -21,7 +21,11 @@ export type ScreenId =
   | 'arbitrage'
   | 'live_opportunities'
   | 'telegram_trends'
-  | 'trend_settings';
+  | 'trend_settings'
+  | 'fee_dashboard'
+  | 'referral_earnings'
+  | 'referral_leaderboard'
+  | 'fee_policy_consent';
 
 /** Static config for the Telegram trend source (t.me/trendingssol, t.me/trending)
  * — built once in index.ts from env, same global-not-per-user values the

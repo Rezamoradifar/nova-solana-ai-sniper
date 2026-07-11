@@ -70,6 +70,21 @@ export interface MigrationNotification {
   toDex: string;
 }
 
+/** Sent once per profitable closed trade by the fee/referral system's event-bus
+ * subscriber (apps/api/src/business/registerFeeSystem.ts) — a distinct, separate
+ * message from the existing Sell Signal/exit alert, never replacing it. */
+export interface TradeReportData {
+  symbol: string;
+  grossProfitUsd: number;
+  tradingCostsUsd: number;
+  netProfitUsd: number;
+  feeBps: number;
+  feeUsd: number;
+  userShareUsd: number;
+  referralRewardsTotalUsd: number;
+  referenceId: string;
+}
+
 /** `https://dexscreener.com/solana/{mint}` — the one chart-link format used everywhere. */
 export function buildDexScreenerLink(mint: string): string {
   return `https://dexscreener.com/solana/${mint}`;
@@ -199,6 +214,23 @@ function formatExitMessage(exit: PositionExitNotification): string {
     `${emoji}${paperTag} Position closed: \`${escapeMd(exit.symbol)}\`\n` +
     `Reason: ${reasonLabel}\n` +
     `PnL: ${exit.pnlPercent.toFixed(2)}%${entryLine}${athLine}${lockedLine}${linkLine}`
+  );
+}
+
+/** Pure so it's independently unit-tested, same convention as formatNewTokenMessage. */
+export function formatTradeReportMessage(report: TradeReportData): string {
+  const referralLine =
+    report.referralRewardsTotalUsd > 0
+      ? `\n🔗 Referral Rewards: $${report.referralRewardsTotalUsd.toFixed(2)}`
+      : '';
+  return (
+    `📊 *Trade Report* — \`${escapeMd(report.symbol)}\`\n\n` +
+    `Gross Profit: $${report.grossProfitUsd.toFixed(2)}\n` +
+    `Trading Costs: $${report.tradingCostsUsd.toFixed(2)}\n` +
+    `Net Profit: $${report.netProfitUsd.toFixed(2)}\n` +
+    `Platform Performance Fee (${(report.feeBps / 100).toFixed(1)}%): $${report.feeUsd.toFixed(2)}${referralLine}\n` +
+    `*Final Amount Credited: $${report.userShareUsd.toFixed(2)}*\n\n` +
+    `_Ref: ${report.referenceId}_`
   );
 }
 
@@ -391,6 +423,22 @@ export class NotificationService {
         `${escapeMd(migration.fromDex)} → ${escapeMd(migration.toDex)}\n` +
         `${linksLine(migration.mint, migration.toDex)}`,
     );
+  }
+
+  /**
+   * Targeted at the ONE user whose trade this is — unlike every other alert
+   * type above, this is never fanned out to the owner/other active users
+   * (a trade report is personal financial information, not a DEX signal).
+   * A silent no-op if the user has no telegramId on file (e.g. a
+   * dashboard-only account) — same best-effort convention as every send here.
+   */
+  async notifyTradeReport(userId: string, report: TradeReportData): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { telegramId: true },
+    });
+    if (!user?.telegramId) return;
+    await this.sendToChat(user.telegramId, formatTradeReportMessage(report));
   }
 }
 

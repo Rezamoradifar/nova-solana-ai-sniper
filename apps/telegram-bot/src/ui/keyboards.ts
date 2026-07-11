@@ -21,6 +21,7 @@ export const MENU_LABELS = {
   liveOpportunities: '🔥 Live Opportunities',
   telegramTrends: '📡 Telegram Trends',
   trendSettings: '⚙️ Trend Settings',
+  feeDashboard: '💸 Fees & Earnings',
 } as const;
 
 /** Maps each reply-keyboard label to the screen it opens. */
@@ -44,6 +45,7 @@ export const LABEL_TO_SCREEN: Record<string, ScreenId> = {
   [MENU_LABELS.liveOpportunities]: 'live_opportunities',
   [MENU_LABELS.telegramTrends]: 'telegram_trends',
   [MENU_LABELS.trendSettings]: 'trend_settings',
+  [MENU_LABELS.feeDashboard]: 'fee_dashboard',
 };
 
 /** The persistent bottom keyboard — always visible, opens screens by label. */
@@ -77,6 +79,7 @@ export function mainMenuKeyboard(): Keyboard {
     .text(MENU_LABELS.telegramTrends)
     .row()
     .text(MENU_LABELS.trendSettings)
+    .text(MENU_LABELS.feeDashboard)
     .resized();
 }
 
@@ -119,5 +122,6 @@ export function homeGrid(): InlineKeyboard {
     .text(MENU_LABELS.liveOpportunities, 's:live_opportunities')
     .text(MENU_LABELS.telegramTrends, 's:telegram_trends')
     .row()
-    .text(MENU_LABELS.trendSettings, 's:trend_settings');
+    .text(MENU_LABELS.trendSettings, 's:trend_settings')
+    .text(MENU_LABELS.feeDashboard, 's:fee_dashboard');
 }

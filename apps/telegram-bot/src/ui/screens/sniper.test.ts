@@ -18,8 +18,16 @@ function fakeDeps(configs: ReturnType<typeof makeConfig>[]) {
   const create = vi.fn().mockResolvedValue(undefined);
   const count = vi.fn().mockResolvedValue(configs.length);
   const findMany = vi.fn().mockResolvedValue(configs);
+  const businessSettingsFindFirst = vi.fn().mockResolvedValue({
+    id: 'settings-1',
+    performanceFeeBps: 2000,
+    referralProgramEnabled: true,
+    maxReferralDepth: 2,
+    referralLevels: [],
+  });
   const prisma = {
     snipeConfig: { create, count, findMany },
+    businessSettings: { findFirst: businessSettingsFindFirst, create: vi.fn() },
   } as unknown as PrismaClient;
   const deps = {
     prisma,
@@ -36,7 +44,13 @@ function fakeDeps(configs: ReturnType<typeof makeConfig>[]) {
   return { deps, create, count, findMany };
 }
 
-const user = { id: 'user-1' } as User;
+// Fee policy already accepted at the current fee %, so these existing tests
+// exercise the screen's normal (post-consent-gate) behavior unchanged.
+const user = {
+  id: 'user-1',
+  feePolicyAcceptedAt: new Date(),
+  feePolicyAcceptedFeeBps: 2000,
+} as User;
 
 describe('renderSniperStart', () => {
   it("regression: never builds a message over Telegram's 4096-char limit, however many configs exist", async () => {
@@ -72,5 +86,40 @@ describe('handleQuickStart', () => {
     const { deps, create } = fakeDeps([makeConfig()]);
     await handleQuickStart(deps, user);
     expect(create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('fee policy consent gate', () => {
+  const unacceptedUser = {
+    id: 'user-2',
+    feePolicyAcceptedAt: null,
+    feePolicyAcceptedFeeBps: null,
+  } as User;
+
+  it('renderSniperStart shows the consent screen instead of configs when not yet accepted', async () => {
+    const { deps } = fakeDeps([makeConfig()]);
+    const result = await renderSniperStart(deps, unacceptedUser);
+    expect(result.text).toContain('Performance Fee & Referral Policy');
+    const buttons = result.keyboard.inline_keyboard.flat().map((b) => b.text);
+    expect(buttons).toContain('✅ I Agree, Enable Auto-Trading');
+  });
+
+  it('handleQuickStart refuses to create a config when the policy has not been accepted', async () => {
+    const { deps, create } = fakeDeps([]);
+    const result = await handleQuickStart(deps, unacceptedUser);
+    expect(create).not.toHaveBeenCalled();
+    expect(result.text).toContain('Performance Fee & Referral Policy');
+  });
+
+  it('re-prompts when the accepted fee % is stale (an admin changed it since acceptance)', async () => {
+    const staleUser = {
+      id: 'user-3',
+      feePolicyAcceptedAt: new Date(),
+      feePolicyAcceptedFeeBps: 1500,
+    } as User;
+    const { deps, create } = fakeDeps([]);
+    const result = await handleQuickStart(deps, staleUser);
+    expect(create).not.toHaveBeenCalled();
+    expect(result.text).toContain('Performance Fee & Referral Policy');
   });
 });

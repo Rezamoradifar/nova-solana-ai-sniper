@@ -52,6 +52,10 @@ import { renderArbitrage } from './screens/arbitrage.js';
 import { renderLiveOpportunities } from './screens/liveOpportunities.js';
 import { renderTelegramTrends } from './screens/telegramTrends.js';
 import { renderTrendSettings } from './screens/trendSettings.js';
+import { renderFeeDashboard } from './screens/feeDashboard.js';
+import { renderReferralEarnings } from './screens/referralEarnings.js';
+import { renderReferralLeaderboard } from './screens/referralLeaderboard.js';
+import { handleAcceptFeePolicy, renderFeePolicyConsent } from './screens/feePolicyConsent.js';
 
 async function renderScreen(
   screen: ScreenId,
@@ -98,6 +102,14 @@ async function renderScreen(
       return renderTelegramTrends(deps, user);
     case 'trend_settings':
       return renderTrendSettings(deps, user);
+    case 'fee_dashboard':
+      return renderFeeDashboard(deps, user);
+    case 'referral_earnings':
+      return renderReferralEarnings(deps, user);
+    case 'referral_leaderboard':
+      return renderReferralLeaderboard(deps, user);
+    case 'fee_policy_consent':
+      return renderFeePolicyConsent(deps, user);
   }
 }
 
@@ -118,6 +130,11 @@ async function handleAction(
       return handleResumeAll(deps, user);
     case 'sniper:stopall':
       return handleStopAll(deps, user);
+    case 'sniper:acceptpolicy':
+      // handleAcceptFeePolicy returns the freshly-updated user row — the
+      // in-memory `user` param is stale the instant this resolves (still
+      // shows feePolicyAcceptedAt: null), so re-rendering must use it, not `user`.
+      return renderSniperStart(deps, await handleAcceptFeePolicy(deps, user));
 
     case 'wallet:create':
       return handleCreateWallet(deps, user, ctx);

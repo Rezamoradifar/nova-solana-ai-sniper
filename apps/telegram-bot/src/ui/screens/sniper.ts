@@ -2,6 +2,7 @@ import { InlineKeyboard } from 'grammy';
 import { MAX_SNIPE_CONFIGS_PER_USER } from '@nova/shared';
 import { withNav } from '../keyboards.js';
 import { sol } from '../format.js';
+import { hasAcceptedCurrentFeePolicy, renderFeePolicyConsent } from './feePolicyConsent.js';
 import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
 
 const DEFAULT_BUY_AMOUNT_SOL = 0.1;
@@ -25,6 +26,13 @@ function formatConfig(c: {
 }
 
 export async function renderSniperStart(deps: ScreenDeps, user: ScreenUser): Promise<ScreenResult> {
+  // Require explicit acceptance of the current performance-fee/referral policy
+  // before any auto-trading can be enabled — see feePolicyConsent.ts. Already-
+  // accepted users (the common case once this ships) see zero change below.
+  if (!(await hasAcceptedCurrentFeePolicy(deps, user))) {
+    return renderFeePolicyConsent(deps, user);
+  }
+
   const configs = await deps.prisma.snipeConfig.findMany({
     where: { userId: user.id },
     orderBy: { createdAt: 'desc' },
@@ -77,6 +85,14 @@ export async function renderSniperStop(deps: ScreenDeps, user: ScreenUser): Prom
 }
 
 export async function handleQuickStart(deps: ScreenDeps, user: ScreenUser): Promise<ScreenResult> {
+  // Defense in depth: renderSniperStart already hides this button unless the fee
+  // policy has been accepted, but an old message/replayed callback could still
+  // reach here directly — re-check server-side, same convention as the
+  // existingCount re-check right below.
+  if (!(await hasAcceptedCurrentFeePolicy(deps, user))) {
+    return renderFeePolicyConsent(deps, user);
+  }
+
   // Defense in depth: renderSniperStart already hides this button at the cap, but
   // an old Telegram message (or a double-tap already in flight) can still replay
   // this callback, so re-check server-side rather than trusting the button state.
@@ -97,6 +113,10 @@ export async function handleQuickStart(deps: ScreenDeps, user: ScreenUser): Prom
 }
 
 export async function handleResumeAll(deps: ScreenDeps, user: ScreenUser): Promise<ScreenResult> {
+  if (!(await hasAcceptedCurrentFeePolicy(deps, user))) {
+    return renderFeePolicyConsent(deps, user);
+  }
+
   await deps.prisma.snipeConfig.updateMany({
     where: { userId: user.id },
     data: { isActive: true },

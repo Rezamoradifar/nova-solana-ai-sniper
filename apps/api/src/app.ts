@@ -20,6 +20,7 @@ import walletRoutes from './routes/wallets.js';
 import referralRoutes from './routes/referrals.js';
 import copyTradeRoutes from './routes/copyTrades.js';
 import wsRoutes from './routes/ws.js';
+import { registerFeeSystem } from './business/registerFeeSystem.js';
 
 export async function buildApp() {
   // trustProxy: the API only ever receives real client traffic via the Nginx
@@ -59,6 +60,12 @@ export async function buildApp() {
   await app.register(referralRoutes);
   await app.register(copyTradeRoutes);
   await app.register(wsRoutes);
+
+  // Fee/referral system — a pure event-bus subscriber reacting to the already-
+  // existing 'position.updated' event after a position has already closed.
+  // Does not touch trading/execution code (positionManager.ts, autoTrader.ts,
+  // riskAnalyzer.ts, worker.ts) at all — see registerFeeSystem.ts's own doc comment.
+  registerFeeSystem({ prisma: app.prisma, log: app.log as never, config: app.config });
 
   app.setErrorHandler((err: FastifyError | ZodError, _req, reply) => {
     if (err instanceof ZodError) {

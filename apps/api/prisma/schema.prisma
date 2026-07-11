@@ -30,11 +30,22 @@ model User {
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
+  // Snapshot of what the user actually agreed to (see fee.ts's consent-gate
+  // check in the Telegram bot) — if an admin later changes the fee %, this
+  // snapshot no longer matches BusinessSettings.performanceFeeBps and the
+  // user is prompted to re-accept before auto-trading is re-enabled, without
+  // needing a separate policy-version-history table.
+  feePolicyAcceptedAt     DateTime?
+  feePolicyAcceptedFeeBps Int?
+
   wallets       Wallet[]
   watchlists    WatchlistItem[]
   snipeConfigs  SnipeConfig[]
   copyConfigs   CopyTradeConfig[]
   auditLogs     AuditLog[]
+  performanceFees        PerformanceFeeLedger[]
+  referralRewardsEarned  ReferralReward[]        @relation("ReferralRewardReferrer")
+  referralRewardsCaused  ReferralReward[]        @relation("ReferralRewardReferredUser")
 
   @@map("users")
 }
@@ -325,4 +336,85 @@ model BlacklistEntry {
 
   @@unique([type, value])
   @@map("blacklist_entries")
+}
+
+/// Singleton row (lazily created on first access — see packages/shared/src/fee.ts's
+/// getOrCreateBusinessSettings) holding the platform's admin-configurable
+/// performance-fee and referral-program parameters. Ledger/bookkeeping only —
+/// no on-chain fee collection or referral payout happens automatically.
+model BusinessSettings {
+  id                     String   @id @default(cuid())
+  performanceFeeBps      Int      @default(2000)
+  referralProgramEnabled Boolean  @default(true)
+  maxReferralDepth       Int      @default(2)
+  updatedAt              DateTime @updatedAt
+
+  referralLevels ReferralLevelConfig[]
+
+  @@map("business_settings")
+}
+
+/// One row per referral level (1 = direct referrer, 2 = their referrer, ...).
+/// percentBps is a share of the PLATFORM's performance fee, not of the
+/// trader's profit directly — see fee.ts's calculateReferralRewards.
+model ReferralLevelConfig {
+  id                 String           @id @default(cuid())
+  businessSettingsId String
+  businessSettings   BusinessSettings @relation(fields: [businessSettingsId], references: [id], onDelete: Cascade)
+  level              Int
+  percentBps         Int
+  enabled            Boolean          @default(true)
+
+  @@unique([businessSettingsId, level])
+  @@map("referral_level_configs")
+}
+
+/// One row per closed, profitable position — written once by the event-bus
+/// subscriber in apps/api/src/business/registerFeeSystem.ts, never by the
+/// trading/execution code itself. The unique constraint on positionId is the
+/// idempotency guard (never double-charge the same close). `id` doubles as
+/// the human-shareable "Transaction Reference" in trade-report displays.
+model PerformanceFeeLedger {
+  id              String   @id @default(cuid())
+  positionId      String   @unique
+  sellTradeId     String?
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  walletId        String
+  tokenId         String
+  grossProfitUsd  Float
+  tradingCostsUsd Float
+  netProfitUsd    Float
+  feeBps          Int
+  feeUsd          Float
+  userShareUsd    Float
+  createdAt       DateTime @default(now())
+
+  referralRewards ReferralReward[]
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("performance_fee_ledger")
+}
+
+/// One row per referrer per level who earns a share of a single
+/// PerformanceFeeLedger row's fee. percentBps/rewardUsd are snapshotted at
+/// creation time so a later admin change to ReferralLevelConfig never
+/// rewrites history.
+model ReferralReward {
+  id                     String               @id @default(cuid())
+  performanceFeeLedgerId String
+  performanceFeeLedger   PerformanceFeeLedger @relation(fields: [performanceFeeLedgerId], references: [id], onDelete: Cascade)
+  referrerUserId         String
+  referrer               User                 @relation("ReferralRewardReferrer", fields: [referrerUserId], references: [id])
+  referredUserId         String
+  referredUser           User                 @relation("ReferralRewardReferredUser", fields: [referredUserId], references: [id])
+  level                  Int
+  percentBps             Int
+  rewardUsd              Float
+  createdAt              DateTime             @default(now())
+
+  @@index([referrerUserId])
+  @@index([performanceFeeLedgerId])
+  @@map("referral_rewards")
 }
