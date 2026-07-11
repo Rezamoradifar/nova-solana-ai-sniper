@@ -11,7 +11,7 @@ import { PumpFunMonitor } from './solana/pumpfun.js';
 import { JupiterClient } from './solana/jupiter.js';
 import { DexScreenerClient } from './solana/dexscreener.js';
 import { TokenEventClassifier } from './detection/detectors.js';
-import { RiskAnalyzer } from './detection/riskAnalyzer.js';
+import { RiskAnalyzer, type LaunchableDex } from './detection/riskAnalyzer.js';
 import { extractMintFromParsedTx } from './detection/extractMint.js';
 import { MigrationMonitor } from './detection/migrationMonitor.js';
 import { DexRegistry } from './solana/dex/registry.js';
@@ -22,11 +22,18 @@ import { AutoTrader } from './trading/autoTrader.js';
 import { TradingSafety, verifySafetySystemReady, type SafetyConfig } from './trading/safety.js';
 import { PriceMonitor } from './trading/priceMonitor.js';
 import { hasAnyAiProvider, resolveAiProvider, scoreToken } from '@nova/ai';
-import type { Dex } from '@nova/shared';
+import type { Dex, RiskFlags } from '@nova/shared';
 import { createBot, NotificationService, AI_HIGH_SCORE_THRESHOLD } from '@nova/telegram-bot';
 import { eventBus } from './lib/eventBus.js';
+import { metrics } from './lib/metrics.js';
+import { TtlCache } from './lib/ttlCache.js';
 import { TwitterClient } from './social/twitter.js';
 import { TwitterMonitor } from './social/twitterMonitor.js';
+import { TelegramTrendClient } from './social/telegramTrend.js';
+import {
+  TelegramTrendMonitor,
+  type TelegramSignalCandidate,
+} from './social/telegramTrendMonitor.js';
 
 /**
  * Wires the detection -> risk -> AI-score -> auto-trade pipeline together and
@@ -227,7 +234,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // which DEX a token actually launched on.
   async function handleNewTokenLaunch(
     mint: string,
-    dex: 'PUMPFUN' | 'PUMPSWAP' | 'RAYDIUM' | 'ORCA' | 'METEORA',
+    dex: LaunchableDex,
     detectedAt: string,
     poolAddress?: string,
   ) {
@@ -286,6 +293,24 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       });
     }
 
+    await notifyAndAutoTrade(mint, dex, token.id, riskFlags, aiScoreValue);
+  }
+
+  /**
+   * Shared by every path that has already decided a token is worth surfacing
+   * (on-chain detection unconditionally; the Telegram trend source only after
+   * its own liquidity + AI gates pass — see handleTelegramSignal below):
+   * fires the New Launch / AI High Score alerts and evaluates every active
+   * SnipeConfig for an auto-buy. Extracted verbatim from handleNewTokenLaunch's
+   * previous tail — same fields, same order, same behavior.
+   */
+  async function notifyAndAutoTrade(
+    mint: string,
+    dex: LaunchableDex,
+    tokenId: string,
+    riskFlags: RiskFlags,
+    aiScoreValue: number,
+  ): Promise<{ boughtCount: number }> {
     // NotificationService.notifyNewToken fans this out to the owner chat plus every
     // user with a live snipe config (isActive + autoBuyOnLaunch — the exact set
     // AutoTrader.evaluateAndMaybeBuy is about to query below) — see notifications.ts.
@@ -318,7 +343,180 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       });
     }
 
-    await autoTrader.evaluateAndMaybeBuy(mint, token.id, riskFlags, aiScoreValue);
+    const results = await autoTrader.evaluateAndMaybeBuy(mint, tokenId, riskFlags, aiScoreValue);
+    return { boughtCount: results.filter((r) => r.bought).length };
+  }
+
+  // Telegram trend channels (t.me/trendingssol, t.me/trending) are a signal
+  // source only — they never buy directly. A mint mentioned there is just a
+  // candidate that must clear its own dedupe/blacklist/liquidity/AI gates
+  // (all RPC/AI-free or cheap, in that order, so junk is rejected before any
+  // expensive work) before it reaches the exact same upsert/notify/AutoTrader
+  // path as an on-chain detection. AutoTrader's own per-user SnipeConfig gating
+  // (isActive + autoBuyOnLaunch) is completely unchanged — this only adds one
+  // more way for a mint to arrive at that same gate.
+  const telegramDedupeCache = new TtlCache<string>(10 * 60 * 1000);
+  const telegramAiCooldownCache = new TtlCache<string>(5 * 60 * 1000);
+
+  async function handleTelegramSignal(candidate: TelegramSignalCandidate): Promise<void> {
+    const { mint, channel, messageUrl } = candidate;
+
+    if (telegramDedupeCache.has(mint) || telegramAiCooldownCache.has(mint)) {
+      metrics.increment('duplicateRejected');
+      app.log.debug(
+        { mint, channel },
+        'Duplicate Check: recently processed via Telegram — skipping',
+      );
+      return;
+    }
+
+    const existing = await app.prisma.token.findUnique({ where: { mint } });
+    telegramDedupeCache.add(mint);
+    if (existing) {
+      metrics.increment('duplicateRejected');
+      app.log.debug({ mint, channel }, 'Duplicate Check: token already tracked — skipping');
+      return;
+    }
+
+    const blacklisted = await app.prisma.blacklistEntry.findUnique({
+      where: { type_value: { type: 'MINT', value: mint } },
+    });
+    if (blacklisted) {
+      metrics.increment('blacklistRejected');
+      app.log.debug(
+        { mint, channel, reason: blacklisted.reason },
+        'Blacklist: mint is blacklisted — skipping',
+      );
+      return;
+    }
+
+    // Cheap Filters / Liquidity Filter: DexScreener HTTP call, at most one cheap
+    // getAccountInfo RPC read — never the mint-authority/holder-concentration
+    // calls analyze() makes, and never an AI call, for a candidate that turns
+    // out to have no real liquidity on a supported venue.
+    const cheapLiquidity = await riskAnalyzer.cheapLiquidityPrecheck(mint);
+    if (cheapLiquidity.liquidityUsd <= 0 || !cheapLiquidity.dex) {
+      metrics.increment('liquidityZeroRejected');
+      metrics.increment('rpcCallsSavedEstimate', 2);
+      app.log.debug(
+        { mint, channel },
+        'Liquidity Filter: liquidity == 0 or unsupported venue — skipping before AI/expensive RPC',
+      );
+      return;
+    }
+
+    const riskFlags = await riskAnalyzer.analyze({
+      mint,
+      dex: cheapLiquidity.dex,
+      poolAddress: cheapLiquidity.poolAddress,
+    });
+    const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
+    let aiScoreValue = ruleScore;
+    let aiSummary: string | undefined;
+    if (aiProvider) {
+      const aiScore = await scoreToken(
+        aiProvider,
+        {
+          mint,
+          decimals: 9,
+          createdAt: new Date().toISOString(),
+          dex: cheapLiquidity.dex.toLowerCase() as Dex,
+        },
+        riskFlags,
+      );
+      aiScoreValue = aiScore.score;
+      aiSummary = aiScore.summary;
+    }
+
+    // AI Filter: below this source's own minimum (default 50, separate from any
+    // per-user SnipeConfig.minAiScore) — reject before ever creating a Token row,
+    // publishing to the Launch Feed, or notifying. 5-minute cooldown so a channel
+    // repeating the same low-quality mint doesn't re-run this every poll tick.
+    if (Math.min(ruleScore, aiScoreValue) < app.config.TELEGRAM_TREND_MIN_AI_SCORE) {
+      metrics.increment('aiRejected');
+      telegramAiCooldownCache.add(mint);
+      app.log.debug(
+        { mint, channel, ruleScore, aiScoreValue },
+        'AI Filter: below Telegram-source minimum — skipping, 5 min cooldown',
+      );
+      return;
+    }
+
+    metrics.increment('qualifiedOpportunities');
+
+    const token = await app.prisma.token.upsert({
+      where: { mint },
+      create: {
+        mint,
+        dex: cheapLiquidity.dex,
+        poolAddress: cheapLiquidity.poolAddress,
+        name: riskFlags.name,
+        symbol: riskFlags.symbol,
+        liquidityUsd: riskFlags.liquidityUsd,
+        marketCapUsd: riskFlags.marketCapUsd,
+        mintAuthorityRevoked: riskFlags.mintAuthorityRevoked,
+        freezeAuthorityRevoked: riskFlags.freezeAuthorityRevoked,
+        lpBurnedOrLocked: riskFlags.lpBurnedOrLocked,
+        top10HolderPercent: riskFlags.top10HolderPercent,
+        holderCount: riskFlags.holderCount,
+        isHoneypotSuspected: riskFlags.isHoneypotSuspected,
+        imageUrl: riskFlags.imageUrl,
+        aiScore: aiScoreValue,
+        aiSummary,
+        discoverySource: 'TELEGRAM',
+        telegramChannel: channel,
+        telegramMessageUrl: messageUrl,
+      },
+      update: {
+        name: riskFlags.name,
+        symbol: riskFlags.symbol,
+        liquidityUsd: riskFlags.liquidityUsd,
+        marketCapUsd: riskFlags.marketCapUsd,
+        top10HolderPercent: riskFlags.top10HolderPercent,
+        holderCount: riskFlags.holderCount,
+        isHoneypotSuspected: riskFlags.isHoneypotSuspected,
+        imageUrl: riskFlags.imageUrl,
+        aiScore: aiScoreValue,
+        aiSummary,
+      },
+    });
+
+    eventBus.publish('token.created', { tokenId: token.id, mint, dex: cheapLiquidity.dex });
+
+    const { boughtCount } = await notifyAndAutoTrade(
+      mint,
+      cheapLiquidity.dex,
+      token.id,
+      riskFlags,
+      aiScoreValue,
+    );
+    metrics.increment('executedTrades', boughtCount);
+  }
+
+  let telegramTrendMonitor: TelegramTrendMonitor | undefined;
+  if (app.config.TELEGRAM_TREND_SOURCE_ENABLED) {
+    const telegramTrendClient = new TelegramTrendClient();
+    const telegramTrendChannels = app.config.TELEGRAM_TREND_CHANNELS.split(',')
+      .map((c) => c.trim())
+      .filter(Boolean);
+    telegramTrendMonitor = new TelegramTrendMonitor(
+      telegramTrendClient,
+      telegramTrendChannels,
+      app.config.TELEGRAM_TREND_POLL_INTERVAL_MS,
+      app.log as never,
+    );
+    telegramTrendMonitor.start(async (candidate) => {
+      try {
+        await handleTelegramSignal(candidate);
+      } catch (err) {
+        app.log.error(
+          { err, mint: candidate.mint, channel: candidate.channel },
+          'failed to process telegram trend signal',
+        );
+      }
+    });
+  } else {
+    app.log.warn('TELEGRAM_TREND_SOURCE_ENABLED not set — Telegram trend channel monitor disabled');
   }
 
   monitor.start(async (event) => {
@@ -408,6 +606,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   return async () => {
     await monitor.stop();
     twitterMonitor?.stop();
+    telegramTrendMonitor?.stop();
     priceMonitor.stop();
     migrationMonitor.stop();
     await dexRegistry.stopAll();

@@ -67,6 +67,11 @@ enum Dex {
   METEORA
 }
 
+enum DiscoverySource {
+  ON_CHAIN
+  TELEGRAM
+}
+
 model Token {
   id              String   @id @default(cuid())
   mint            String   @unique
@@ -77,6 +82,15 @@ model Token {
   poolAddress     String?
   createdAt       DateTime @default(now())
   firstSeenAt     DateTime @default(now())
+
+  // How this token was first discovered — ON_CHAIN (pump.fun log / DEX pool-creation
+  // scanner) is the default and covers every token created before this field existed.
+  // TELEGRAM means a signal source (see apps/api/src/social/telegramTrend.ts) surfaced
+  // the mint first; the token still went through the exact same risk/AI/buy pipeline
+  // as any ON_CHAIN detection — this field is provenance only, never a gate.
+  discoverySource     DiscoverySource @default(ON_CHAIN)
+  telegramChannel     String?
+  telegramMessageUrl  String?
 
   liquidityUsd        Float?
   marketCapUsd         Float?
@@ -291,4 +305,24 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@map("audit_logs")
+}
+
+enum BlacklistType {
+  MINT
+  DEPLOYER
+}
+
+/// Cheap, RPC-free deny-list checked before any expensive risk/AI work runs —
+/// currently only MINT entries are looked up (see worker.ts's handleTelegramSignal);
+/// DEPLOYER exists for future use once a cheap way to resolve a deployer address
+/// from a bare mint exists, but is not populated or checked yet.
+model BlacklistEntry {
+  id        String        @id @default(cuid())
+  type      BlacklistType
+  value     String
+  reason    String?
+  createdAt DateTime      @default(now())
+
+  @@unique([type, value])
+  @@map("blacklist_entries")
 }

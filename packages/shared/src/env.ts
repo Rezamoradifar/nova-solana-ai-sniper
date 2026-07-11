@@ -105,6 +105,22 @@ export const envSchema = z.object({
     .default('(pump.fun OR "solana memecoin" OR $SOL) -is:retweet lang:en'),
   TWITTER_POLL_INTERVAL_MS: z.coerce.number().min(15000).default(60000),
 
+  // Telegram trend channels (signal source only — see apps/api/src/social/
+  // telegramTrend.ts). Reads each channel's public HTML preview
+  // (https://t.me/s/<channel>), no bot membership or login required. Master
+  // switch defaults to false, same double-opt-in convention as
+  // ENTRY_FILTER_ENABLED: a mint surfaced here still goes through the exact
+  // same risk/AI/safety pipeline as any on-chain detection before anything
+  // can buy it, gated per-user by each SnipeConfig's own autoBuyOnLaunch.
+  TELEGRAM_TREND_SOURCE_ENABLED: booleanFlag(false),
+  TELEGRAM_TREND_CHANNELS: z.string().default('trendingssol,trending'),
+  TELEGRAM_TREND_POLL_INTERVAL_MS: z.coerce.number().min(15000).default(20000),
+  // "AI Score < configured minimum" gate for this source specifically —
+  // deliberately separate from SnipeConfig.minAiScore (a buy-gate) since this
+  // one exists purely to keep low-quality Telegram-sourced candidates out of
+  // the Launch Feed/notifications before a user-level config is even consulted.
+  TELEGRAM_TREND_MIN_AI_SCORE: z.coerce.number().min(0).max(100).default(50),
+
   // Third-party market data
   DEXSCREENER_API_BASE: z.string().url().default('https://api.dexscreener.com'),
   JUPITER_API_BASE: z.string().url().default('https://lite-api.jup.ag'),

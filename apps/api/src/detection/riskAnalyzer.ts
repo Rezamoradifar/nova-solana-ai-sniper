@@ -61,6 +61,36 @@ export function resolveLiquidityUsd(candidates: {
   return { liquidityUsd: 0, source: 'unavailable' };
 }
 
+/** Every Dex value a token can actually launch/trade on — excludes JUPITER,
+ * which is an aggregator route label, never a launch venue itself. */
+export type LaunchableDex = Exclude<Dex, 'JUPITER'>;
+
+/**
+ * Maps DexScreener's own `dexId` string to this codebase's `Dex` enum,
+ * matching only the venues the DEX filter actually supports (PumpSwap,
+ * pump.fun, Raydium, Orca, Meteora) — anything else (an unlisted/fake pool,
+ * or DexScreener not indexing it under a name we recognize) returns
+ * `undefined`, which callers treat as "ignore this pool." Pure and exported
+ * so the mapping can't silently regress, same convention as
+ * resolveLiquidityUsd.
+ */
+export function mapDexScreenerIdToDex(dexId: string | undefined): LaunchableDex | undefined {
+  if (!dexId) return undefined;
+  const id = dexId.toLowerCase();
+  if (id.includes('pumpswap')) return 'PUMPSWAP';
+  if (id.includes('pumpfun') || id.includes('pump.fun')) return 'PUMPFUN';
+  if (id.includes('raydium')) return 'RAYDIUM';
+  if (id.includes('orca')) return 'ORCA';
+  if (id.includes('meteora')) return 'METEORA';
+  return undefined;
+}
+
+export interface CheapLiquidityResult {
+  liquidityUsd: number;
+  dex?: LaunchableDex;
+  poolAddress?: string;
+}
+
 export interface RecentActivity {
   recentBuys?: number;
   recentSells?: number;
@@ -150,6 +180,37 @@ export class RiskAnalyzer {
     this.resultCache.set(cacheKey, { result, expiresAt: Date.now() + RISK_RESULT_TTL_MS });
 
     return result;
+  }
+
+  /**
+   * A liquidity-only check, far cheaper than analyze(): one HTTP call to
+   * DexScreener and, only if that has nothing, one cheap `getAccountInfo`
+   * RPC read of the pump.fun bonding curve — no mint-authority or
+   * holder-concentration RPC calls. Meant to sit in front of untrusted/noisy
+   * candidate sources (e.g. the Telegram trend monitor) so junk never
+   * reaches the expensive part of analyze() or an AI call. Returns
+   * `liquidityUsd: 0` (no `dex`) for anything with no liquidity on a
+   * recognized venue, which the caller treats as an immediate reject.
+   */
+  async cheapLiquidityPrecheck(mint: string): Promise<CheapLiquidityResult> {
+    const pair = await this.dexScreener.getBestSolanaPair(mint).catch((err: unknown) => {
+      this.logger.debug({ mint, err }, 'cheap liquidity precheck: dexscreener lookup failed');
+      return undefined;
+    });
+
+    if (pair?.liquidity?.usd !== undefined) {
+      const dex = mapDexScreenerIdToDex(pair.dexId);
+      return dex
+        ? { liquidityUsd: pair.liquidity.usd, dex, poolAddress: pair.pairAddress }
+        : { liquidityUsd: 0 };
+    }
+
+    const bondingCurveLiquidityUsd = await this.tryBondingCurveLiquidity(mint);
+    if (bondingCurveLiquidityUsd !== undefined && bondingCurveLiquidityUsd > 0) {
+      return { liquidityUsd: bondingCurveLiquidityUsd, dex: 'PUMPFUN' };
+    }
+
+    return { liquidityUsd: 0 };
   }
 
   private async analyzeUncached(input: RiskAnalysisInput): Promise<RiskFlags> {

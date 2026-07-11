@@ -2,6 +2,7 @@ import { PublicKey } from '@solana/web3.js';
 import { describe, expect, it, vi } from 'vitest';
 import {
   estimateLiquidityFromPriceImpact,
+  mapDexScreenerIdToDex,
   resolveLiquidityUsd,
   resolveRecentActivity,
   RiskAnalyzer,
@@ -122,6 +123,23 @@ describe('estimateLiquidityFromPriceImpact', () => {
 
   it('returns undefined for a non-finite price impact', () => {
     expect(estimateLiquidityFromPriceImpact(0.5, 77.91, NaN)).toBeUndefined();
+  });
+});
+
+describe('mapDexScreenerIdToDex', () => {
+  it('maps every venue the DEX filter actually supports', () => {
+    expect(mapDexScreenerIdToDex('raydium')).toBe('RAYDIUM');
+    expect(mapDexScreenerIdToDex('raydium-clmm')).toBe('RAYDIUM');
+    expect(mapDexScreenerIdToDex('orca')).toBe('ORCA');
+    expect(mapDexScreenerIdToDex('meteora')).toBe('METEORA');
+    expect(mapDexScreenerIdToDex('meteora-dlmm')).toBe('METEORA');
+    expect(mapDexScreenerIdToDex('pumpswap')).toBe('PUMPSWAP');
+    expect(mapDexScreenerIdToDex('pumpfun')).toBe('PUMPFUN');
+  });
+
+  it('returns undefined for an unlisted/unrecognized venue, treated as "ignore this pool"', () => {
+    expect(mapDexScreenerIdToDex('some-unknown-dex')).toBeUndefined();
+    expect(mapDexScreenerIdToDex(undefined)).toBeUndefined();
   });
 });
 
@@ -327,5 +345,79 @@ describe('RiskAnalyzer.analyze liquidity fallback chain', () => {
     const result = await analyzer.analyze({ mint: 'MintDead' });
 
     expect(result.liquidityUsd).toBe(0);
+  });
+});
+
+describe('RiskAnalyzer.cheapLiquidityPrecheck', () => {
+  it('uses DexScreener liquidity + dexId when present, without any RPC call', async () => {
+    const dexScreener = {
+      getBestSolanaPair: vi.fn().mockResolvedValue({
+        liquidity: { usd: 5000 },
+        dexId: 'raydium',
+        pairAddress: 'Pool111',
+      }),
+    } as never;
+    const jupiter = { getQuote: vi.fn() } as never;
+    const connection = { getAccountInfo: vi.fn() } as never;
+
+    const analyzer = new RiskAnalyzer(connection, dexScreener, jupiter, fakeLogger());
+    const result = await analyzer.cheapLiquidityPrecheck('MintAAAA');
+
+    expect(result).toEqual({ liquidityUsd: 5000, dex: 'RAYDIUM', poolAddress: 'Pool111' });
+    expect(
+      (connection as { getAccountInfo: ReturnType<typeof vi.fn> }).getAccountInfo,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('rejects (liquidityUsd 0) when DexScreener has liquidity on a venue the DEX filter does not support', async () => {
+    const dexScreener = {
+      getBestSolanaPair: vi.fn().mockResolvedValue({
+        liquidity: { usd: 5000 },
+        dexId: 'some-fake-dex',
+        pairAddress: 'Pool111',
+      }),
+    } as never;
+    const jupiter = { getQuote: vi.fn() } as never;
+    const connection = { getAccountInfo: vi.fn() } as never;
+
+    const analyzer = new RiskAnalyzer(connection, dexScreener, jupiter, fakeLogger());
+    const result = await analyzer.cheapLiquidityPrecheck('MintAAAA');
+
+    expect(result).toEqual({ liquidityUsd: 0 });
+  });
+
+  it('falls back to a cheap bonding-curve read (one RPC call) when DexScreener has nothing', async () => {
+    const dexScreener = {
+      getBestSolanaPair: vi
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ priceUsd: '77.91', liquidity: { usd: 25_000_000 } }),
+    } as never;
+    const jupiter = { getQuote: vi.fn() } as never;
+
+    const data = Buffer.alloc(49);
+    data.writeBigUInt64LE(691_250_005n, 32);
+    data.writeUInt8(0, 48);
+    const connection = { getAccountInfo: vi.fn().mockResolvedValue({ data }) } as never;
+
+    const analyzer = new RiskAnalyzer(connection, dexScreener, jupiter, fakeLogger());
+    const result = await analyzer.cheapLiquidityPrecheck(
+      '8Jexwtd8Py1g2bkjhQXPXoSztf5WEBAHvdLb7gUmpump',
+    );
+
+    expect(result.liquidityUsd).toBeGreaterThan(0);
+    expect(result.dex).toBe('PUMPFUN');
+    expect((jupiter as { getQuote: ReturnType<typeof vi.fn> }).getQuote).not.toHaveBeenCalled();
+  });
+
+  it('reports 0 (not a crash) when neither DexScreener nor the bonding curve have anything', async () => {
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const jupiter = { getQuote: vi.fn() } as never;
+    const connection = { getAccountInfo: vi.fn().mockResolvedValue(null) } as never;
+
+    const analyzer = new RiskAnalyzer(connection, dexScreener, jupiter, fakeLogger());
+    const result = await analyzer.cheapLiquidityPrecheck('MintDead');
+
+    expect(result).toEqual({ liquidityUsd: 0 });
   });
 });
