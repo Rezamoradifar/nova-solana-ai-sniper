@@ -155,3 +155,154 @@ describe('AutoTrader — Smart Entry Filter (opt-in, additive gate)', () => {
     expect(openPosition).toHaveBeenCalled();
   });
 });
+
+describe('AutoTrader — root-cause investigation 2026-07-12: an accepted token can never be silently skipped', () => {
+  it('every config always gets exactly one result — never fewer than configs.length', async () => {
+    const { trader } = setup(fakeConfig({ minLiquidityUsd: 1_000_000 })); // fails the liquidity gate
+
+    const results = await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.bought).toBe(false);
+    expect(results[0]!.reason).toBeDefined();
+  });
+
+  it('logs a structured BUY CANCELLED line with an explicit reason for the liquidity gate', async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const openPosition = vi.fn().mockResolvedValue({ trade: {}, position: {} });
+    const config = fakeConfig({ minLiquidityUsd: 1_000_000 });
+    const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([config]) } } as never;
+    const trader = new AutoTrader({
+      prisma,
+      riskAnalyzer: {} as never,
+      positionManager: { openPosition } as never,
+      logger: logger as never,
+      encryptionKey: 'key',
+    });
+
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mint: 'MintABC',
+        userId: 'user-1',
+        location: expect.stringContaining('autoTrader.ts'),
+      }),
+      expect.stringMatching(/^BUY CANCELLED\nReason:\nliquidity_below_threshold/),
+    );
+  });
+
+  it('logs a structured BUY CANCELLED line with an explicit reason for the score gate', async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const openPosition = vi.fn().mockResolvedValue({ trade: {}, position: {} });
+    const config = fakeConfig({ minAiScore: 999 });
+    const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([config]) } } as never;
+    const trader = new AutoTrader({
+      prisma,
+      riskAnalyzer: {} as never,
+      positionManager: { openPosition } as never,
+      logger: logger as never,
+      encryptionKey: 'key',
+    });
+
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ mint: 'MintABC', userId: 'user-1' }),
+      expect.stringMatching(/^BUY CANCELLED\nReason:\nscore_below_threshold/),
+    );
+  });
+
+  it('logs a structured BUY CANCELLED line when the user has no active wallet', async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const openPosition = vi.fn().mockResolvedValue({ trade: {}, position: {} });
+    const config = fakeConfig({ user: { wallets: [] } });
+    const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([config]) } } as never;
+    const trader = new AutoTrader({
+      prisma,
+      riskAnalyzer: {} as never,
+      positionManager: { openPosition } as never,
+      logger: logger as never,
+      encryptionKey: 'key',
+    });
+
+    const results = await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'no_active_wallet' }]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringMatching(/^BUY CANCELLED\nReason:\nno_active_wallet/),
+    );
+  });
+
+  it('logs BUY STARTED and BUY EXECUTED with the real signature when the buy succeeds', async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const openPosition = vi
+      .fn()
+      .mockResolvedValue({ trade: { txSignature: 'sig-abc-123' }, position: {} });
+    const config = fakeConfig();
+    const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([config]) } } as never;
+    const trader = new AutoTrader({
+      prisma,
+      riskAnalyzer: {} as never,
+      positionManager: { openPosition } as never,
+      logger: logger as never,
+      encryptionKey: 'key',
+    });
+
+    const results = await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(results).toEqual([{ userId: 'user-1', bought: true }]);
+    expect(logger.info).toHaveBeenCalledWith(expect.anything(), 'BUY STARTED');
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ signature: 'sig-abc-123' }),
+      'BUY EXECUTED\nSignature:\nsig-abc-123',
+    );
+  });
+
+  it('a generic execution error still produces a result with a reason and a structured BUY CANCELLED log, never a silent skip', async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const openPosition = vi.fn().mockRejectedValue(new Error('RPC timeout'));
+    const config = fakeConfig();
+    const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([config]) } } as never;
+    const trader = new AutoTrader({
+      prisma,
+      riskAnalyzer: {} as never,
+      positionManager: { openPosition } as never,
+      logger: logger as never,
+      encryptionKey: 'key',
+    });
+
+    const results = await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'execution_error' }]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      expect.stringMatching(/^BUY CANCELLED\nReason:\nexecution_error: RPC timeout/),
+    );
+  });
+
+  it('logs TOKEN ACCEPTED at info level (visible in production) even when there are zero active configs', async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([]) } } as never;
+    const trader = new AutoTrader({
+      prisma,
+      riskAnalyzer: {} as never,
+      positionManager: { openPosition: vi.fn() } as never,
+      logger: logger as never,
+      encryptionKey: 'key',
+    });
+
+    const results = await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(results).toEqual([]);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ activeConfigCount: 0 }),
+      'TOKEN ACCEPTED — evaluating against active auto-buy configs',
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.stringMatching(/^BUY CANCELLED\nReason:\nno active SnipeConfig/),
+    );
+  });
+});

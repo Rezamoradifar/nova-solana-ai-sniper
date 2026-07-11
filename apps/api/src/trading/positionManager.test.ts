@@ -929,6 +929,10 @@ describe('PositionManager unverified-swap lock (regression: live incident 2026-0
       fakeSafety(),
       notifier,
       false, // live trading
+      undefined,
+      undefined,
+      undefined,
+      0, // verificationRetryDelayMs — no real delay in tests
     );
 
     // First attempt: swap lands, verification fails.
@@ -983,6 +987,10 @@ describe('PositionManager unverified-swap lock (regression: live incident 2026-0
       fakeSafety(),
       notifier,
       false, // live trading
+      undefined,
+      undefined,
+      undefined,
+      0, // verificationRetryDelayMs — no real delay in tests
     );
 
     await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow();
@@ -997,6 +1005,128 @@ describe('PositionManager unverified-swap lock (regression: live incident 2026-0
 
     await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow(/could not be verified/);
     expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  // Root-cause investigation 2026-07-12: two real production BUYs failed verification
+  // on the FIRST attempt with "Could not fetch confirmed transaction" — a transient
+  // RPC-propagation-lag error, not a real problem. Proves the retry recovers instead
+  // of needlessly locking the wallet+token out of trading.
+  it('openPosition recovers automatically when verification succeeds on a retry after transient RPC failures', async () => {
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
+      getQuote: vi.fn(),
+    } as never;
+    const sendTransaction = vi.fn().mockResolvedValue('sig-buy-retry-1');
+    const getParsedTransaction = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('429 Too Many Requests'))
+      .mockRejectedValueOnce(new Error('429 Too Many Requests'))
+      .mockResolvedValueOnce({ meta: { preTokenBalances: [], postTokenBalances: [] } });
+    const connection = {
+      sendTransaction,
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction,
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-1' });
+    const prisma = {
+      trade: { create: tradeCreate },
+      position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
+      token: { findUnique: vi.fn().mockResolvedValue(undefined) },
+    } as never;
+    const notifyError = vi.fn();
+    const notifier = { notifyError, notifyTrade: vi.fn() } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      notifier,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      0,
+    );
+
+    const { trade } = await manager.openPosition(BASE_PARAMS);
+
+    expect(trade.id).toBe('trade-1');
+    expect(sendTransaction).toHaveBeenCalledTimes(1); // only ONE real swap submitted
+    expect(getParsedTransaction).toHaveBeenCalledTimes(3); // 2 failed + 1 succeeded verification calls
+    expect(notifyError).not.toHaveBeenCalled();
+  });
+
+  // Root-cause investigation 2026-07-12: the old Set-based lock never expired — once
+  // verification failed, that wallet+token pair was blocked from ever buying again
+  // until the whole API process restarted. Proves the lock now auto-recovers on its
+  // own after the TTL, so trading is never permanently blocked.
+  it('openPosition auto-recovers a stuck verification lock after the TTL elapses, never blocking trading forever', async () => {
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
+      getQuote: vi.fn(),
+    } as never;
+    const sendTransaction = vi.fn().mockResolvedValue('sig-buy-ttl-1');
+    const connection = {
+      sendTransaction,
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      // Every verification attempt fails on the first swap (locks); succeeds on the
+      // swap submitted after the TTL has elapsed.
+      getParsedTransaction: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('429 Too Many Requests'))
+        .mockRejectedValueOnce(new Error('429 Too Many Requests'))
+        .mockRejectedValueOnce(new Error('429 Too Many Requests'))
+        .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-1' });
+    const prisma = {
+      trade: { create: tradeCreate },
+      position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
+      token: { findUnique: vi.fn().mockResolvedValue(undefined) },
+    } as never;
+    const notifier = { notifyError: vi.fn(), notifyTrade: vi.fn() } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      notifier,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      0,
+    );
+
+    vi.useFakeTimers();
+    try {
+      // First attempt: swap lands, verification fails after retries -> locked.
+      await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow();
+
+      // Immediately retrying is still refused — the lock is active.
+      await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow(
+        /could not be verified.*refusing to submit another swap/,
+      );
+      expect(sendTransaction).toHaveBeenCalledTimes(1);
+
+      // Advance past the 10-minute reconciliation TTL.
+      vi.advanceTimersByTime(11 * 60 * 1000);
+
+      // Lock has auto-expired: a fresh swap is submitted and this time succeeds.
+      const { trade } = await manager.openPosition(BASE_PARAMS);
+      expect(trade.id).toBe('trade-1');
+      expect(sendTransaction).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -1059,6 +1189,10 @@ describe('PositionManager zero-balance reconciliation (regression: live incident
       fakeSafety(),
       notifier,
       false, // live trading
+      undefined,
+      undefined,
+      undefined,
+      0, // verificationRetryDelayMs — no real delay in tests
     );
 
     const result = await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', {

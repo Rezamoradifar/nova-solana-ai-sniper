@@ -18,6 +18,29 @@ function activePreset(raw: string | null): Exclude<TrailingStopPreset, 'custom'>
     : undefined;
 }
 
+/**
+ * Root-cause investigation 2026-07-12: an accepted token (passed the notify
+ * gate — liquidity OK, risk checks passed, AI score visible) can still be
+ * silently rejected by a per-config gate here, and every one of these
+ * rejections was previously logged at `debug` level only — invisible in
+ * production (LOG_LEVEL=info). This guarantees a single, always-visible,
+ * greppable line with the exact reason and source location for every
+ * cancelled buy, so "accepted but no buy" is never unexplained again.
+ */
+function logBuyCancelled(
+  logger: Logger,
+  fields: {
+    mint: string;
+    userId: string;
+    reason: string;
+    location: string;
+    [key: string]: unknown;
+  },
+): void {
+  const { reason, ...rest } = fields;
+  logger.warn(rest, `BUY CANCELLED\nReason:\n${reason}`);
+}
+
 export interface EvaluateLaunchInput {
   mint: string;
   liquidityUsd: number;
@@ -56,8 +79,9 @@ export class AutoTrader {
     const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
     // Pipeline checkpoint: Scanner -> AI Filter / Risk Filter. Confirms this function
     // was actually reached for the token and shows the exact numbers every config
-    // will be evaluated against, before any per-user gating happens.
-    this.deps.logger.debug(
+    // will be evaluated against, before any per-user gating happens. info (not debug)
+    // so this is always visible in production, per the 2026-07-12 root-cause work.
+    this.deps.logger.info(
       {
         mint,
         activeConfigCount: configs.length,
@@ -65,35 +89,34 @@ export class AutoTrader {
         ruleScore,
         aiScore,
       },
-      'AutoTrader.evaluateAndMaybeBuy reached — evaluating active configs',
+      'TOKEN ACCEPTED — evaluating against active auto-buy configs',
     );
+    if (configs.length === 0) {
+      this.deps.logger.info(
+        { mint, location: 'apps/api/src/trading/autoTrader.ts:evaluateAndMaybeBuy' },
+        `BUY CANCELLED\nReason:\nno active SnipeConfig has autoBuyOnLaunch enabled — nothing to evaluate this token against`,
+      );
+    }
     const results: Array<{ userId: string; bought: boolean; reason?: string }> = [];
 
     for (const config of configs) {
       if (riskFlags.liquidityUsd < config.minLiquidityUsd) {
-        this.deps.logger.debug(
-          {
-            mint,
-            userId: config.userId,
-            liquidityUsd: riskFlags.liquidityUsd,
-            minLiquidityUsd: config.minLiquidityUsd,
-          },
-          "Risk Filter: liquidity below this config's threshold — skipping",
-        );
+        logBuyCancelled(this.deps.logger, {
+          mint,
+          userId: config.userId,
+          reason: `liquidity_below_threshold: liquidityUsd=${riskFlags.liquidityUsd} < config.minLiquidityUsd=${config.minLiquidityUsd}`,
+          location: 'apps/api/src/trading/autoTrader.ts:evaluateAndMaybeBuy (liquidity gate)',
+        });
         results.push({ userId: config.userId, bought: false, reason: 'liquidity_below_threshold' });
         continue;
       }
       if (Math.min(ruleScore, aiScore) < config.minAiScore) {
-        this.deps.logger.debug(
-          {
-            mint,
-            userId: config.userId,
-            ruleScore,
-            aiScore,
-            minAiScore: config.minAiScore,
-          },
-          "AI Filter: combined score below this config's threshold — skipping",
-        );
+        logBuyCancelled(this.deps.logger, {
+          mint,
+          userId: config.userId,
+          reason: `score_below_threshold: min(ruleScore=${ruleScore}, aiScore=${aiScore})=${Math.min(ruleScore, aiScore)} < config.minAiScore=${config.minAiScore}`,
+          location: 'apps/api/src/trading/autoTrader.ts:evaluateAndMaybeBuy (score gate)',
+        });
         results.push({ userId: config.userId, bought: false, reason: 'score_below_threshold' });
         continue;
       }
@@ -121,20 +144,24 @@ export class AutoTrader {
         },
       );
       if (!entryDecision.allowed) {
-        this.deps.logger.debug(
-          { mint, userId: config.userId, reasons: entryDecision.reasons },
-          'Smart Entry Filter: rejected — skipping',
-        );
+        logBuyCancelled(this.deps.logger, {
+          mint,
+          userId: config.userId,
+          reason: `entry_filter_blocked: ${entryDecision.reasons.join('; ')}`,
+          location: 'apps/api/src/trading/autoTrader.ts:evaluateAndMaybeBuy (Smart Entry Filter)',
+        });
         results.push({ userId: config.userId, bought: false, reason: 'entry_filter_blocked' });
         continue;
       }
 
       const wallet = config.user.wallets[0];
       if (!wallet) {
-        this.deps.logger.debug(
-          { mint, userId: config.userId },
-          'Wallet: no active wallet for this user — skipping',
-        );
+        logBuyCancelled(this.deps.logger, {
+          mint,
+          userId: config.userId,
+          reason: 'no_active_wallet: user has no wallet with isActive=true',
+          location: 'apps/api/src/trading/autoTrader.ts:evaluateAndMaybeBuy (wallet check)',
+        });
         results.push({ userId: config.userId, bought: false, reason: 'no_active_wallet' });
         continue;
       }
@@ -157,14 +184,15 @@ export class AutoTrader {
           };
 
       // Pipeline checkpoint: PositionManager reached — every filter above passed,
-      // this config is genuinely about to attempt a real (or paper) buy.
-      this.deps.logger.debug(
+      // this config is genuinely about to attempt a real (or paper) buy. info so
+      // every attempt is traceable in production, not just its outcome.
+      this.deps.logger.info(
         { mint, userId: config.userId, walletId: wallet.id, amountSol: config.buyAmountSol },
-        'PositionManager reached — attempting openPosition',
+        'BUY STARTED',
       );
 
       try {
-        await this.deps.positionManager.openPosition({
+        const { trade } = await this.deps.positionManager.openPosition({
           userId: config.userId,
           walletId: wallet.id,
           walletPublicKey: wallet.publicKey,
@@ -178,9 +206,12 @@ export class AutoTrader {
           aiScore,
           ...exitParams,
         });
-        this.deps.logger.debug(
-          { mint, userId: config.userId },
-          'Buy Executor: openPosition succeeded',
+        // positionManager.openPosition itself already logs the canonical
+        // "BUY EXECUTED\nSignature:\n<signature>" line; this ties that outcome
+        // back to the specific config/user that triggered it.
+        this.deps.logger.info(
+          { mint, userId: config.userId, signature: trade.txSignature },
+          `BUY EXECUTED\nSignature:\n${trade.txSignature}`,
         );
         results.push({ userId: config.userId, bought: true });
       } catch (err) {
@@ -188,6 +219,8 @@ export class AutoTrader {
           // Exact gate that blocked this trade (kill switch / per-trade limit / daily
           // loss limit / max open positions / wallet balance) — see safety.ts's
           // checkBeforeOpen, which returns the specific reason string used here.
+          // positionManager.openPosition already logged the BUY CANCELLED line for
+          // this; this ties it back to the specific config/user.
           this.deps.logger.warn(
             { userId: config.userId, mint, reason: err.reason },
             'auto-buy blocked by safety check',
@@ -195,12 +228,18 @@ export class AutoTrader {
           results.push({ userId: config.userId, bought: false, reason: 'safety_blocked' });
           continue;
         }
-        this.deps.logger.error({ err, userId: config.userId, mint }, 'auto-buy failed');
+        logBuyCancelled(this.deps.logger, {
+          mint,
+          userId: config.userId,
+          reason: `execution_error: ${err instanceof Error ? err.message : String(err)}`,
+          location: 'apps/api/src/trading/autoTrader.ts:evaluateAndMaybeBuy (openPosition catch)',
+          err,
+        });
         results.push({ userId: config.userId, bought: false, reason: 'execution_error' });
       }
     }
 
-    this.deps.logger.debug({ mint, results }, 'AutoTrader.evaluateAndMaybeBuy complete');
+    this.deps.logger.info({ mint, results }, 'AutoTrader.evaluateAndMaybeBuy complete');
     return results;
   }
 }

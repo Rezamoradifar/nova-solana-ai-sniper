@@ -52,6 +52,36 @@ async function getActualTokenDelta(
   return post - pre;
 }
 
+/**
+ * The verification RPC call (getParsedTransaction) frequently fails with
+ * "Could not fetch confirmed transaction" for a few seconds right after a
+ * swap lands — the tx is confirmed on-chain but hasn't propagated to the RPC
+ * node's own view yet. Live-verified 2026-07-11: two real production BUYs
+ * landed on-chain and failed verification on the first attempt with exactly
+ * this transient error, permanently locking that wallet+token pair out of
+ * further auto-buys (see unverifiedSwapLocks) even though the transaction
+ * was simply not yet visible. Retrying a few times with a short delay before
+ * giving up fixes the root cause instead of just working around its effect.
+ */
+async function withVerificationRetry<T>(
+  fn: () => Promise<T>,
+  attempts = 3,
+  delayMs = 2000,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1 && delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 /** Same idea as getActualTokenDelta, but for native SOL (lamports), which isn't an SPL token balance. */
 async function getActualSolDelta(
   connection: Connection,
@@ -141,8 +171,37 @@ export class PositionManager {
    * Keyed by positionId for sells, `${walletId}:${tokenId}` for buys (no
    * positionId exists yet at buy time). Deliberately process-lifetime only, not
    * persisted — see the doc comment on the catch blocks that set it.
+   *
+   * Value is the timestamp the lock was set. A lock is never permanent: after
+   * RECONCILIATION_LOCK_TTL_MS it auto-expires and trading recovers on its
+   * own (see isLockActive). Root-cause investigation 2026-07-12 found the
+   * previous Set-based version blocked a wallet+token pair forever once a
+   * single verification RPC call failed, with no recovery path short of a
+   * full process restart — a real "no buy ever executes again for this pair"
+   * bug, not a deliberate safety gate.
    */
-  private readonly unverifiedSwapLocks = new Set<string>();
+  private readonly unverifiedSwapLocks = new Map<string, number>();
+
+  /** How long a stuck reconciliation lock is honored before auto-recovering. */
+  private static readonly RECONCILIATION_LOCK_TTL_MS = 10 * 60 * 1000;
+
+  /**
+   * Checks (and lazily clears) a reconciliation lock. Never permanently blocks
+   * trading: once the TTL elapses, the lock is treated as stale and removed
+   * automatically, with an explicit log line explaining the recovery.
+   */
+  private isLockActive(key: string): boolean {
+    const lockedAt = this.unverifiedSwapLocks.get(key);
+    if (lockedAt === undefined) return false;
+    const lockedForMs = Date.now() - lockedAt;
+    if (lockedForMs < PositionManager.RECONCILIATION_LOCK_TTL_MS) return true;
+    this.logger.warn(
+      { key, lockedForMs },
+      'unverifiedSwapLocks: reconciliation lock expired — automatically recovering, trading is no longer blocked for this key',
+    );
+    this.unverifiedSwapLocks.delete(key);
+    return false;
+  }
 
   constructor(
     private readonly prisma: PrismaClient,
@@ -159,6 +218,8 @@ export class PositionManager {
     /** Optional: gated on JITO_BLOCK_ENGINE_URL being configured; unset means every send goes direct. */
     private readonly jito?: JitoClient,
     private readonly maxPriorityFeeLamports: number = DEFAULT_MAX_PRIORITY_FEE_LAMPORTS,
+    /** Delay between verification retries (withVerificationRetry) — overridable so tests don't wait on real timers. */
+    private readonly verificationRetryDelayMs: number = 2000,
   ) {}
 
   /**
@@ -352,10 +413,18 @@ export class PositionManager {
 
   async openPosition(params: OpenPositionParams) {
     const lockKey = `${params.walletId}:${params.tokenId}`;
-    if (this.unverifiedSwapLocks.has(lockKey)) {
-      throw new Error(
-        `A previous buy for wallet ${params.walletId} / token ${params.tokenId} landed on-chain but could not be verified — refusing to submit another swap until this is manually reconciled.`,
+    if (this.isLockActive(lockKey)) {
+      const reason = `A previous buy for wallet ${params.walletId} / token ${params.tokenId} landed on-chain but could not be verified — refusing to submit another swap until this is manually reconciled (or until the lock auto-expires).`;
+      this.logger.warn(
+        {
+          walletId: params.walletId,
+          mint: params.mint,
+          tokenId: params.tokenId,
+          location: 'apps/api/src/trading/positionManager.ts:openPosition',
+        },
+        `BUY CANCELLED\nReason:\n${reason}`,
       );
+      throw new Error(reason);
     }
 
     const check = await this.safety.checkBeforeOpen(
@@ -369,11 +438,17 @@ export class PositionManager {
       { isLive: !this.paperTrading },
     );
     if (!check.allowed) {
+      const reason = check.reason ?? 'unknown safety violation';
       this.logger.warn(
-        { reason: check.reason, walletId: params.walletId, mint: params.mint },
-        'trade blocked by safety check',
+        {
+          reason,
+          walletId: params.walletId,
+          mint: params.mint,
+          location: 'apps/api/src/trading/safety.ts:checkBeforeOpen',
+        },
+        `BUY CANCELLED\nReason:\n${reason}`,
       );
-      throw new SafetyCheckError(check.reason ?? 'unknown safety violation');
+      throw new SafetyCheckError(reason);
     }
     this.logger.debug(
       { walletId: params.walletId, mint: params.mint, paperTrading: this.paperTrading },
@@ -433,22 +508,37 @@ export class PositionManager {
       // is locked out of further auto-buys until a human reconciles it (see
       // unverifiedSwapLocks's doc comment: retrying blind here would submit a
       // second real buy on top of one that already landed).
-      this.unverifiedSwapLocks.add(lockKey);
+      this.unverifiedSwapLocks.set(lockKey, Date.now());
       try {
         // The quote is only an estimate — record what actually landed in the wallet,
         // since a later sell has to work with the real balance, not the estimate.
-        const actualReceived = await getActualTokenDelta(
-          this.connection,
-          signature,
-          keypair.publicKey.toBase58(),
-          params.mint,
+        // Retried: the RPC node frequently hasn't caught up with a just-landed tx yet
+        // (see withVerificationRetry's doc comment) — most "verification failures" are
+        // this transient lag, not a real problem.
+        const actualReceived = await withVerificationRetry(
+          () =>
+            getActualTokenDelta(
+              this.connection,
+              signature,
+              keypair.publicKey.toBase58(),
+              params.mint,
+            ),
+          3,
+          this.verificationRetryDelayMs,
         );
         outAmount = actualReceived.toString();
         this.unverifiedSwapLocks.delete(lockKey);
       } catch (err) {
+        const reason = `BUY landed on-chain (signature ${signature}) but could not be verified after retries for wallet ${params.walletId} / token ${params.tokenId}. Position was NOT recorded. Manual reconciliation required — further auto-buys for this wallet+token are blocked for up to ${PositionManager.RECONCILIATION_LOCK_TTL_MS / 60_000} minutes, then automatically recover.`;
         this.logger.error(
-          { err, walletId: params.walletId, tokenId: params.tokenId, signature },
-          'BUY landed on-chain but verification failed — position NOT recorded, auto-buys for this wallet+token are locked until manually reconciled',
+          {
+            err,
+            walletId: params.walletId,
+            tokenId: params.tokenId,
+            signature,
+            location: 'apps/api/src/trading/positionManager.ts:openPosition',
+          },
+          `BUY CANCELLED\nReason:\n${reason}`,
         );
         await this.recordFailedTrade({
           walletId: params.walletId,
@@ -459,10 +549,7 @@ export class PositionManager {
           signature,
           err,
         });
-        await this.notifier?.notifyError(
-          'openPosition verification',
-          `BUY landed on-chain (signature ${signature}) but could not be verified for wallet ${params.walletId} / token ${params.tokenId}. Position was NOT recorded. Manual reconciliation required — further auto-buys for this wallet+token are blocked until then.`,
-        );
+        await this.notifier?.notifyError('openPosition verification', reason);
         throw err;
       }
     }
@@ -525,7 +612,16 @@ export class PositionManager {
       },
     });
 
-    this.logger.info({ tradeId: trade.id, positionId: position.id, signature }, 'position opened');
+    this.logger.info(
+      {
+        tradeId: trade.id,
+        positionId: position.id,
+        signature,
+        walletId: params.walletId,
+        mint: params.mint,
+      },
+      `BUY EXECUTED\nSignature:\n${signature}`,
+    );
 
     eventBus.publish('trade.created', { tradeId: trade.id, side: 'BUY', mint: params.mint });
     eventBus.publish('position.updated', { positionId: position.id, status: 'OPEN' });
@@ -643,10 +739,13 @@ export class PositionManager {
     encryptionKey: string,
     exit: { currentPriceUsd: number; reason?: ExitReason },
   ) {
-    if (this.unverifiedSwapLocks.has(positionId)) {
-      throw new Error(
-        `A previous sell for position ${positionId} landed on-chain but could not be verified — refusing to submit another swap until this is manually reconciled.`,
+    if (this.isLockActive(positionId)) {
+      const reason = `A previous sell for position ${positionId} landed on-chain but could not be verified — refusing to submit another swap until this is manually reconciled (or until the lock auto-expires).`;
+      this.logger.warn(
+        { positionId, walletId, location: 'apps/api/src/trading/positionManager.ts:closePosition' },
+        `SELL CANCELLED\nReason:\n${reason}`,
       );
+      throw new Error(reason);
     }
 
     const position = await this.prisma.position.findUniqueOrThrow({
@@ -769,20 +868,29 @@ export class PositionManager {
       // its original amountToken untouched, and resubmit a fresh sell of the same
       // amount — twice — draining unrelated token balance out of the wallet each
       // time. See unverifiedSwapLocks's doc comment.
-      this.unverifiedSwapLocks.add(positionId);
+      this.unverifiedSwapLocks.set(positionId, Date.now());
       try {
-        const actualSolReceived = await getActualSolDelta(
-          this.connection,
-          signature,
-          keypair.publicKey.toBase58(),
+        // Retried for the same reason as the BUY-side verification — see
+        // withVerificationRetry's doc comment.
+        const actualSolReceived = await withVerificationRetry(
+          () => getActualSolDelta(this.connection, signature, keypair.publicKey.toBase58()),
+          3,
+          this.verificationRetryDelayMs,
         );
         outAmountLamports = Number(actualSolReceived);
         soldAmountToken = Number(sellAmountRaw);
         this.unverifiedSwapLocks.delete(positionId);
       } catch (err) {
+        const reason = `SELL landed on-chain (signature ${signature}) but could not be verified after retries for position ${positionId}. Position was left OPEN with stale amountToken. Manual reconciliation required — further auto-sell attempts for this position are blocked for up to ${PositionManager.RECONCILIATION_LOCK_TTL_MS / 60_000} minutes, then automatically recover.`;
         this.logger.error(
-          { err, positionId, walletId, signature },
-          'SELL landed on-chain but verification failed — position left OPEN, further auto-sell attempts for it are locked until manually reconciled',
+          {
+            err,
+            positionId,
+            walletId,
+            signature,
+            location: 'apps/api/src/trading/positionManager.ts:closePosition',
+          },
+          `SELL CANCELLED\nReason:\n${reason}`,
         );
         await this.recordFailedTrade({
           walletId,
@@ -793,10 +901,7 @@ export class PositionManager {
           signature,
           err,
         });
-        await this.notifier?.notifyError(
-          'closePosition verification',
-          `SELL landed on-chain (signature ${signature}) but could not be verified for position ${positionId}. Position was left OPEN with stale amountToken. Manual reconciliation required — further auto-sell attempts for this position are blocked until then.`,
-        );
+        await this.notifier?.notifyError('closePosition verification', reason);
         throw err;
       }
     }
