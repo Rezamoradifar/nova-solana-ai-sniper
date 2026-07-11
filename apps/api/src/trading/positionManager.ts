@@ -11,6 +11,7 @@ import { SolPriceOracle } from '../solana/pumpfunBondingCurve.js';
 import type { DexRegistry } from '../solana/dex/registry.js';
 import { JitoClient } from '../solana/jito.js';
 import { evaluateExit, type ExitReason } from './exitEngine.js';
+import { computeTrailingStopDisplay } from './adaptiveTrailingStop.js';
 import { eventBus } from '../lib/eventBus.js';
 import { TradingSafety, SafetyCheckError } from './safety.js';
 
@@ -107,6 +108,8 @@ export interface OpenPositionParams {
   takeProfitPercent?: number;
   stopLossPercent?: number;
   trailingStopPercent?: number;
+  /** Optional exit strategy — see adaptiveTrailingStop.ts. Frozen onto the Position at open time. */
+  trailingStopPreset?: string;
 }
 
 /** A random-looking signature so paper trades are visually distinct from real (base58) ones. */
@@ -357,6 +360,7 @@ export class PositionManager {
         takeProfitPercent: params.takeProfitPercent,
         stopLossPercent: params.stopLossPercent,
         trailingStopPercent: params.trailingStopPercent,
+        trailingStopPreset: params.trailingStopPreset,
         isPaperTrade: this.paperTrading,
       },
     });
@@ -542,6 +546,14 @@ export class PositionManager {
     if (exit.reason) {
       const pnlPercent =
         ((exit.currentPriceUsd - position.entryPriceUsd) / position.entryPriceUsd) * 100;
+      const display = computeTrailingStopDisplay({
+        entryPriceUsd: position.entryPriceUsd,
+        currentPriceUsd: exit.currentPriceUsd,
+        highWaterMarkUsd: position.highWaterMarkUsd ?? position.entryPriceUsd,
+        amountToken: position.amountToken,
+        tokenDecimals: position.token.decimals,
+        trailingStopPercent: position.trailingStopPercent,
+      });
       await this.notifier?.notifyExit({
         symbol: position.token.symbol ?? position.token.mint.slice(0, 8),
         mint: position.token.mint,
@@ -550,6 +562,9 @@ export class PositionManager {
         pnlPercent,
         pnlUsd: realizedPnlUsd,
         isPaperTrade: this.paperTrading,
+        entryPriceUsd: display.entryPriceUsd,
+        athUsd: display.athUsd,
+        lockedProfitPercent: display.lockedProfitPercent,
       });
     }
 

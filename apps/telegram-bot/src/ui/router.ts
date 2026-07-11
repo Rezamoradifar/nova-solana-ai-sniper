@@ -41,6 +41,7 @@ import {
   promptFor,
   applySettingsEdit,
   isSettingsField,
+  applyTrailingStopPreset,
 } from './screens/settings.js';
 import { renderProfile } from './screens/profile.js';
 import { renderPortfolio } from './screens/portfolio.js';
@@ -133,6 +134,11 @@ async function handleAction(
       if (typeof field !== 'string' || !isSettingsField(field) || !snipeConfigId) return undefined;
       setPending(chatId, { type: 'settings_edit', snipeConfigId, field, returnTo: 'settings' });
       return promptFor(field);
+    }
+    case 'settings:preset': {
+      const [preset, snipeConfigId] = rest;
+      if (typeof preset !== 'string' || !snipeConfigId) return undefined;
+      return applyTrailingStopPreset(deps, user, snipeConfigId, preset);
     }
 
     case 'referrals:refresh':

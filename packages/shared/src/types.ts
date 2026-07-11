@@ -25,6 +25,24 @@ export interface RiskFlags {
   marketCapUsd?: number;
 }
 
+/** Optional exit strategy — see apps/api/src/trading/adaptiveTrailingStop.ts. */
+export type TrailingStopPreset =
+  'conservative' | 'balanced' | 'aggressive' | 'meme_coin' | 'custom';
+
+export const TRAILING_STOP_PRESETS: readonly Exclude<TrailingStopPreset, 'custom'>[] = [
+  'conservative',
+  'balanced',
+  'aggressive',
+  'meme_coin',
+] as const;
+
+export const TRAILING_STOP_PRESET_LABELS: Record<Exclude<TrailingStopPreset, 'custom'>, string> = {
+  conservative: '🛡 Conservative',
+  balanced: '⚖️ Balanced',
+  aggressive: '🚀 Aggressive',
+  meme_coin: '🐸 Meme Coin Mode',
+};
+
 export interface AiScore {
   score: number; // 0-100, higher = safer/more promising
   summary: string;

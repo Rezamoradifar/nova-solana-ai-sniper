@@ -1,9 +1,48 @@
 import { InlineKeyboard } from 'grammy';
+import type { Position, Token } from '@prisma/client';
 import { withNav } from '../keyboards.js';
 import { sol, escapeMd } from '../format.js';
 import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
 
 const MAX_SHOWN = 8;
+
+/**
+ * Preset-driven positions (adaptiveTrailingStop.ts) show the full ATH/locked-profit
+ * picture; everything else keeps today's plain TP/SL line unchanged. "Current
+ * profit %"/"distance to stop" need a live price and aren't shown here — they're
+ * on the exit alert instead, since that's computed during an actual price tick;
+ * this screen only has the last stored high-water-mark, not a fresh quote.
+ */
+function formatPositionSummary(p: Position & { token: Token }): string {
+  const symbol = escapeMd(p.token.symbol ?? p.token.mint.slice(0, 6));
+  if (!p.trailingStopPreset) {
+    const tp = p.takeProfitPercent ? `TP ${p.takeProfitPercent}%` : 'TP —';
+    const sl = p.stopLossPercent ? `SL ${p.stopLossPercent}%` : 'SL —';
+    return `🪙 ${symbol} — ${sol(p.amountSolInvested)} invested\n${tp} · ${sl}`;
+  }
+
+  const athUsd = p.highWaterMarkUsd ?? p.entryPriceUsd;
+  const highestProfitPercent =
+    p.entryPriceUsd > 0 ? ((athUsd - p.entryPriceUsd) / p.entryPriceUsd) * 100 : 0;
+  const trailingStopPriceUsd =
+    p.trailingStopPercent != null ? athUsd * (1 - p.trailingStopPercent / 100) : undefined;
+  const lockedProfitPercent =
+    trailingStopPriceUsd !== undefined && p.entryPriceUsd > 0
+      ? ((trailingStopPriceUsd - p.entryPriceUsd) / p.entryPriceUsd) * 100
+      : undefined;
+
+  const lines = [
+    `🪙 ${symbol} [${p.trailingStopPreset}] — ${sol(p.amountSolInvested)} invested`,
+    `Entry: $${p.entryPriceUsd.toFixed(8)} · ATH: $${athUsd.toFixed(8)}`,
+    `Highest profit: ${highestProfitPercent.toFixed(2)}%`,
+  ];
+  if (trailingStopPriceUsd !== undefined) {
+    lines.push(
+      `Trailing stop: $${trailingStopPriceUsd.toFixed(8)} (locked ${lockedProfitPercent!.toFixed(2)}%)`,
+    );
+  }
+  return lines.join('\n');
+}
 
 export async function renderPositions(deps: ScreenDeps, user: ScreenUser): Promise<ScreenResult> {
   const [open, closedCount] = await Promise.all([
@@ -22,14 +61,7 @@ export async function renderPositions(deps: ScreenDeps, user: ScreenUser): Promi
   if (open.length === 0) {
     text += 'No open positions.';
   } else {
-    text += open
-      .map((p) => {
-        const symbol = escapeMd(p.token.symbol ?? p.token.mint.slice(0, 6));
-        const tp = p.takeProfitPercent ? `TP ${p.takeProfitPercent}%` : 'TP —';
-        const sl = p.stopLossPercent ? `SL ${p.stopLossPercent}%` : 'SL —';
-        return `🪙 ${symbol} — ${sol(p.amountSolInvested)} invested\n${tp} · ${sl}`;
-      })
-      .join('\n\n');
+    text += open.map(formatPositionSummary).join('\n\n');
 
     for (const p of open) {
       const symbol = p.token.symbol ?? p.token.mint.slice(0, 6);

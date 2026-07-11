@@ -21,6 +21,11 @@ export interface PositionExitNotification {
   pnlPercent: number;
   pnlUsd?: number;
   isPaperTrade?: boolean;
+  // Optional exit-strategy display fields — see adaptiveTrailingStop.ts. Undefined
+  // for positions not using the trailing-stop-preset system (today's default).
+  entryPriceUsd?: number;
+  athUsd?: number;
+  lockedProfitPercent?: number;
 }
 
 export interface NewTokenNotification {
@@ -126,11 +131,18 @@ function formatExitMessage(exit: PositionExitNotification): string {
   const emoji = exit.pnlPercent >= 0 ? '✅' : '⚠️';
   const paperTag = exit.isPaperTrade ? ' 📝 PAPER' : '';
   const reasonLabel = exit.reason.replace(/_/g, ' ');
+  const entryLine =
+    exit.entryPriceUsd !== undefined ? `\nEntry: $${exit.entryPriceUsd.toFixed(8)}` : '';
+  const athLine = exit.athUsd !== undefined ? `\nATH: $${exit.athUsd.toFixed(8)}` : '';
+  const lockedLine =
+    exit.lockedProfitPercent !== undefined
+      ? `\nLocked profit: ${exit.lockedProfitPercent.toFixed(2)}%`
+      : '';
   const linkLine = exit.mint ? `\n${linksLine(exit.mint, exit.dex)}` : '';
   return (
     `${emoji}${paperTag} Position closed: \`${exit.symbol}\`\n` +
     `Reason: ${reasonLabel}\n` +
-    `PnL: ${exit.pnlPercent.toFixed(2)}%${linkLine}`
+    `PnL: ${exit.pnlPercent.toFixed(2)}%${entryLine}${athLine}${lockedLine}${linkLine}`
   );
 }
 

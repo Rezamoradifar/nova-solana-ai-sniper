@@ -4,6 +4,18 @@ import type { RiskFlags } from '@nova/shared';
 import { RiskAnalyzer } from '../detection/riskAnalyzer.js';
 import type { PositionManager } from './positionManager.js';
 import { SafetyCheckError } from './safety.js';
+import {
+  resolvePresetExitParams,
+  TRAILING_STOP_PRESETS,
+  type TrailingStopPreset,
+} from './adaptiveTrailingStop.js';
+
+/** Narrows the raw DB string (or null/'custom') to a preset the adaptive formula understands. */
+function activePreset(raw: string | null): Exclude<TrailingStopPreset, 'custom'> | undefined {
+  return raw && (TRAILING_STOP_PRESETS as readonly string[]).includes(raw)
+    ? (raw as Exclude<TrailingStopPreset, 'custom'>)
+    : undefined;
+}
 
 export interface EvaluateLaunchInput {
   mint: string;
@@ -54,6 +66,23 @@ export class AutoTrader {
         continue;
       }
 
+      // Optional exit strategy, additive on top of the existing manual TP/SL/
+      // trailing fields: only when the config has explicitly opted into a preset
+      // (not null, not 'custom') do these get overridden. Anyone who hasn't touched
+      // this setting gets exactly today's behavior — config.takeProfitPercent etc,
+      // unchanged. See adaptiveTrailingStop.ts.
+      const preset = activePreset(config.trailingStopPreset);
+      const exitParams = preset
+        ? resolvePresetExitParams(preset, {
+            liquidityUsd: riskFlags.liquidityUsd,
+            top10HolderPercent: riskFlags.top10HolderPercent,
+          })
+        : {
+            takeProfitPercent: config.takeProfitPercent ?? undefined,
+            stopLossPercent: config.stopLossPercent ?? undefined,
+            trailingStopPercent: config.trailingStopPercent ?? undefined,
+          };
+
       try {
         await this.deps.positionManager.openPosition({
           userId: config.userId,
@@ -65,9 +94,8 @@ export class AutoTrader {
           mint,
           amountSol: config.buyAmountSol,
           slippageBps: config.maxSlippageBps,
-          takeProfitPercent: config.takeProfitPercent ?? undefined,
-          stopLossPercent: config.stopLossPercent ?? undefined,
-          trailingStopPercent: config.trailingStopPercent ?? undefined,
+          trailingStopPreset: preset,
+          ...exitParams,
         });
         results.push({ userId: config.userId, bought: true });
       } catch (err) {

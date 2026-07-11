@@ -149,6 +149,10 @@ model Position {
   takeProfitPercent    Float?
   stopLossPercent      Float?
   trailingStopPercent  Float?
+  // Frozen at open time, same convention as the three fields above — a position's
+  // exit strategy doesn't retroactively change if the user edits their SnipeConfig
+  // later. Null means "not using a preset" (today's default behavior, unchanged).
+  trailingStopPreset   String?
   highWaterMarkUsd     Float?
   realizedPnlUsd       Float?
   isPaperTrade         Boolean        @default(false)
@@ -174,6 +178,10 @@ model SnipeConfig {
   takeProfitPercent   Float?
   stopLossPercent     Float?
   trailingStopPercent Float?
+  // See Position.trailingStopPreset — the template default copied onto each new
+  // position at open time. Null (the default) is fully backward compatible: no
+  // behavior changes unless a user explicitly picks a preset in Settings.
+  trailingStopPreset  String?
   autoBuyOnLaunch     Boolean  @default(false)
   createdAt           DateTime @default(now())
 

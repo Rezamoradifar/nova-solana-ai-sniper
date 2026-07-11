@@ -1,4 +1,5 @@
 import { InlineKeyboard } from 'grammy';
+import { TRAILING_STOP_PRESETS, TRAILING_STOP_PRESET_LABELS } from '@nova/shared';
 import { withNav } from '../keyboards.js';
 import { sol } from '../format.js';
 import type { PendingAction } from '../pending.js';
@@ -57,22 +58,63 @@ export async function renderSettings(deps: ScreenDeps, user: ScreenUser): Promis
     };
   }
 
+  const presetLabel = isKnownPreset(config.trailingStopPreset)
+    ? TRAILING_STOP_PRESET_LABELS[config.trailingStopPreset]
+    : 'Custom (manual TP/SL/trailing on each position)';
+
   const text =
     `⚙️ *Settings*\n\n` +
     `Editing your most recent snipe config:\n\n` +
     `💰 Buy amount: *${sol(config.buyAmountSol)}*\n` +
     `📉 Max slippage: *${config.maxSlippageBps} bps*\n` +
     `💧 Min liquidity: *$${config.minLiquidityUsd.toFixed(0)}*\n` +
-    `🤖 Min AI score: *${config.minAiScore}*`;
+    `🤖 Min AI score: *${config.minAiScore}*\n` +
+    `📐 Exit strategy: *${presetLabel}*` +
+    (isKnownPreset(config.trailingStopPreset)
+      ? '\n_No fixed take-profit — trailing stop only, distance adapts to liquidity/holder concentration._'
+      : '');
 
   const keyboard = new InlineKeyboard()
     .text('✏️ Buy amount', `a:settings:edit:buyAmountSol:${config.id}`)
     .text('✏️ Slippage', `a:settings:edit:maxSlippageBps:${config.id}`)
     .row()
     .text('✏️ Min liquidity', `a:settings:edit:minLiquidityUsd:${config.id}`)
-    .text('✏️ Min AI score', `a:settings:edit:minAiScore:${config.id}`);
+    .text('✏️ Min AI score', `a:settings:edit:minAiScore:${config.id}`)
+    .row();
+
+  for (const preset of TRAILING_STOP_PRESETS) {
+    keyboard
+      .text(TRAILING_STOP_PRESET_LABELS[preset], `a:settings:preset:${preset}:${config.id}`)
+      .row();
+  }
+  keyboard.text('↩️ Custom (manual TP/SL/trailing)', `a:settings:preset:custom:${config.id}`);
 
   return { text, keyboard: withNav(keyboard, 'home') };
+}
+
+function isKnownPreset(
+  value: string | null,
+): value is Exclude<import('@nova/shared').TrailingStopPreset, 'custom'> {
+  return value !== null && (TRAILING_STOP_PRESETS as readonly string[]).includes(value);
+}
+
+/** Direct-action (not a pending text prompt) — a button-driven select, not free text. */
+export async function applyTrailingStopPreset(
+  deps: ScreenDeps,
+  user: ScreenUser,
+  snipeConfigId: string,
+  rawPreset: string,
+): Promise<ScreenResult> {
+  const config = await deps.prisma.snipeConfig.findUnique({ where: { id: snipeConfigId } });
+  if (!config || config.userId !== user.id) return renderSettings(deps, user);
+
+  const preset = rawPreset === 'custom' || isKnownPreset(rawPreset) ? rawPreset : null;
+  await deps.prisma.snipeConfig.update({
+    where: { id: snipeConfigId },
+    data: { trailingStopPreset: preset === 'custom' ? null : preset },
+  });
+
+  return renderSettings(deps, user);
 }
 
 export function isSettingsField(value: string): value is SettingsField {
