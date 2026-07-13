@@ -48,6 +48,8 @@ export const apiEnvSchema = envSchema.pick({
   PRICE_CHECK_INTERVAL_MS: true,
   MIGRATION_CHECK_INTERVAL_MS: true,
   MAX_PRIORITY_FEE_LAMPORTS: true,
+  DEPOSIT_MONITOR_ENABLED: true,
+  DEPOSIT_MONITOR_INTERVAL_MS: true,
 });
 
 export function loadApiEnv() {

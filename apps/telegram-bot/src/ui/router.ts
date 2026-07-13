@@ -24,6 +24,11 @@ import {
   restoreFilePrompt,
   restorePasswordPrompt,
   applyRestore,
+  renderDeposit,
+  handleRefreshBalance,
+  handleShowQr,
+  renderWalletHistory,
+  renderTransactionHistory,
 } from './screens/wallet.js';
 import { renderDashboard } from './screens/dashboard.js';
 import {
@@ -153,6 +158,14 @@ async function handleAction(
     case 'wallet:restore':
       setPending(chatId, { type: 'wallet_restore_awaiting_file', returnTo: 'wallet' });
       return restoreFilePrompt();
+    case 'wallet:deposit':
+      return renderDeposit(deps, user, rest[0]!);
+    case 'wallet:refreshbalance':
+      return handleRefreshBalance(deps, user, rest[0]!);
+    case 'wallet:history':
+      return renderWalletHistory(deps, user, rest[0]!, rest[1] ? Number(rest[1]) : 0);
+    case 'wallet:transactions':
+      return renderTransactionHistory(deps, user, rest[0]!, rest[1] ? Number(rest[1]) : 0);
 
     case 'positions:edittp':
       setPending(chatId, { type: 'position_edit_tp', positionId: rest[0]!, returnTo: 'positions' });
@@ -339,6 +352,12 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
 
       if (data.startsWith('a:card:')) {
         await handleCardAction(data, deps, user, ctx);
+        await ctx.answerCallbackQuery();
+        return;
+      } else if (data.startsWith('a:wallet:qr:')) {
+        // A photo message, same reasoning as a:card:* above — sent as a
+        // fresh reply rather than an inline keyboard edit.
+        await handleShowQr(deps, user, ctx, data.slice('a:wallet:qr:'.length));
         await ctx.answerCallbackQuery();
         return;
       } else if (data.startsWith('s:')) {

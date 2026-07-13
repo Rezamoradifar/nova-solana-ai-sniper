@@ -1,5 +1,6 @@
 import type { PrismaClient, User } from '@prisma/client';
 import type { Logger } from '@nova/shared';
+import type { Connection } from '@solana/web3.js';
 import type { InlineKeyboard } from 'grammy';
 
 export type ScreenId =
@@ -47,6 +48,13 @@ export interface ScreenDeps {
   logger: Logger;
   botUsername?: string;
   telegramTrend: TelegramTrendDeps;
+  /** Minimal single-endpoint connection (see solana/connection.ts) used only
+   * for the wallet Deposit screen's balance reads — see refreshWalletBalance
+   * in @nova/shared, shared with apps/api's DepositMonitor and
+   * refresh-balance route. Optional (undefined in most test fixtures) — the
+   * Deposit screen's refresh action just reports "not configured" rather
+   * than throwing when unset. */
+  solanaConnection?: Connection;
 }
 
 export interface ScreenResult {

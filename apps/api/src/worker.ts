@@ -21,6 +21,7 @@ import { PositionManager } from './trading/positionManager.js';
 import { AutoTrader } from './trading/autoTrader.js';
 import { TradingSafety, verifySafetySystemReady, type SafetyConfig } from './trading/safety.js';
 import { PriceMonitor } from './trading/priceMonitor.js';
+import { DepositMonitor } from './wallet/depositMonitor.js';
 import { hasAnyAiProvider, resolveAiProvider, scoreToken } from '@nova/ai';
 import type { Dex, RiskFlags } from '@nova/shared';
 import { createBot, NotificationService, AI_HIGH_SCORE_THRESHOLD } from '@nova/telegram-bot';
@@ -186,6 +187,22 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     notifier,
   });
   migrationMonitor.start(app.config.MIGRATION_CHECK_INTERVAL_MS);
+
+  // Polls every active wallet's live balance and records deposits — see
+  // wallet/depositMonitor.ts's doc comment. Independent on/off switch from
+  // every trading-related monitor above; deposits are core wallet
+  // functionality, not a staged/experimental feature, so this defaults on.
+  let depositMonitor: DepositMonitor | undefined;
+  if (app.config.DEPOSIT_MONITOR_ENABLED) {
+    depositMonitor = new DepositMonitor({
+      prisma: app.prisma,
+      connection,
+      logger: app.log as never,
+    });
+    depositMonitor.start(app.config.DEPOSIT_MONITOR_INTERVAL_MS);
+  } else {
+    app.log.warn('DEPOSIT_MONITOR_ENABLED not set — wallet deposits will not be auto-detected');
+  }
 
   // dexRegistry (constructed above, alongside riskAnalyzer) also drives
   // PumpSwap/Raydium(CPMM)/Orca(Whirlpool)/Meteora(DLMM) pool-creation scanners,
@@ -663,6 +680,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     telegramTrendMonitor?.stop();
     priceMonitor.stop();
     migrationMonitor.stop();
+    depositMonitor?.stop();
     await dexRegistry.stopAll();
   };
 }

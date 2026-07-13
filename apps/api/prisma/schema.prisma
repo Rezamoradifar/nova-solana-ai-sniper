@@ -43,6 +43,7 @@ model User {
   snipeConfigs  SnipeConfig[]
   copyConfigs   CopyTradeConfig[]
   auditLogs     AuditLog[]
+  ledgerEntries LedgerEntry[]
   performanceFees        PerformanceFeeLedger[]
   referralRewardsEarned  ReferralReward[]        @relation("ReferralRewardReferrer")
   referralRewardsCaused  ReferralReward[]        @relation("ReferralRewardReferredUser")
@@ -62,8 +63,18 @@ model Wallet {
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
 
-  trades   Trade[]
-  positions Position[]
+  // Cache backing "Current Balance"/"Last Updated" in the wallet UX (Telegram
+  // + Dashboard) — written by depositMonitor.ts's poll loop and by the
+  // on-demand /wallets/:id/refresh-balance route, read instead of a live RPC
+  // call on every list render. Both null until the first successful balance
+  // read for this wallet.
+  lastKnownBalanceLamports BigInt?
+  balanceUpdatedAt         DateTime?
+
+  trades        Trade[]
+  positions     Position[]
+  auditLogs     AuditLog[]
+  ledgerEntries LedgerEntry[]
 
   @@index([userId])
   @@map("wallets")
@@ -304,18 +315,110 @@ model MarketingPost {
   @@map("marketing_posts")
 }
 
+enum AuditStatus {
+  SUCCESS
+  FAILED
+  PENDING
+}
+
+/// Append-only: a DB-level BEFORE UPDATE/DELETE trigger (see migration
+/// 20260713150000_add_wallet_audit_immutability) rejects any write to an
+/// existing row, regardless of which role issues it — table-owner GRANTs
+/// don't stop a superuser or the owner itself from UPDATE/DELETE, so a plain
+/// REVOKE wouldn't actually enforce "immutable" here (the app's own DB role
+/// owns this table). Every existing call site only ever calls .create() —
+/// verified against the whole codebase before this change — so this is
+/// purely additive and cannot break anything that already works.
 model AuditLog {
-  id        String   @id @default(cuid())
-  userId    String?
-  user      User?    @relation(fields: [userId], references: [id])
-  action    String
-  metadata  Json?
-  ip        String?
-  createdAt DateTime @default(now())
+  id     String  @id @default(cuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+  // Nullable — most existing events (auth.login, etc.) aren't wallet-scoped.
+  // SetNull (not Cascade) on wallet deletion so the audit trail survives even
+  // if the wallet row it references is ever hard-deleted.
+  walletId String?
+  wallet   Wallet? @relation(fields: [walletId], references: [id], onDelete: SetNull)
+  action   String
+  // Defaults to SUCCESS so every pre-existing call site (which never set this)
+  // reads as a successful event, matching what actually happened in each case.
+  status      AuditStatus @default(SUCCESS)
+  txSignature String?
+  metadata    Json?
+  ip          String?
+  createdAt   DateTime    @default(now())
 
   @@index([userId])
   @@index([action])
+  @@index([walletId])
   @@map("audit_logs")
+}
+
+enum LedgerEntryType {
+  DEPOSIT
+  WITHDRAWAL
+  REFERRAL_CREDIT
+  PROFIT_CREDIT
+  OWNER_FEE
+  LEDGER_ADJUSTMENT
+}
+
+enum LedgerAsset {
+  SOL
+  USD
+}
+
+enum LedgerDirection {
+  CREDIT
+  DEBIT
+}
+
+/// Immutable financial ledger — separate from AuditLog (compliance/security
+/// trail) by design: this is the balance-affecting event history (deposits,
+/// admin-recorded withdrawals, profit/referral/owner-fee bookkeeping), always
+/// written alongside an AuditLog row from the same call site (see
+/// packages/shared/src/wallet/ledgerWrite.ts's writeLedgerAndAudit). Same
+/// BEFORE UPDATE/DELETE trigger immutability pattern as audit_logs (see
+/// migration 20260713150000_add_wallet_audit_immutability).
+model LedgerEntry {
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id])
+  // Nullable — USD bookkeeping entries derived from a closed position
+  // (PROFIT_CREDIT/OWNER_FEE/REFERRAL_CREDIT) aren't tied to one specific
+  // wallet at the ledger level, only to the user. SetNull (not Cascade) so a
+  // hard-deleted wallet never takes its own ledger history down with it.
+  walletId  String?
+  wallet    Wallet?         @relation(fields: [walletId], references: [id], onDelete: SetNull)
+  type      LedgerEntryType
+  asset     LedgerAsset
+  direction LedgerDirection
+
+  // Exactly one of these two is populated, matching `asset`: SOL-denominated
+  // events (DEPOSIT/WITHDRAWAL) use amountLamports; USD-denominated
+  // bookkeeping events (PROFIT_CREDIT/OWNER_FEE/REFERRAL_CREDIT — no on-chain
+  // transfer exists for these today, see registerFeeSystem.ts) use amountUsd.
+  amountLamports       BigInt?
+  amountUsd            Float?
+  // Only meaningful for SOL wallet-affecting entries (DEPOSIT/WITHDRAWAL) —
+  // the wallet's cached balance immediately after this entry was recorded.
+  balanceAfterLamports BigInt?
+
+  txSignature String?
+  // Reused from AuditLog's own enum rather than duplicated.
+  status      AuditStatus @default(SUCCESS)
+  // Links back to PerformanceFeeLedger.id / ReferralReward.id / a manual
+  // withdrawal record — never a hard FK (different target tables per type),
+  // same convention as Position.exitReason being a plain string.
+  referenceType String?
+  referenceId   String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([walletId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("ledger_entries")
 }
 
 enum BlacklistType {

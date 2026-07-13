@@ -142,6 +142,16 @@ export const envSchema = z.object({
   // rarer than a price tick, so a longer default interval than PRICE_CHECK_INTERVAL_MS.
   MIGRATION_CHECK_INTERVAL_MS: z.coerce.number().min(10000).default(30000),
 
+  // DepositMonitor — polls every active wallet's live SOL balance and records
+  // an increase as a DEPOSIT ledger/audit event (see
+  // packages/shared/src/wallet/balanceLedger.ts). Defaults on: deposits are
+  // core wallet functionality, not opt-in, unlike the staged/experimental
+  // trading features above. Independent of the on-demand refresh-balance
+  // route and the Telegram refresh button, which share the same underlying
+  // helper and can still be disabled here without affecting either.
+  DEPOSIT_MONITOR_ENABLED: booleanFlag(true),
+  DEPOSIT_MONITOR_INTERVAL_MS: z.coerce.number().min(10000).default(20000),
+
   // Marketing / links
   DASHBOARD_URL: z.string().url().default('http://localhost:5173'),
   COMMUNITY_URL: z.string().url().optional(),

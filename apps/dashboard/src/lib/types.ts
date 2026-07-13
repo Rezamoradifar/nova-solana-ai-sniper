@@ -56,6 +56,45 @@ export interface Wallet {
   publicKey: string;
   isActive: boolean;
   createdAt: string;
+  /** Cached balance (BigInt serialized as a string) — populated by
+   * apps/api's DepositMonitor or a manual refresh, null until first read. */
+  lastKnownBalanceLamports: string | null;
+  balanceUpdatedAt: string | null;
+}
+
+export type LedgerEntryType =
+  | 'DEPOSIT'
+  | 'WITHDRAWAL'
+  | 'REFERRAL_CREDIT'
+  | 'PROFIT_CREDIT'
+  | 'OWNER_FEE'
+  | 'LEDGER_ADJUSTMENT';
+
+/** One row of a wallet's Transaction History (GET /wallets/:id/transactions)
+ * — mirrors apps/api's LedgerEntry, with BigInt fields as strings. */
+export interface LedgerEntry {
+  id: string;
+  type: LedgerEntryType;
+  asset: 'SOL' | 'USD';
+  direction: 'CREDIT' | 'DEBIT';
+  amountLamports: string | null;
+  amountUsd: number | null;
+  balanceAfterLamports: string | null;
+  txSignature: string | null;
+  status: 'SUCCESS' | 'FAILED' | 'PENDING';
+  referenceType: string | null;
+  referenceId: string | null;
+  createdAt: string;
+}
+
+/** One row of a wallet's Wallet History (GET /wallets/:id/audit-log). */
+export interface AuditLogEntry {
+  id: string;
+  action: string;
+  status: 'SUCCESS' | 'FAILED' | 'PENDING';
+  txSignature: string | null;
+  ip: string | null;
+  createdAt: string;
 }
 
 /** Returned only from POST /wallets — `mnemonic` is shown once and never persisted. */

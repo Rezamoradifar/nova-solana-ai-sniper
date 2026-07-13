@@ -4,6 +4,61 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Internal Wallet, Ledger, Audit and Wallet UX: a real balance/deposit/withdrawal trail for
+  every managed wallet, built on top of the existing encrypted-at-rest keystore.
+  - `LedgerEntry` (`ledger_entries`): one immutable row per balance-affecting event —
+    `DEPOSIT`/`WITHDRAWAL` (SOL, `amountLamports`) and `PROFIT_CREDIT`/`OWNER_FEE`/
+    `REFERRAL_CREDIT` (USD bookkeeping, `amountUsd`). `AuditLog` gained `walletId`,
+    `status` (`SUCCESS`/`FAILED`/`PENDING`), and `txSignature` so it can carry the
+    compliance/security trail (wallet create/import/backup/restore/deactivate) alongside
+    the financial one. Both tables are made genuinely immutable by a `BEFORE UPDATE/DELETE`
+    Postgres trigger (migration `20260713150000_add_wallet_audit_immutability`,
+    `20260713160000_add_ledger_entries`) rather than a `REVOKE` — this app's own DB role owns
+    both tables, and Postgres table owners always bypass `GRANT`/`REVOKE` checks on their own
+    tables, so only a trigger makes "immutable" actually true regardless of which role writes.
+  - `packages/shared/src/wallet/ledgerWrite.ts`'s `writeLedgerAndAudit` is the single place
+    either table is written from application code, always inside the caller's own transaction,
+    so no financial event can produce a ledger row without its audit counterpart or vice versa.
+  - `packages/shared/src/wallet/balanceLedger.ts`'s `refreshWalletBalance` reads a wallet's live
+    SOL balance, diffs it against `Wallet.lastKnownBalanceLamports` (new cached-balance columns,
+    also added this migration), and records a `DEPOSIT` ledger row on any increase — guarded by
+    an optimistic `updateMany` so two concurrent callers (the poller and a manual refresh) can
+    never double-count the same deposit. The first-ever read for a wallet only seeds the cache
+    and never fabricates a deposit. This one helper is shared by all three places a balance gets
+    checked, so they can never disagree about what counts as a deposit:
+    - `apps/api/src/wallet/depositMonitor.ts` — polls every active wallet on an interval
+      (`DEPOSIT_MONITOR_ENABLED`/`DEPOSIT_MONITOR_INTERVAL_MS`, default 20s), same start/stop/tick
+      shape as the existing `PriceMonitor`.
+    - `POST /wallets/:id/refresh-balance` — the on-demand dashboard/API equivalent.
+    - The Telegram bot's 🔄 Refresh Balance button.
+  - `apps/api/src/business/registerFeeSystem.ts`'s `processProfitableClose` now writes
+    `PROFIT_CREDIT`/`OWNER_FEE`/(per-referrer) `REFERRAL_CREDIT` ledger+audit rows alongside the
+    existing `PerformanceFeeLedger`/`ReferralReward` rows it already created, each referencing
+    the `PerformanceFeeLedger` row it came from. Documented architectural finding, verified by
+    grepping the whole codebase for `treasury`/`feeWallet`/`collectFee`/`sweepFee`: the
+    performance-fee system is a pure USD accounting ledger — no on-chain transfer ever moves
+    SOL/tokens to collect a platform fee or pay a referral reward, so these three entry types are
+    informational bookkeeping only, never a real wallet-balance change (see
+    `profitDistributionAudit.test.ts`, an 8-scenario audit that exercises the real
+    `PositionManager`/`processProfitableClose` code paths end-to-end rather than reimplementing
+    the math, and documents this finding at the top of the file).
+  - New wallet routes: `GET /wallets/:id`, `POST /wallets/:id/refresh-balance`,
+    `GET /wallets/:id/audit-log` (compliance trail), `GET /wallets/:id/transactions` (financial
+    ledger, optionally filtered by type), and admin-only `POST /wallets/:id/withdrawals` — a
+    record-only endpoint: it logs that a withdrawal was already executed manually out-of-band
+    and updates the cached balance, but never decrypts a key or signs/broadcasts anything itself.
+  - Dashboard: a new per-wallet detail page (`WalletDetail.tsx`) with current balance, a
+    deposit-address QR code, tap-to-copy address (`CopyButton`/`clipboard.ts`, with a
+    `document.execCommand('copy')` fallback for non-HTTPS/older-iOS contexts), paginated
+    Recent Transactions and Wallet History tables, a manual refresh-balance button, and an
+    admin-only Record Withdrawal modal. `Layout.tsx` also gained a responsive mobile nav drawer
+    (hamburger + slide-over) so wallet actions are usable on a phone, not just desktop.
+  - Telegram bot: the Deposit screen now shows live balance/last-updated, a 🔄 Refresh Balance
+    button, a scannable QR code of the deposit address, and paginated 🧾 Transaction History /
+    📜 Wallet History screens — all routed through `ui/router.ts`'s existing action dispatch.
+
 ### Fixed
 
 - Every detected token showed `Liquidity = $0`. Root-caused with live mainnet data

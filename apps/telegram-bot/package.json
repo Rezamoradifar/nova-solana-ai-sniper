@@ -18,12 +18,15 @@
   "dependencies": {
     "@nova/shared": "*",
     "@prisma/client": "^5.22.0",
+    "@solana/web3.js": "^1.98.0",
     "grammy": "^1.32.0",
     "ioredis": "^5.4.1",
+    "qrcode": "^1.5.4",
     "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",
+    "@types/qrcode": "^1.5.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

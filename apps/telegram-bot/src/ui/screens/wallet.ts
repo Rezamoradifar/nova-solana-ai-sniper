@@ -1,16 +1,21 @@
-import { InlineKeyboard } from 'grammy';
+import { InlineKeyboard, InputFile } from 'grammy';
 import type { Context } from 'grammy';
+import QRCode from 'qrcode';
+import { PublicKey } from '@solana/web3.js';
 import {
   generateWallet,
   importWalletFromSecretKey,
   decryptSecret,
   createWalletBackup,
   restoreWalletBackup,
+  refreshWalletBalance,
   type WalletBackup,
 } from '@nova/shared';
 import { withNav } from '../keyboards.js';
-import { shortKey, escapeMd } from '../format.js';
+import { shortKey, escapeMd, sol, lamportsToSol, fmtAgo, fmtDate } from '../format.js';
 import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
+
+const HISTORY_PAGE_SIZE = 10;
 
 const SEED_PHRASE_AUTO_DELETE_MS = 60_000;
 
@@ -32,7 +37,9 @@ export async function renderWallet(deps: ScreenDeps, user: ScreenUser): Promise<
 
     for (const w of wallets.filter((w) => w.isActive)) {
       keyboard
+        .text(`🧾 Deposit ${w.label}`, `a:wallet:deposit:${w.id}`)
         .text(`💾 Backup ${w.label}`, `a:wallet:backup:${w.id}`)
+        .row()
         .text(`🗑 Deactivate ${w.label}`, `a:wallet:deactivate:${w.id}`)
         .row();
     }
@@ -72,7 +79,7 @@ export async function handleCreateWallet(
 ): Promise<ScreenResult> {
   const sealed = generateWallet(deps.encryptionKey);
   const label = `Wallet ${(await deps.prisma.wallet.count({ where: { userId: user.id } })) + 1}`;
-  await deps.prisma.wallet.create({
+  const wallet = await deps.prisma.wallet.create({
     data: {
       userId: user.id,
       label,
@@ -81,7 +88,12 @@ export async function handleCreateWallet(
     },
   });
   await deps.prisma.auditLog.create({
-    data: { userId: user.id, action: 'wallet.create', metadata: { source: 'telegram' } },
+    data: {
+      userId: user.id,
+      walletId: wallet.id,
+      action: 'wallet.create',
+      metadata: { walletId: wallet.id, source: 'telegram' },
+    },
   });
 
   await sendSeedPhraseOnce(ctx, sealed.mnemonic);
@@ -97,6 +109,14 @@ export async function handleDeactivateWallet(
   const wallet = await deps.prisma.wallet.findUnique({ where: { id: walletId } });
   if (wallet && wallet.userId === user.id) {
     await deps.prisma.wallet.update({ where: { id: walletId }, data: { isActive: false } });
+    await deps.prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        walletId: wallet.id,
+        action: 'wallet.deactivate',
+        metadata: { walletId: wallet.id, source: 'telegram' },
+      },
+    });
   }
   return renderWallet(deps, user);
 }
@@ -127,7 +147,7 @@ export async function applyImportWallet(
   }
 
   const label = `Wallet ${(await deps.prisma.wallet.count({ where: { userId: user.id } })) + 1}`;
-  await deps.prisma.wallet.create({
+  const wallet = await deps.prisma.wallet.create({
     data: {
       userId: user.id,
       label,
@@ -136,7 +156,12 @@ export async function applyImportWallet(
     },
   });
   await deps.prisma.auditLog.create({
-    data: { userId: user.id, action: 'wallet.import', metadata: { source: 'telegram' } },
+    data: {
+      userId: user.id,
+      walletId: wallet.id,
+      action: 'wallet.import',
+      metadata: { walletId: wallet.id, source: 'telegram' },
+    },
   });
 
   return { ok: true, result: await renderWallet(deps, user) };
@@ -170,6 +195,7 @@ export async function applyBackup(
   await deps.prisma.auditLog.create({
     data: {
       userId: user.id,
+      walletId: wallet.id,
       action: 'wallet.backup_exported',
       metadata: { walletId: wallet.id, source: 'telegram' },
     },
@@ -234,6 +260,7 @@ export async function applyRestore(
     await deps.prisma.auditLog.create({
       data: {
         userId: user.id,
+        walletId: existing.id,
         action: 'wallet.restore',
         metadata: { walletId: existing.id, source: 'telegram' },
       },
@@ -253,10 +280,215 @@ export async function applyRestore(
   await deps.prisma.auditLog.create({
     data: {
       userId: user.id,
+      walletId: wallet.id,
       action: 'wallet.restore',
       metadata: { walletId: wallet.id, source: 'telegram' },
     },
   });
 
   return { ok: true, result: await renderWallet(deps, user) };
+}
+
+async function loadOwnedWallet(deps: ScreenDeps, user: ScreenUser, walletId: string) {
+  const wallet = await deps.prisma.wallet.findUnique({ where: { id: walletId } });
+  return wallet && wallet.userId === user.id ? wallet : undefined;
+}
+
+/**
+ * The Deposit screen — full address in a Markdown code block (Telegram's
+ * mobile/desktop clients all offer tap-to-copy on a code span natively, so
+ * no custom "Copy Address" button/code is needed here, unlike the
+ * dashboard). Balance/last-updated come from Wallet.lastKnownBalanceLamports/
+ * balanceUpdatedAt, populated by apps/api's DepositMonitor or by tapping
+ * Refresh Balance below (both go through the same @nova/shared
+ * refreshWalletBalance helper).
+ */
+export async function renderDeposit(
+  deps: ScreenDeps,
+  user: ScreenUser,
+  walletId: string,
+): Promise<ScreenResult> {
+  const wallet = await loadOwnedWallet(deps, user, walletId);
+  if (!wallet) {
+    return {
+      text: '⚠️ That wallet no longer exists.',
+      keyboard: withNav(new InlineKeyboard(), 'wallet'),
+    };
+  }
+
+  const text =
+    `🧾 *Deposit — ${escapeMd(wallet.label)}*\n\n` +
+    `\`${wallet.publicKey}\`\n\n` +
+    `Network: Solana Mainnet\n` +
+    `Balance: ${sol(lamportsToSol(wallet.lastKnownBalanceLamports))}\n` +
+    `Last Updated: ${fmtAgo(wallet.balanceUpdatedAt)}\n\n` +
+    `Send only SOL or SPL tokens on Solana to this address. Tap the address above to copy it.`;
+
+  const keyboard = new InlineKeyboard()
+    .text('🔄 Refresh Balance', `a:wallet:refreshbalance:${wallet.id}`)
+    .text('🖼 Show QR', `a:wallet:qr:${wallet.id}`)
+    .row()
+    .text('🧾 Transaction History', `a:wallet:transactions:${wallet.id}:0`)
+    .text('📜 Wallet History', `a:wallet:history:${wallet.id}:0`);
+
+  return { text, keyboard: withNav(keyboard, 'wallet') };
+}
+
+export async function handleRefreshBalance(
+  deps: ScreenDeps,
+  user: ScreenUser,
+  walletId: string,
+): Promise<ScreenResult> {
+  const wallet = await loadOwnedWallet(deps, user, walletId);
+  if (!wallet) {
+    return {
+      text: '⚠️ That wallet no longer exists.',
+      keyboard: withNav(new InlineKeyboard(), 'wallet'),
+    };
+  }
+  if (!deps.solanaConnection) {
+    deps.logger.warn(
+      { walletId },
+      'refresh balance tapped but no Solana RPC connection is configured',
+    );
+    return renderDeposit(deps, user, walletId);
+  }
+  await refreshWalletBalance(
+    { prisma: deps.prisma, connection: deps.solanaConnection, logger: deps.logger },
+    walletId,
+    { source: 'telegram' },
+  ).catch((err) => {
+    deps.logger.error({ err, walletId }, 'telegram refresh balance failed');
+  });
+  return renderDeposit(deps, user, walletId);
+}
+
+/** Generates and sends the deposit address as a scannable QR photo — a photo
+ * message, so this is sent as a fresh reply rather than an inline keyboard
+ * edit (see router.ts's handleCardAction for the identical reasoning). */
+export async function handleShowQr(
+  deps: ScreenDeps,
+  user: ScreenUser,
+  ctx: Context,
+  walletId: string,
+): Promise<void> {
+  const wallet = await loadOwnedWallet(deps, user, walletId);
+  if (!wallet) {
+    await ctx.reply('⚠️ That wallet no longer exists.');
+    return;
+  }
+  // Validate before generating — a malformed key would otherwise still
+  // produce a "valid" QR code encoding garbage.
+  void new PublicKey(wallet.publicKey);
+  const png = await QRCode.toBuffer(wallet.publicKey, { type: 'png', width: 512, margin: 2 });
+  await ctx.replyWithPhoto(new InputFile(png, `${wallet.label}-deposit-qr.png`), {
+    caption: `🖼 *${escapeMd(wallet.label)}* deposit address\n\`${wallet.publicKey}\``,
+    parse_mode: 'Markdown',
+  });
+}
+
+/** "Wallet History" — the compliance/security audit trail for this wallet
+ * (create/import/backup/restore/deactivate plus every financial event's
+ * paired AuditLog row — see writeLedgerAndAudit in @nova/shared). */
+export async function renderWalletHistory(
+  deps: ScreenDeps,
+  user: ScreenUser,
+  walletId: string,
+  offset: number,
+): Promise<ScreenResult> {
+  const wallet = await loadOwnedWallet(deps, user, walletId);
+  if (!wallet) {
+    return {
+      text: '⚠️ That wallet no longer exists.',
+      keyboard: withNav(new InlineKeyboard(), 'wallet'),
+    };
+  }
+  const entries = await deps.prisma.auditLog.findMany({
+    where: { walletId },
+    orderBy: { createdAt: 'desc' },
+    skip: offset,
+    take: HISTORY_PAGE_SIZE + 1,
+  });
+  const hasMore = entries.length > HISTORY_PAGE_SIZE;
+  const page = entries.slice(0, HISTORY_PAGE_SIZE);
+
+  const text =
+    `📜 *Wallet History — ${escapeMd(wallet.label)}*\n\n` +
+    (page.length === 0
+      ? 'No history yet.'
+      : page
+          .map((e) => `${fmtDate(e.createdAt)} — ${escapeMd(e.action)} (${e.status})`)
+          .join('\n'));
+
+  const keyboard = new InlineKeyboard()
+    .text('🧾 Deposit Screen', `a:wallet:deposit:${wallet.id}`)
+    .row();
+  if (offset > 0) {
+    keyboard.text(
+      '⬅️ Newer',
+      `a:wallet:history:${wallet.id}:${Math.max(0, offset - HISTORY_PAGE_SIZE)}`,
+    );
+  }
+  if (hasMore) {
+    keyboard.text('➡️ Older', `a:wallet:history:${wallet.id}:${offset + HISTORY_PAGE_SIZE}`);
+  }
+
+  return { text, keyboard: withNav(keyboard, 'wallet') };
+}
+
+/** "Transaction History" — the financial ledger for this wallet (deposits,
+ * admin-recorded withdrawals). Profit/referral/owner-fee entries are
+ * user-scoped rather than wallet-scoped (see registerFeeSystem.ts) and
+ * don't appear here. */
+export async function renderTransactionHistory(
+  deps: ScreenDeps,
+  user: ScreenUser,
+  walletId: string,
+  offset: number,
+): Promise<ScreenResult> {
+  const wallet = await loadOwnedWallet(deps, user, walletId);
+  if (!wallet) {
+    return {
+      text: '⚠️ That wallet no longer exists.',
+      keyboard: withNav(new InlineKeyboard(), 'wallet'),
+    };
+  }
+  const entries = await deps.prisma.ledgerEntry.findMany({
+    where: { walletId },
+    orderBy: { createdAt: 'desc' },
+    skip: offset,
+    take: HISTORY_PAGE_SIZE + 1,
+  });
+  const hasMore = entries.length > HISTORY_PAGE_SIZE;
+  const page = entries.slice(0, HISTORY_PAGE_SIZE);
+
+  const text =
+    `🧾 *Transaction History — ${escapeMd(wallet.label)}*\n\n` +
+    (page.length === 0
+      ? 'No transactions yet.'
+      : page
+          .map((e) => {
+            const sign = e.direction === 'CREDIT' ? '+' : '-';
+            const amount =
+              e.asset === 'SOL'
+                ? sol(lamportsToSol(e.amountLamports))
+                : `$${(e.amountUsd ?? 0).toFixed(2)}`;
+            return `${fmtDate(e.createdAt)} — ${e.type} ${sign}${amount}`;
+          })
+          .join('\n'));
+
+  const keyboard = new InlineKeyboard()
+    .text('🧾 Deposit Screen', `a:wallet:deposit:${wallet.id}`)
+    .row();
+  if (offset > 0) {
+    keyboard.text(
+      '⬅️ Newer',
+      `a:wallet:transactions:${wallet.id}:${Math.max(0, offset - HISTORY_PAGE_SIZE)}`,
+    );
+  }
+  if (hasMore) {
+    keyboard.text('➡️ Older', `a:wallet:transactions:${wallet.id}:${offset + HISTORY_PAGE_SIZE}`);
+  }
+
+  return { text, keyboard: withNav(keyboard, 'wallet') };
 }

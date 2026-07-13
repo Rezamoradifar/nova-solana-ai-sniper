@@ -14,6 +14,8 @@ export const botEnvSchema = envSchema.pick({
   TELEGRAM_TREND_CHANNELS: true,
   TELEGRAM_TREND_MIN_AI_SCORE: true,
   TELEGRAM_TREND_POLL_INTERVAL_MS: true,
+  SOLANA_RPC_URL: true,
+  HELIUS_API_KEY: true,
 });
 
 export function loadBotEnv() {

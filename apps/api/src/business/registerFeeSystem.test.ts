@@ -45,6 +45,10 @@ function fakePrisma(overrides: {
   ledgerExists?: boolean;
   position?: Record<string, unknown> | null;
   sellTrade?: Record<string, unknown> | null;
+  /** All CONFIRMED SELL trades for this position (partial exits + the final
+   * close) — takes precedence over `sellTrade` when set, for scenarios that
+   * need more than one (e.g. institutional-mode partial exits). */
+  sellTrades?: Record<string, unknown>[];
   buyTrade?: Record<string, unknown> | null;
   businessSettings?: Record<string, unknown> | null;
   ledgerCreate?: ReturnType<typeof vi.fn>;
@@ -76,23 +80,27 @@ function fakePrisma(overrides: {
           id: 'position-1',
           walletId: 'wallet-1',
           tokenId: 'token-1',
+          createdAt: BEFORE_ACTIVATION,
           closedAt: AFTER_ACTIVATION,
           wallet: { userId: 'user-1', createdAt: overrides.userCreatedAt ?? BEFORE_ACTIVATION },
           token: { symbol: 'FOO', mint: 'MintFoo1111111111111111111111111111111111' },
         }
       : overrides.position,
   );
-  const tradeFindFirst = vi.fn().mockImplementation(({ where }: { where: { side: string } }) => {
-    if (where.side === 'SELL') {
-      return Promise.resolve(
-        overrides.sellTrade === undefined
-          ? { id: 'sell-trade-1', amountSol: 1.1 }
-          : overrides.sellTrade,
-      );
-    }
+  const tradeFindFirst = vi.fn().mockImplementation((_args: { where: { side: string } }) => {
+    // BUY only — the SELL side is now a sum-of-all-trades findMany (see below).
     return Promise.resolve(
       overrides.buyTrade === undefined ? { id: 'buy-trade-1', amountSol: 1.0 } : overrides.buyTrade,
     );
+  });
+  const defaultSellTrades = () => {
+    if (overrides.sellTrades !== undefined) return overrides.sellTrades;
+    if (overrides.sellTrade === undefined) return [{ id: 'sell-trade-1', amountSol: 1.1 }];
+    return overrides.sellTrade === null ? [] : [overrides.sellTrade];
+  };
+  const tradeFindMany = vi.fn().mockImplementation(({ where }: { where: { side: string } }) => {
+    if (where.side === 'SELL') return Promise.resolve(defaultSellTrades());
+    return Promise.resolve([]);
   });
   const businessSettingsFindFirst = vi.fn().mockResolvedValue(
     overrides.businessSettings === undefined
@@ -107,6 +115,12 @@ function fakePrisma(overrides: {
       : overrides.businessSettings,
   );
   const referralRewardCreate = overrides.referralRewardCreate ?? vi.fn().mockResolvedValue({});
+  // writeLedgerAndAudit (see @nova/shared) writes both of these inside the
+  // same $transaction for every PROFIT_CREDIT/OWNER_FEE/REFERRAL_CREDIT —
+  // stubbed so the transaction callback below doesn't throw on
+  // tx.ledgerEntry.create / tx.auditLog.create being undefined.
+  const ledgerEntryCreate = vi.fn().mockResolvedValue({ id: 'ledger-entry-1' });
+  const auditLogCreate = vi.fn().mockResolvedValue({ id: 'audit-log-1' });
   // user-1 (the trader) was referred by user-2 (referralCode 'REF-2') — exercises
   // the referral-reward path by default; individual tests can still override
   // businessSettings.referralProgramEnabled to turn it off.
@@ -122,13 +136,15 @@ function fakePrisma(overrides: {
   const prisma = {
     performanceFeeLedger: { findUnique: performanceFeeLedgerFindUnique },
     position: { findUnique: positionFindUnique },
-    trade: { findFirst: tradeFindFirst },
+    trade: { findFirst: tradeFindFirst, findMany: tradeFindMany },
     businessSettings: { findFirst: businessSettingsFindFirst, create: vi.fn() },
     user: { findUnique: userFindUnique },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
       fn({
         performanceFeeLedger: { create: ledgerCreate },
         referralReward: { create: referralRewardCreate },
+        ledgerEntry: { create: ledgerEntryCreate },
+        auditLog: { create: auditLogCreate },
       }),
     ),
   };
@@ -136,6 +152,8 @@ function fakePrisma(overrides: {
     prisma: prisma as unknown as PrismaClient,
     ledgerCreate,
     referralRewardCreate,
+    ledgerEntryCreate,
+    auditLogCreate,
     performanceFeeLedgerFindUnique,
   };
 }
@@ -163,12 +181,13 @@ async function fireEvent(
   prismaOverrides: Parameters<typeof fakePrisma>[0] = {},
 ) {
   capturedHandlers.length = 0;
-  const { prisma, ledgerCreate, referralRewardCreate } = fakePrisma(prismaOverrides);
+  const { prisma, ledgerCreate, referralRewardCreate, ledgerEntryCreate, auditLogCreate } =
+    fakePrisma(prismaOverrides);
   registerFeeSystem(fakeDeps(prisma));
   const handler = capturedHandlers[capturedHandlers.length - 1]!;
   handler({ type: 'position.updated', payload });
   await flush();
-  return { ledgerCreate, referralRewardCreate };
+  return { ledgerCreate, referralRewardCreate, ledgerEntryCreate, auditLogCreate };
 }
 
 describe('registerFeeSystem', () => {
@@ -223,6 +242,73 @@ describe('registerFeeSystem', () => {
       feeBps: 2000,
     });
     expect(referralRewardCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes an immutable LedgerEntry + AuditLog pair for PROFIT_CREDIT, OWNER_FEE, and each REFERRAL_CREDIT', async () => {
+    const { ledgerEntryCreate, auditLogCreate } = await fireEvent({
+      positionId: 'position-1',
+      status: 'CLOSED',
+      realizedPnlUsd: 100,
+    });
+
+    // PROFIT_CREDIT (trader) + OWNER_FEE (platform) + one REFERRAL_CREDIT
+    // (the default fixture has one referral level) = 3 of each.
+    expect(ledgerEntryCreate).toHaveBeenCalledTimes(3);
+    expect(auditLogCreate).toHaveBeenCalledTimes(3);
+
+    const ledgerTypes = ledgerEntryCreate.mock.calls.map((call) => call[0].data.type);
+    expect(ledgerTypes.sort()).toEqual(['OWNER_FEE', 'PROFIT_CREDIT', 'REFERRAL_CREDIT'].sort());
+
+    const profitCredit = ledgerEntryCreate.mock.calls.find(
+      (call) => call[0].data.type === 'PROFIT_CREDIT',
+    )![0].data;
+    expect(profitCredit).toMatchObject({
+      asset: 'USD',
+      direction: 'CREDIT',
+      userId: 'user-1',
+      walletId: 'wallet-1',
+      referenceType: 'performance_fee_ledger',
+    });
+
+    const referralCredit = ledgerEntryCreate.mock.calls.find(
+      (call) => call[0].data.type === 'REFERRAL_CREDIT',
+    )![0].data;
+    // Credited to the referrer (user-2), not the trader whose close triggered it.
+    expect(referralCredit.userId).toBe('user-2');
+
+    const auditActions = auditLogCreate.mock.calls.map((call) => call[0].data.action);
+    expect(auditActions.sort()).toEqual(
+      ['fee.owner_fee_charged', 'fee.profit_credited', 'fee.referral_credited'].sort(),
+    );
+  });
+
+  it('regression (Profit Distribution Audit, 2026-07-12): sums ALL sell trades for a position with prior partial exits, not just the latest one — a genuinely profitable institutional-mode close is no longer wrongly zero-feed', async () => {
+    // Institutional mode: a partial exit already returned 0.5 SOL, and the
+    // final close (the trade findFirst used to fetch alone) returned 0.7 SOL
+    // — total 1.2 SOL back against a 1.0 SOL buy-in, a real $30 net profit at
+    // $150/SOL. Before the fix, only the final leg's 0.7 SOL was compared
+    // against the FULL 1.0 SOL buy-in -> a false -$45 "actual net loss" that
+    // zeroed the fee out entirely (calculatePerformanceFee's netProfitUsd
+    // clamp) despite realizedPnlUsd (100, the position's true accumulated
+    // gross profit across every leg) being genuinely positive.
+    const { ledgerCreate } = await fireEvent(
+      { positionId: 'position-1', status: 'CLOSED', realizedPnlUsd: 100 },
+      {
+        sellTrades: [
+          { id: 'sell-trade-partial-1', amountSol: 0.5 },
+          { id: 'sell-trade-final-1', amountSol: 0.7 },
+        ],
+        buyTrade: { id: 'buy-trade-1', amountSol: 1.0 },
+      },
+    );
+    expect(ledgerCreate).toHaveBeenCalledTimes(1);
+    const data = ledgerCreate.mock.calls[0]![0].data;
+    expect(data.grossProfitUsd).toBe(100);
+    // netProfitUsd clamps to the smaller of gross (100) and actual
+    // ((0.5+0.7-1.0)*150 = 30) -- 30, not a false negative.
+    expect(data.netProfitUsd).toBeCloseTo(30, 8);
+    expect(data.feeUsd).toBeCloseTo(6, 8); // 20% of 30
+    expect(data.tradingCostsUsd).toBeCloseTo(70, 8); // 100 - 30
   });
 
   it('is idempotent — does nothing if a ledger row already exists for this position', async () => {

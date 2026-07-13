@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, ApiError } from '../lib/api.js';
 import { usePolling } from '../lib/usePolling.js';
+import { CopyButton } from '../components/CopyButton.js';
 import type { Wallet, WalletCreateResult, WalletBackupFile } from '../lib/types.js';
 
 function downloadJson(filename: string, data: unknown) {
@@ -120,6 +122,7 @@ function BackupModal({
 }
 
 export function Wallets() {
+  const navigate = useNavigate();
   const { data: wallets, error: pollError } = usePolling(
     () => api.get<Wallet[]>('/wallets'),
     10000,
@@ -321,12 +324,23 @@ export function Wallets() {
           </thead>
           <tbody>
             {(wallets ?? []).map((wallet) => (
-              <tr key={wallet.id}>
+              <tr
+                key={wallet.id}
+                onClick={() => navigate(`/wallets/${wallet.id}`)}
+                className="cursor-pointer hover:bg-surface-hover"
+              >
                 <td>{wallet.label}</td>
-                <td className="font-mono text-xs">{wallet.publicKey}</td>
+                <td className="font-mono text-xs">
+                  <div className="flex items-center gap-2">
+                    <span>{wallet.publicKey}</span>
+                    <span onClick={(e) => e.stopPropagation()}>
+                      <CopyButton text={wallet.publicKey} />
+                    </span>
+                  </div>
+                </td>
                 <td>{wallet.isActive ? 'Active' : 'Disabled'}</td>
                 <td>{new Date(wallet.createdAt).toLocaleDateString()}</td>
-                <td className="space-x-3 whitespace-nowrap">
+                <td className="space-x-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                   <button
                     onClick={() => setBackupTarget(wallet)}
                     className="text-xs text-accent hover:underline"

@@ -5,6 +5,7 @@ import { loadBotEnv, parseAdminIds } from './config/env.js';
 import { createBot } from './bot.js';
 import { registerAdminCommands } from './admin/commands.js';
 import { registerUiRouter } from './ui/router.js';
+import { getBotConnection } from './solana/connection.js';
 
 const logger = createLogger('telegram-bot');
 
@@ -46,8 +47,19 @@ async function main() {
     metricsUrl: `http://127.0.0.1:${env.API_PORT}/metrics`,
   };
 
+  const solanaConnection = getBotConnection({
+    HELIUS_API_KEY: env.HELIUS_API_KEY,
+    SOLANA_RPC_URL: env.SOLANA_RPC_URL,
+  });
+
   registerAdminCommands(bot, prisma, adminIds, logger, redis);
-  registerUiRouter(bot, { prisma, encryptionKey: env.ENCRYPTION_KEY, logger, telegramTrend });
+  registerUiRouter(bot, {
+    prisma,
+    encryptionKey: env.ENCRYPTION_KEY,
+    logger,
+    telegramTrend,
+    solanaConnection,
+  });
 
   await bot.start({
     onStart: () => logger.info('telegram bot started (long polling)'),

@@ -6,6 +6,7 @@ import {
   getOrCreateBusinessSettings,
   isEligibleForFeeProcessing,
   resolveReferralChain,
+  writeLedgerAndAudit,
 } from '@nova/shared';
 import { createBot, NotificationService, type TradeReportData } from '@nova/telegram-bot';
 import { eventBus } from '../lib/eventBus.js';
@@ -121,13 +122,32 @@ export async function processProfitableClose(
   // Best-effort lookback, mirroring the exact same strategy positionManager.ts
   // already uses to match a BUY trade to a position (no Trade->Position FK
   // exists) — same convention, not a new join strategy.
-  const [sellTrade, buyTrade] = await Promise.all([
-    deps.prisma.trade.findFirst({
+  //
+  // Production bug fixed here (Profit Distribution Audit, 2026-07-12): this
+  // used to fetch only the single MOST RECENT SELL trade (findFirst). For a
+  // position with prior partial exits (institutional mode's profit ladder —
+  // see partialExitEngine.ts), that's just the final leg — comparing it
+  // alone against the position's FULL original buyTrade.amountSol massively
+  // understated (often to a false negative) actualNetProfitUsd, since it
+  // silently dropped the SOL every earlier partial exit already returned.
+  // calculatePerformanceFee clamps netProfitUsd to the smaller of gross and
+  // actual, so this could wrongly zero out (or shrink) the fee — and
+  // therefore the referral rewards derived from it — on a genuinely
+  // profitable institutional-mode close. Fixed to sum every CONFIRMED SELL
+  // trade for this wallet+token since this position opened, scoped by
+  // `createdAt >= position.createdAt` so an earlier, already-closed position
+  // for the same wallet+token (no Trade->Position FK exists) is never
+  // double-counted. For a position with no partial exits this returns
+  // exactly one row (the final sell), so the result is byte-identical to
+  // the old calculation in that case.
+  const [sellTrades, buyTrade] = await Promise.all([
+    deps.prisma.trade.findMany({
       where: {
         walletId: position.walletId,
         tokenId: position.tokenId,
         side: 'SELL',
         status: 'CONFIRMED',
+        createdAt: { gte: position.createdAt },
       },
       orderBy: { createdAt: 'desc' },
     }),
@@ -141,15 +161,17 @@ export async function processProfitableClose(
       orderBy: { createdAt: 'desc' },
     }),
   ]);
+  const sellTrade = sellTrades[0]; // latest, for the ledger's own reference field only
 
   // The real on-chain SOL delta between the matched trades already reflects
   // actual slippage/gas (they're real fill amounts, not quotes) — the gap
   // between this and the price-based grossProfitUsd IS the trading cost.
   let actualNetProfitUsd: number | undefined;
-  if (sellTrade && buyTrade) {
+  if (sellTrades.length > 0 && buyTrade) {
+    const totalSellAmountSol = sellTrades.reduce((sum, t) => sum + t.amountSol, 0);
     const solPriceUsd = await sharedSolPriceOracle.getPriceUsd(dexScreener).catch(() => undefined);
     if (solPriceUsd !== undefined) {
-      actualNetProfitUsd = (sellTrade.amountSol - buyTrade.amountSol) * solPriceUsd;
+      actualNetProfitUsd = (totalSellAmountSol - buyTrade.amountSol) * solPriceUsd;
     }
   }
 
@@ -187,8 +209,37 @@ export async function processProfitableClose(
           userShareUsd: feeResult.userShareUsd,
         },
       });
+
+      // Immutable ledger/audit trail for this close — see writeLedgerAndAudit's
+      // doc comment. Both entries reference the PerformanceFeeLedger row above
+      // so they can be reconciled against it; neither moves any real funds
+      // (see registerFeeSystem.ts's own module doc comment: this is USD
+      // bookkeeping, not an on-chain transfer).
+      await writeLedgerAndAudit(tx, {
+        type: 'PROFIT_CREDIT',
+        asset: 'USD',
+        direction: 'CREDIT',
+        amountUsd: feeResult.userShareUsd,
+        userId: position.wallet.userId,
+        walletId: position.walletId,
+        referenceType: 'performance_fee_ledger',
+        referenceId: created.id,
+        action: 'fee.profit_credited',
+      });
+      await writeLedgerAndAudit(tx, {
+        type: 'OWNER_FEE',
+        asset: 'USD',
+        direction: 'DEBIT',
+        amountUsd: feeResult.feeUsd,
+        userId: position.wallet.userId,
+        walletId: position.walletId,
+        referenceType: 'performance_fee_ledger',
+        referenceId: created.id,
+        action: 'fee.owner_fee_charged',
+      });
+
       for (const reward of referralDistribution) {
-        await tx.referralReward.create({
+        const referralReward = await tx.referralReward.create({
           data: {
             performanceFeeLedgerId: created.id,
             referrerUserId: reward.referrerUserId,
@@ -197,6 +248,20 @@ export async function processProfitableClose(
             percentBps: reward.percentBps,
             rewardUsd: reward.rewardUsd,
           },
+        });
+        // Referral credits belong to the referrer, not the trader whose
+        // close triggered them — walletId is intentionally omitted (the
+        // referrer's own wallet isn't known/relevant at this call site).
+        await writeLedgerAndAudit(tx, {
+          type: 'REFERRAL_CREDIT',
+          asset: 'USD',
+          direction: 'CREDIT',
+          amountUsd: reward.rewardUsd,
+          userId: reward.referrerUserId,
+          referenceType: 'referral_reward',
+          referenceId: referralReward.id,
+          action: 'fee.referral_credited',
+          metadata: { level: reward.level, referredUserId: position.wallet.userId },
         });
       }
       return created;

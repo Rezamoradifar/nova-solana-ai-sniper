@@ -8,6 +8,7 @@ import { Tokens } from './pages/Tokens.js';
 import { Positions } from './pages/Positions.js';
 import { Portfolio } from './pages/Portfolio.js';
 import { Wallets } from './pages/Wallets.js';
+import { WalletDetail } from './pages/WalletDetail.js';
 import { Snipes } from './pages/Snipes.js';
 import { Leaderboard } from './pages/Leaderboard.js';
 import { Logs } from './pages/Logs.js';
@@ -31,6 +32,7 @@ export function App() {
             <Route path="positions" element={<Positions />} />
             <Route path="portfolio" element={<Portfolio />} />
             <Route path="wallets" element={<Wallets />} />
+            <Route path="wallets/:id" element={<WalletDetail />} />
             <Route path="snipes" element={<Snipes />} />
             <Route path="leaderboard" element={<Leaderboard />} />
             <Route path="logs" element={<Logs />} />
