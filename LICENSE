@@ -1,0 +1,43 @@
+Proprietary Software License
+
+Copyright (c) 2026 Nova Solana AI Sniper. All Rights Reserved.
+
+This repository and all of its contents — including but not limited to
+source code, database schemas, documentation, presentation materials,
+trading strategies, scoring models, and configuration — are the
+proprietary and confidential property of the project owner.
+
+This matches the `license` field declared in this repository's own
+`package.json` (`"UNLICENSED"`): no open-source license is granted.
+
+No permission is granted to any person to:
+
+1. Copy, reproduce, or redistribute any part of this repository, in whole
+   or in part, in any form.
+2. Modify, adapt, translate, or create derivative works based on this
+   software.
+3. Sublicense, sell, lease, rent, or otherwise transfer rights to this
+   software to any third party.
+4. Reverse engineer, decompile, or disassemble any compiled artifact
+   produced from this software, except to the extent such restriction is
+   prohibited by applicable law.
+5. Deploy, host, or operate this software, or any derivative of it, for
+   any purpose without prior written authorization from the project
+   owner.
+
+Any authorized use (e.g. by an engaged contractor, employee, or investor
+under a separate written agreement) is governed by the terms of that
+separate agreement, which takes precedence over this notice where the two
+conflict.
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM, OUT OF, OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE —
+INCLUDING, WITHOUT LIMITATION, ANY FINANCIAL LOSS ARISING FROM AUTOMATED
+TRADING DECISIONS, FUND CUSTODY, OR WITHDRAWAL EXECUTION PERFORMED BY
+THIS SOFTWARE.
+
+For licensing inquiries, contact the project owner directly.

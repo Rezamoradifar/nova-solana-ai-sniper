@@ -1,0 +1,9 @@
+flowchart LR
+    A["User needs a wallet"] --> B["Fresh BIP39 mnemonic generated"]
+    B --> C["Private key encrypted\n(AES-256-GCM, scrypt-derived key)"]
+    C --> D["Mnemonic shown once,\nnever persisted"]
+    D --> E["Deposit Monitor polls\nlive on-chain balance"]
+    E --> F{"Balance increased?"}
+    F -->|yes| G["DEPOSIT ledger entry\n(race-safe optimistic update)"]
+    F -->|no| E
+    G --> H["Reflected in dashboard\n+ Telegram bot"]

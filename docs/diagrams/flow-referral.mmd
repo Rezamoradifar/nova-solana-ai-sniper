@@ -1,0 +1,9 @@
+flowchart TB
+    A["User A refers User B\n(referral code at signup)"] --> B["referredByCode link stored"]
+    B --> C["User B trades profitably"]
+    C --> D["Performance fee computed"]
+    D --> E["Referral chain resolved\n(cycle-protected, max depth)"]
+    E --> F["Each referrer's share\ncredited via REFERRAL_REWARD"]
+    F --> G{"Referrer crossed\nreward threshold?"}
+    G -->|yes, first time| H["Default sniper config granted\n(DB-unique: exactly once)"]
+    G -->|already granted| I["No-op"]

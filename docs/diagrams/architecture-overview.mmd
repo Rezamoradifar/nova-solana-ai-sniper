@@ -1,0 +1,39 @@
+flowchart TB
+    subgraph Sources["Discovery Sources"]
+        S1["pump.fun / PumpSwap"]
+        S2["Raydium / Orca / Meteora / OpenBook / Moonshot / Phoenix / Fluxbeam"]
+        S3["DexScreener / Birdeye"]
+        S4["Twitter / Telegram Trend"]
+    end
+
+    subgraph Pipeline["Trading Pipeline (apps/api)"]
+        RISK["Risk Analyzer"]
+        AISC["AI Scoring"]
+        AUTO["AutoTrader"]
+        PM["Position Manager"]
+        MON["Exit Monitors"]
+    end
+
+    subgraph Financial["Financial Core"]
+        FEE["Fee & Referral System"]
+        DIST["Profit Distribution Engine"]
+        WD["Withdrawal Engine"]
+        LEDGER[("Ledger + Audit (Immutable)")]
+    end
+
+    subgraph Surfaces["User Surfaces"]
+        TG["Telegram Bot"]
+        DASH["Dashboard"]
+    end
+
+    Sources --> RISK --> AISC --> AUTO --> PM
+    PM --> MON --> PM
+    PM -->|"position.updated"| FEE --> DIST --> LEDGER
+    DIST --> WD --> LEDGER
+    PM --> TG
+    PM --> DASH
+    WD --> TG
+    WD --> DASH
+
+    Pipeline --> PG[(PostgreSQL)]
+    Financial --> PG

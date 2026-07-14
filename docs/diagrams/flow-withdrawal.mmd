@@ -1,0 +1,10 @@
+flowchart TB
+    A["User requests withdrawal"] --> B["Atomic balance reservation\n(conditional UPDATE)"]
+    B --> C["Risk score computed"]
+    C --> D["Admin review queue"]
+    D --> E["Admin approves"]
+    E --> F["Executor signs & broadcasts\nreal on-chain transfer"]
+    F --> G["Signature recorded\n(crash-safety checkpoint,\nbefore confirmation)"]
+    G --> H["Confirmation awaited"]
+    H --> I["Reconciliation:\nledger vs chain vs DB row"]
+    D -->|reject| J["Reservation refunded"]

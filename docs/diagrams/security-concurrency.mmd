@@ -1,0 +1,16 @@
+flowchart TB
+    subgraph Guards["Database-Enforced Concurrency Guards"]
+        G1["Position Close\nPositionCloseLock (unique claim table\n+ in-process mutex)"]
+        G2["Duplicate Open Position\nPartial unique index\n(walletId, tokenId) WHERE OPEN"]
+        G3["Withdrawal Request\nAtomic conditional UPDATE\n+ partial unique index"]
+        G4["Withdrawal Transition\nSELECT ... FOR UPDATE\nrow lock"]
+        G5["Profit Distribution\nUnique constraint on\npositionId / performanceFeeLedgerId"]
+        G6["Referral Reward Grant\nUnique constraint on\nreferrerUserId"]
+    end
+
+    T1["Two monitors racing\nto close the same position"] --> G1
+    T2["Two concurrent buy signals\nfor the same wallet+token"] --> G2
+    T3["Retried / duplicate\nwithdrawal request"] --> G3
+    T4["Two admins approving\nthe same request"] --> G4
+    T5["Fast-path event +\nreconciliation sweep racing"] --> G5
+    T6["Two simultaneous referrals\ncrossing the reward threshold"] --> G6

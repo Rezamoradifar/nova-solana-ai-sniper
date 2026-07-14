@@ -1,0 +1,8 @@
+flowchart LR
+    A["Register\n(email + password,\noptional referral code)"] --> B["Wallet auto-provisioned\n(encrypted at rest)"]
+    B --> C["Configure Snipe\n(buy amount, TP/SL,\nmin liquidity/AI score)"]
+    C --> D["AutoTrader matches\nlive discovery feed"]
+    D --> E["Position opened & monitored"]
+    E --> F["Position closes\n(TP/SL/trailing/emergency)"]
+    F --> G["Profit distributed\n(trader + referrers + platform)"]
+    G --> H["Withdraw earnings"]

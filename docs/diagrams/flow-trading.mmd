@@ -1,0 +1,19 @@
+sequenceDiagram
+    participant Chain as Solana
+    participant Disc as Discovery
+    participant Risk as Risk + AI
+    participant Auto as AutoTrader
+    participant PM as Position Manager
+    participant Mon as Exit Monitors
+
+    Chain->>Disc: new token / pool event
+    Disc->>Risk: candidate (deduped, filtered)
+    Risk->>Risk: rule-based score + optional AI second opinion
+    Risk->>Auto: combined score
+    Auto->>PM: open position (per matching SnipeConfig)
+    PM->>Chain: Jupiter quote -> sign -> simulate -> send
+    Chain-->>PM: on-chain confirmation (real balance delta)
+    loop every price tick
+        Mon->>PM: evaluate TP / SL / trailing / emergency
+        PM->>Chain: reverse swap on exit trigger
+    end

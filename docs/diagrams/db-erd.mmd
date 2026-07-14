@@ -1,0 +1,16 @@
+erDiagram
+    User ||--o{ Wallet : owns
+    User ||--o{ SnipeConfig : configures
+    Wallet ||--o{ Position : holds
+    Wallet ||--o{ Trade : executes
+    Token ||--o{ Position : "traded as"
+    Position ||--o{ PositionPartialExit : "partial exits"
+    Position ||--o{ EmergencyExitLog : "exit events"
+    Position ||--|| PerformanceFeeLedger : "fee on close"
+    PerformanceFeeLedger ||--o{ ReferralReward : distributes
+    PerformanceFeeLedger ||--|| ProfitDistribution : "produces"
+    User ||--o{ WithdrawalRequest : requests
+    User ||--|| UserDistributionBalance : "has balance"
+    Wallet ||--o{ LedgerEntry : "financial events"
+    User ||--o{ AuditLog : "audit trail"
+    Position ||--|| PositionCloseClaim : "close lock"

@@ -1,0 +1,9 @@
+flowchart LR
+    A["Position closes profitably"] --> B["position.updated event"]
+    B --> C["Fee & Referral System\ncomputes performance fee"]
+    C --> D["PerformanceFeeLedger row"]
+    D --> E["Profit Distribution Engine\n(fast-path subscriber)"]
+    D --> F["Reconciliation sweep\n(periodic, catches missed events)"]
+    E --> G["ProfitDistribution record\n(idempotent, DB-unique)"]
+    F --> G
+    G --> H["Balances updated:\ntrader / referrers / platform / owner"]

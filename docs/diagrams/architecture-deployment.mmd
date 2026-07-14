@@ -1,0 +1,11 @@
+flowchart LR
+    Internet((Internet)) -->|"HTTPS 443 / HTTP 80"| Nginx["Nginx reverse proxy + TLS"]
+    Nginx -->|"/api/* (prefix stripped)"| API["nova-api (Fastify, PM2)"]
+    Nginx -->|"/* (SPA fallback)"| Static["Dashboard static build"]
+    API --> PG[(PostgreSQL)]
+    API --> Redis[(Redis)]
+    API --> RPC["Solana RPC providers"]
+    Bot["nova-telegram-bot (PM2)"] --> PG
+    Bot --> TGAPI[["Telegram Bot API"]]
+    Marketing["nova-marketing-engine (PM2)"] --> PG
+    Marketing --> TGAPI

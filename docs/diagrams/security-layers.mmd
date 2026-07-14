@@ -1,0 +1,9 @@
+flowchart TB
+    A["Internet"] --> B["Firewall\n(only 22 / 80 / 443 externally reachable)"]
+    B --> C["Nginx\nTLS termination + security headers"]
+    C --> D["Fastify API\nJWT auth + rate limiting + Zod validation + Helmet"]
+    D --> E["Ownership checks\n(every user-scoped route)"]
+    E --> F["Prisma (parameterized queries only)"]
+    F --> G[("PostgreSQL")]
+    D --> H["AES-256-GCM wallet key encryption\n(scrypt-derived key, memory-only decryption)"]
+    F --> I["Immutable ledger + audit trail\n(DB trigger enforced)"]
