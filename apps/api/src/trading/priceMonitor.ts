@@ -74,10 +74,25 @@ export class PriceMonitor {
             this.deps.encryptionKey,
           );
         } catch (err) {
-          this.deps.logger.error(
-            { err, positionId: position.id },
-            'price check failed for open position',
-          );
+          // Production Bug Fix (2026-07-14): this catch previously covered both
+          // a DexScreener price-fetch failure above AND a SELL execution
+          // failure from checkAndMaybeClose below under the same generic
+          // message, with no way to tell which happened or why from the log
+          // line alone. PositionManager tags every SELL failure it throws
+          // with `.sellFailureCategory` (see sellFailureClassifier.ts) — when
+          // present, log it as a distinct, categorized SELL failure instead.
+          const category = (err as { sellFailureCategory?: string } | null)?.sellFailureCategory;
+          if (category) {
+            this.deps.logger.error(
+              { err, positionId: position.id, mint: position.token.mint, category },
+              `SELL execution failed [${category}]`,
+            );
+          } else {
+            this.deps.logger.error(
+              { err, positionId: position.id },
+              'price check failed for open position',
+            );
+          }
         }
       }
     } finally {

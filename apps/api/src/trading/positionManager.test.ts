@@ -1,13 +1,18 @@
 import { Keypair, VersionedTransaction } from '@solana/web3.js';
 import bs58 from 'bs58';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 vi.mock('@nova/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@nova/shared')>();
   return { ...actual, unsealKeypair: vi.fn(() => Keypair.generate()) };
 });
 
+vi.mock('../detection/onchain.js', () => ({
+  getTopHolder: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { PositionManager } from './positionManager.js';
+import { getTopHolder } from '../detection/onchain.js';
 
 function fakeLogger() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
@@ -57,6 +62,11 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const dexRegistry = { getExecutor: vi.fn() } as never;
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn() },
@@ -103,6 +113,11 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
     } as never;
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: {
@@ -156,6 +171,11 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
     } as never;
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       token: {
         findUnique: vi.fn().mockResolvedValue({
           dex: 'PUMPSWAP',
@@ -195,6 +215,11 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
     const dexRegistry = { getExecutor: vi.fn() } as never;
     const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-failed-1' });
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: tradeCreate },
       position: { create: vi.fn() },
       token: { findUnique: vi.fn() },
@@ -232,6 +257,11 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
     const connection = { sendTransaction: vi.fn(), confirmTransaction: vi.fn() } as never;
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       token: { findUnique: vi.fn().mockResolvedValue({ dex: 'PUMPFUN', poolAddress: null }) },
     } as never;
 
@@ -251,6 +281,117 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
   });
 });
 
+describe('PositionManager Institutional Mode — Emergency Exit Engine dev-wallet capture at open', () => {
+  beforeEach(() => vi.mocked(getTopHolder).mockClear());
+
+  function fakeOpenPositionSetup() {
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
+      getQuote: vi.fn(),
+    } as never;
+    const connection = {
+      sendTransaction: vi.fn().mockResolvedValue('sig123'),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi
+        .fn()
+        .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const dexRegistry = { getExecutor: vi.fn() } as never;
+    const positionCreate = vi.fn().mockResolvedValue({ id: 'position-1' });
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      position: { create: positionCreate },
+      token: { findUnique: vi.fn() },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+      dexRegistry,
+    );
+
+    return { manager, positionCreate };
+  }
+
+  // getBondingCurveVaultAta requires an actually-valid base58 PublicKey — unlike
+  // BASE_PARAMS.mint (a readable placeholder that isn't one), these tests need a
+  // real one so the dev-wallet-resolution code path under test is actually reached.
+  const VALID_MINT = '8Jexwtd8Py1g2bkjhQXPXoSztf5WEBAHvdLb7gUmpump';
+
+  it('resolves and persists devWalletAddress/devWalletAmountRawAtEntry for an institutional-mode buy', async () => {
+    vi.mocked(getTopHolder).mockResolvedValueOnce({
+      address: 'TopHolderWallet111111111111111111111111111',
+      amountRaw: 123_456_789n,
+    });
+    const { manager, positionCreate } = fakeOpenPositionSetup();
+
+    await manager.openPosition({
+      ...BASE_PARAMS,
+      mint: VALID_MINT,
+      institutionalModeEnabled: true,
+    });
+
+    expect(positionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          devWalletAddress: 'TopHolderWallet111111111111111111111111111',
+          devWalletAmountRawAtEntry: '123456789',
+        }),
+      }),
+    );
+  });
+
+  it('never resolves a dev wallet for a non-institutional buy', async () => {
+    const { manager, positionCreate } = fakeOpenPositionSetup();
+
+    await manager.openPosition(BASE_PARAMS);
+
+    expect(getTopHolder).not.toHaveBeenCalled();
+    expect(positionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          devWalletAddress: undefined,
+          devWalletAmountRawAtEntry: undefined,
+        }),
+      }),
+    );
+  });
+
+  it('never blocks the buy when dev-wallet resolution fails', async () => {
+    vi.mocked(getTopHolder).mockRejectedValueOnce(new Error('rpc blip'));
+    const { manager, positionCreate } = fakeOpenPositionSetup();
+
+    await expect(
+      manager.openPosition({
+        ...BASE_PARAMS,
+        mint: VALID_MINT,
+        institutionalModeEnabled: true,
+      }),
+    ).resolves.toBeDefined();
+
+    expect(positionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          devWalletAddress: undefined,
+          devWalletAmountRawAtEntry: undefined,
+        }),
+      }),
+    );
+  });
+});
+
 describe('PositionManager guaranteed exit strategy (regression: live incident 2026-07-11 — positions opened with no TP/SL/trailing at all could never close)', () => {
   it('applies the balanced-preset default when the caller supplies no TP/SL/trailing at all', async () => {
     const jupiter = {
@@ -267,6 +408,11 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const positionCreate = vi.fn().mockResolvedValue({ id: 'position-1' });
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
       position: { create: positionCreate },
       token: { findUnique: vi.fn().mockResolvedValue(undefined) },
@@ -315,6 +461,11 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const positionCreate = vi.fn().mockResolvedValue({ id: 'position-1' });
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
       position: { create: positionCreate },
       token: { findUnique: vi.fn().mockResolvedValue(undefined) },
@@ -365,6 +516,11 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const positionCreate = vi.fn().mockResolvedValue({ id: 'position-1' });
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
       position: { create: positionCreate },
       token: { findUnique: vi.fn().mockResolvedValue(undefined) },
@@ -418,6 +574,11 @@ describe('PositionManager Jito bundle broadcast', () => {
     } as never;
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn() },
@@ -468,6 +629,11 @@ describe('PositionManager Jito bundle broadcast', () => {
     } as never;
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn() },
@@ -510,8 +676,14 @@ describe('PositionManager live sell failure handling', () => {
     const positionUpdate = vi.fn();
     const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-failed-sell-1' });
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       position: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
+          status: 'OPEN',
           id: 'position-1',
           tokenId: 'token-1',
           walletId: 'wallet-1',
@@ -575,6 +747,11 @@ describe('PositionManager notification content', () => {
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const dexRegistry = { getExecutor: vi.fn() } as never;
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn().mockResolvedValue({ dex: 'PUMPSWAP' }) },
@@ -622,6 +799,11 @@ describe('PositionManager notification content', () => {
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const dexRegistry = { getExecutor: vi.fn() } as never;
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: {
@@ -667,7 +849,10 @@ describe('PositionManager notification content', () => {
     );
   });
 
-  function fakeClosePositionSetup() {
+  function fakeClosePositionSetup(overrides?: {
+    position?: Record<string, unknown>;
+    sellTradesFindMany?: { amountSol: number }[];
+  }) {
     const jupiter = {
       getQuote: vi.fn().mockResolvedValue({ outAmount: '20000000' }),
     } as never;
@@ -681,8 +866,14 @@ describe('PositionManager notification content', () => {
     } as never;
     const positionUpdate = vi.fn().mockResolvedValue({ id: 'position-1', status: 'CLOSED' });
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       position: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
+          status: 'OPEN',
           id: 'position-1',
           tokenId: 'token-1',
           walletId: 'wallet-1',
@@ -700,12 +891,17 @@ describe('PositionManager notification content', () => {
             name: 'Foo',
             decimals: 9,
           },
+          ...overrides?.position,
         }),
         update: positionUpdate,
       },
       trade: {
         create: vi.fn().mockResolvedValue({ id: 'sell-trade-1' }),
         findFirst: vi.fn().mockResolvedValue({ txSignature: 'buy-sig-1' }),
+        // Sum-of-all-sell-trades-for-this-position lookup (sell card
+        // profitSol/roiPercent) — one row here, matching this fixture's
+        // single (non-partial-exit) close: outAmountLamports 20000000 / 1e9.
+        findMany: vi.fn().mockResolvedValue(overrides?.sellTradesFindMany ?? [{ amountSol: 0.02 }]),
       },
       wallet: {
         findUnique: vi
@@ -772,6 +968,46 @@ describe('PositionManager notification content', () => {
     );
   });
 
+  it('closePosition persists exitReason onto the Position row — regression: this was computed for the notification but never actually written to the DB', async () => {
+    const { manager, positionUpdate } = fakeClosePositionSetup();
+
+    await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', {
+      currentPriceUsd: 0.002,
+      reason: 'trailing_stop',
+    });
+
+    expect(positionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ exitReason: 'trailing_stop' }) }),
+    );
+  });
+
+  it('closePosition persists exitReason "manual" when no reason was supplied (manual/API-triggered close)', async () => {
+    const { manager, positionUpdate } = fakeClosePositionSetup();
+
+    await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 });
+
+    expect(positionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ exitReason: 'manual' }) }),
+    );
+  });
+
+  it('closePosition persists exitReason "emergency" when the Emergency Exit Engine triggers the close', async () => {
+    const { manager, positionUpdate } = fakeClosePositionSetup();
+
+    await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', {
+      currentPriceUsd: 0.002,
+      // Isolated SELL-fix build note: HEAD's exitEngine.ts ExitReason type
+      // doesn't include 'emergency' (Emergency Exit Engine is intentionally
+      // excluded from this deploy) — cast keeps this pre-existing test's
+      // runtime behavior identical while satisfying the narrower HEAD type.
+      reason: 'emergency' as never,
+    });
+
+    expect(positionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ exitReason: 'emergency' }) }),
+    );
+  });
+
   it('closePosition sends a SELL trade card carrying the matched BUY signature, and persists the returned share caption', async () => {
     const { manager, notifier, positionUpdate } = fakeClosePositionSetup();
 
@@ -823,6 +1059,55 @@ describe('PositionManager notification content', () => {
     const cardCall = notifier.notifySellCard.mock.calls[0]![0];
     expect(cardCall.profitUsd).toBeCloseTo(expected, 12);
     expect(cardCall.profitUsd).toBeLessThan(0.01); // sanity bound against the raw-amount bug (~1)
+  });
+
+  it("regression (Profit Distribution Audit, 2026-07-12): a final close ADDS this leg's PnL to a position's already-accumulated partial-exit realizedPnlUsd, using only the REMAINING tokens — never overwrites it with a full-original-amount recompute", async () => {
+    // Institutional-mode position: originally bought 1000 real tokens
+    // (1_000_000_000_000 raw at 9 decimals), partial exits already sold 60%
+    // of them and recorded $50 of real profit along the way, leaving 400
+    // real tokens (the moonbag) to sell at final close. Before the fix, this
+    // close would have discarded that $50 and recomputed PnL as if ALL 1000
+    // original tokens sold at today's price — badly overstating the total.
+    const { manager, positionUpdate } = fakeClosePositionSetup({
+      position: {
+        amountToken: 1_000_000_000_000, // 1000 real tokens at 9 decimals
+        remainingAmountToken: 400_000_000_000, // 400 real tokens remaining
+        realizedPnlUsd: 50, // already accumulated from 2 prior partial exits
+      },
+    });
+
+    await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', {
+      currentPriceUsd: 0.002,
+      reason: 'trailing_stop',
+    });
+
+    // Correct: prior $50 + this leg's (0.002-0.001)*400 = $0.40 -> $50.40.
+    // Buggy old behavior discarded the prior $50 and used the full original
+    // 1000 tokens instead of the 400 remaining: (0.002-0.001)*1000 = $1.00.
+    const expectedCorrect = 50.4;
+    const buggyOldValue = 1.0;
+    const statusUpdateCall = positionUpdate.mock.calls.find(
+      (c) => (c[0] as { data: { status?: string } }).data.status === 'CLOSED',
+    )!;
+    const actual = (statusUpdateCall[0] as { data: { realizedPnlUsd: number } }).data
+      .realizedPnlUsd;
+    expect(actual).toBeCloseTo(expectedCorrect, 8);
+    expect(actual).not.toBeCloseTo(buggyOldValue, 8);
+  });
+
+  it('regression (Profit Distribution Audit, 2026-07-12): closePosition never sells past what remains after prior partial exits (paper trading)', async () => {
+    const { manager } = fakeClosePositionSetup({
+      position: { amountToken: 1_000_000_000_000, remainingAmountToken: 400_000_000_000 },
+    });
+    const jupiterGetQuote = (
+      manager as unknown as { jupiter: { getQuote: ReturnType<typeof vi.fn> } }
+    ).jupiter.getQuote;
+
+    await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 });
+
+    expect(jupiterGetQuote).toHaveBeenCalledWith(
+      expect.objectContaining({ amountLamports: BigInt(400_000_000_000) }),
+    );
   });
 
   it('closePosition maps an undefined exit reason to "manual" on the sell card', async () => {
@@ -893,8 +1178,14 @@ describe('PositionManager unverified-swap lock (regression: live incident 2026-0
     const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-1' });
     const notifyError = vi.fn();
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       position: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
+          status: 'OPEN',
           id: 'position-1',
           tokenId: 'token-1',
           walletId: 'wallet-1',
@@ -957,6 +1248,92 @@ describe('PositionManager unverified-swap lock (regression: live incident 2026-0
     expect(sendTransaction).toHaveBeenCalledTimes(1);
   });
 
+  // Production Bug Fix (2026-07-14): executePartialSell (institutional mode's
+  // profit-ladder sell) previously had no equivalent of the isLockActive check
+  // above — only closePosition checked it. A partial-sell tick landing in the
+  // same window as an unverified full-close could submit a second real sell
+  // against a wallet balance this bot no longer had an accurate read on. This
+  // proves executePartialSell is now refused the same way, with zero further
+  // swap calls, once closePosition has set the reconciliation lock.
+  it('executePartialSell refuses to submit a sell for a position whose previous close landed but failed verification', async () => {
+    const prepareSwap = vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const sendTransaction = vi.fn().mockResolvedValue('sig-verify-fail-2');
+    const connection = {
+      getParsedTokenAccountsByOwner: vi.fn().mockResolvedValue({
+        value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: '1000' } } } } } }],
+      }),
+      sendTransaction,
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi.fn().mockRejectedValue(new Error('429 Too Many Requests')),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          status: 'OPEN',
+          id: 'position-2',
+          tokenId: 'token-1',
+          walletId: 'wallet-1',
+          entryPriceUsd: 0.001,
+          amountToken: 1000,
+          remainingAmountToken: 1000,
+          amountSolInvested: 0.01,
+          highWaterMarkUsd: 0.001,
+          trailingStopPercent: null,
+          closedAt: null,
+          createdAt: new Date('2026-07-10T00:00:00Z'),
+          token: {
+            mint: 'CkWryeENpbbz6Lj4LFQ1ya6U7bJoAbtBkAnSzaeaXCP5',
+            dex: 'PUMPFUN',
+            poolAddress: null,
+            symbol: 'FOO',
+            name: 'Foo',
+            decimals: 9,
+          },
+        }),
+        update: vi.fn(),
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      positionPartialExit: { findFirst: vi.fn().mockResolvedValue(null) },
+    } as never;
+    const notifier = { notifyError: vi.fn() } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      notifier,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      0,
+    );
+
+    // First: a normal close lands but fails verification — sets the lock.
+    await expect(
+      manager.closePosition('position-2', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 }),
+    ).rejects.toThrow();
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+
+    // Then: a partial-sell tick for the SAME position must be refused outright,
+    // never reaching prepareSwap/sendTransaction again.
+    await expect(
+      manager.executePartialSell('position-2', 'wallet-1', 0, 500, 0.002, 'enc', 'key'),
+    ).rejects.toThrow(/could not be verified/);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+    expect(prepareSwap).toHaveBeenCalledTimes(1);
+  });
+
   it('openPosition refuses to resubmit a buy for a wallet+token whose previous swap landed but failed verification', async () => {
     const jupiter = {
       prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
@@ -972,6 +1349,11 @@ describe('PositionManager unverified-swap lock (regression: live incident 2026-0
     const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-1' });
     const notifyError = vi.fn();
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: tradeCreate },
       position: { create: vi.fn() },
       token: { findUnique: vi.fn().mockResolvedValue(undefined) },
@@ -1030,6 +1412,11 @@ describe('PositionManager unverified-swap lock (regression: live incident 2026-0
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-1' });
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: tradeCreate },
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn().mockResolvedValue(undefined) },
@@ -1085,6 +1472,11 @@ describe('PositionManager unverified-swap lock (regression: live incident 2026-0
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
     const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-1' });
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       trade: { create: tradeCreate },
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn().mockResolvedValue(undefined) },
@@ -1153,8 +1545,14 @@ describe('PositionManager zero-balance reconciliation (regression: live incident
     const positionUpdate = vi.fn().mockResolvedValue({ id: 'position-1', status: 'CLOSED' });
     const notifyError = vi.fn();
     const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
       position: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({
+          status: 'OPEN',
           id: 'position-1',
           tokenId: 'token-1',
           walletId: 'wallet-1',
@@ -1212,5 +1610,333 @@ describe('PositionManager zero-balance reconciliation (regression: live incident
     });
     expect(notifyError).toHaveBeenCalledTimes(1);
     expect(notifyError.mock.calls[0]![1]).toMatch(/wallet holds 0/);
+  });
+});
+
+describe('PositionManager concurrent close protection (production blocking fix, 2026-07-14)', () => {
+  /** A genuinely stateful fake — position status really flips to CLOSED, and
+   * position_close_claims really enforces one-live-claim-per-position — so
+   * this exercises the real race, not just a stub that always succeeds. This
+   * is what previously let PriceMonitor's normal TP/SL tick and
+   * EmergencyExitMonitor's tick both submit a real sell for the same
+   * still-OPEN position in the same window. */
+  function fakeRaceablePrisma() {
+    const position = {
+      status: 'OPEN' as 'OPEN' | 'CLOSED',
+      id: 'position-1',
+      tokenId: 'token-1',
+      walletId: 'wallet-1',
+      entryPriceUsd: 0.001,
+      amountToken: 1000,
+      amountSolInvested: 0.01,
+      remainingAmountToken: null,
+      realizedPnlUsd: null,
+      highWaterMarkUsd: 0.001,
+      trailingStopPercent: null,
+      closedAt: null as Date | null,
+      createdAt: new Date('2026-07-10T00:00:00Z'),
+      token: {
+        mint: 'CkWryeENpbbz6Lj4LFQ1ya6U7bJoAbtBkAnSzaeaXCP5',
+        dex: 'PUMPFUN',
+        poolAddress: null,
+        symbol: 'FOO',
+        name: 'Foo',
+        decimals: 9,
+      },
+    };
+    const claims = new Map<string, { positionId: string; token: string; claimedAt: Date }>();
+
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn(async ({ data }: { data: { positionId: string; token: string } }) => {
+          if (claims.has(data.positionId)) {
+            const err = new Error(
+              'Unique constraint failed on the fields: (`positionId`)',
+            ) as Error & {
+              code: string;
+            };
+            err.code = 'P2002';
+            throw err;
+          }
+          const row = { positionId: data.positionId, token: data.token, claimedAt: new Date() };
+          claims.set(data.positionId, row);
+          return row;
+        }),
+        findUnique: vi.fn(
+          async ({ where }: { where: { positionId: string } }) =>
+            claims.get(where.positionId) ?? null,
+        ),
+        deleteMany: vi.fn(async ({ where }: { where: { positionId: string; token: string } }) => {
+          const existing = claims.get(where.positionId);
+          if (existing && existing.token === where.token) {
+            claims.delete(where.positionId);
+            return { count: 1 };
+          }
+          return { count: 0 };
+        }),
+      },
+      position: {
+        findUniqueOrThrow: vi.fn(async () => ({ ...position })),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(position, data);
+          return { ...position };
+        }),
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+    } as never;
+
+    return { prisma, position };
+  }
+
+  it('two concurrent closePosition calls for the same position (e.g. PriceMonitor and EmergencyExitMonitor both firing in the same tick) never both sell — exactly one closes, the other is rejected', async () => {
+    const { prisma, position } = fakeRaceablePrisma();
+    const jupiter = { getQuote: vi.fn().mockResolvedValue({ outAmount: 500_000n }) } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      undefined as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      // paperTrading defaults to true, but pass explicitly for clarity —
+      // avoids needing a live Connection/sendTransaction mock, irrelevant
+      // to what this test is actually verifying (mutual exclusion, not the
+      // swap machinery itself).
+      true,
+    );
+
+    const results = await Promise.allSettled([
+      manager.closePosition('position-1', 'wallet-1', 'enc', 'key', {
+        currentPriceUsd: 0.002,
+        reason: 'take_profit',
+      }),
+      manager.closePosition('position-1', 'wallet-1', 'enc', 'key', {
+        currentPriceUsd: 0.002,
+        reason: 'emergency' as never, // isolated SELL-fix build note: see comment above
+      }),
+    ]);
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason.message).toMatch(/already being closed/);
+
+    // Only one SELL trade was ever recorded for this position.
+    expect(
+      (prisma as unknown as { trade: { create: ReturnType<typeof vi.fn> } }).trade.create,
+    ).toHaveBeenCalledTimes(1);
+    expect(position.status).toBe('CLOSED');
+  });
+
+  it('two concurrent executePartialSell calls for the same tier never both sell — exactly one executes', async () => {
+    const { prisma, position } = fakeRaceablePrisma();
+    const jupiter = { getQuote: vi.fn().mockResolvedValue({ outAmount: 100_000n }) } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    (prisma as unknown as { positionPartialExit: unknown }).positionPartialExit = {
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({ id: 'pe-1' }),
+    };
+
+    const manager = new PositionManager(
+      prisma,
+      undefined as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      true,
+    );
+
+    const results = await Promise.allSettled([
+      manager.executePartialSell('position-1', 'wallet-1', 0, 100, 0.002, 'enc', 'key'),
+      manager.executePartialSell('position-1', 'wallet-1', 0, 100, 0.002, 'enc', 'key'),
+    ]);
+
+    const sold = results.filter(
+      (r) => r.status === 'fulfilled' && (r.value as { sold: boolean }).sold === true,
+    );
+    expect(sold).toHaveLength(1);
+    expect(position.status).toBe('OPEN'); // partial sell never closes the position
+  });
+
+  it('a closePosition call that loses the race never touches Position.update — the winner is the only writer', async () => {
+    const { prisma } = fakeRaceablePrisma();
+    const jupiter = { getQuote: vi.fn().mockResolvedValue({ outAmount: 500_000n }) } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      undefined as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      true,
+    );
+
+    await Promise.allSettled([
+      manager.closePosition('position-1', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 }),
+      manager.closePosition('position-1', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 }),
+    ]);
+
+    const updateCalls = (prisma as unknown as { position: { update: ReturnType<typeof vi.fn> } })
+      .position.update.mock.calls;
+    const closeCalls = updateCalls.filter(
+      (call) => (call[0].data as Record<string, unknown>).status === 'CLOSED',
+    );
+    expect(closeCalls).toHaveLength(1);
+  });
+});
+
+describe('PositionManager SELL pre-broadcast retry (production bug fix 2026-07-14)', () => {
+  function baseClosePositionMocks() {
+    const sendTransaction = vi.fn().mockResolvedValue('sig-retry-1');
+    const connection = {
+      getParsedTokenAccountsByOwner: vi.fn().mockResolvedValue({
+        value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: '1000' } } } } } }],
+      }),
+      sendTransaction,
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      // Verification (getActualSolDelta) isn't the behavior under test here —
+      // matching the exact generated keypair's pubkey in a fixture isn't worth
+      // the complexity. Rejecting keeps closePosition's overall outcome a
+      // (separately well-tested, see the unverified-swap-lock describe block)
+      // thrown error, so the assertions below only need to prove sendSwap's
+      // retry-then-broadcast-exactly-once behavior, not full completion.
+      getParsedTransaction: vi.fn().mockRejectedValue(new Error('429 Too Many Requests')),
+    };
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          status: 'OPEN',
+          id: 'position-retry',
+          tokenId: 'token-1',
+          walletId: 'wallet-1',
+          entryPriceUsd: 0.001,
+          amountToken: 1000,
+          amountSolInvested: 0.01,
+          highWaterMarkUsd: 0.001,
+          trailingStopPercent: null,
+          realizedPnlUsd: null,
+          closedAt: null,
+          createdAt: new Date('2026-07-10T00:00:00Z'),
+          token: {
+            mint: 'CkWryeENpbbz6Lj4LFQ1ya6U7bJoAbtBkAnSzaeaXCP5',
+            dex: 'PUMPFUN',
+            poolAddress: null,
+            symbol: 'FOO',
+            name: 'Foo',
+            decimals: 9,
+          },
+        }),
+        update: vi.fn().mockResolvedValue({ id: 'position-retry', status: 'CLOSED' }),
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+    };
+    return { sendTransaction, connection, dexScreener, prisma };
+  }
+
+  it('recovers from a transient pre-broadcast failure (rpc_timeout) by retrying with a fresh quote, and broadcasts exactly once', async () => {
+    const prepareSwap = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('fetch failed: ETIMEDOUT'))
+      .mockResolvedValueOnce({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const { sendTransaction, connection, dexScreener, prisma } = baseClosePositionMocks();
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false, // live trading
+      undefined,
+      undefined,
+      undefined,
+      0,
+    );
+
+    // The swap itself (after one safe retry) lands and broadcasts fine — what
+    // fails is the unrelated post-broadcast verification RPC call, which is
+    // covered by its own describe block above. What this test proves is that
+    // exactly one retry happened and exactly one transaction was ever sent.
+    await expect(
+      manager.closePosition('position-retry', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 }),
+    ).rejects.toThrow(/429 Too Many Requests/);
+    expect(prepareSwap).toHaveBeenCalledTimes(2);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('never retries a deterministic, non-retryable failure (route_unavailable) — fails fast on the first attempt', async () => {
+    const prepareSwap = vi
+      .fn()
+      .mockRejectedValue(new Error('Jupiter quote failed: 400 could not find any route'));
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const { sendTransaction, connection, dexScreener, prisma } = baseClosePositionMocks();
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+      undefined, // no dexRegistry — nothing to fall back to
+      undefined,
+      undefined,
+      0,
+    );
+
+    await expect(
+      manager.closePosition('position-retry', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 }),
+    ).rejects.toThrow(/could not find any route/);
+    expect(prepareSwap).toHaveBeenCalledTimes(1);
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('does not apply the SELL retry policy to a BUY (openPosition) — a transient failure fails on the first attempt, matching pre-fix behavior', async () => {
+    const prepareSwap = vi.fn().mockRejectedValue(new Error('fetch failed: ETIMEDOUT'));
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const connection = { sendTransaction: vi.fn() } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      token: { findUnique: vi.fn() },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow(/ETIMEDOUT/);
+    expect(prepareSwap).toHaveBeenCalledTimes(1);
   });
 });

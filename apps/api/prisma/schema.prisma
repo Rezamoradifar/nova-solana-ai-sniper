@@ -38,15 +38,15 @@ model User {
   feePolicyAcceptedAt     DateTime?
   feePolicyAcceptedFeeBps Int?
 
-  wallets       Wallet[]
-  watchlists    WatchlistItem[]
-  snipeConfigs  SnipeConfig[]
-  copyConfigs   CopyTradeConfig[]
-  auditLogs     AuditLog[]
-  ledgerEntries LedgerEntry[]
-  performanceFees        PerformanceFeeLedger[]
-  referralRewardsEarned  ReferralReward[]        @relation("ReferralRewardReferrer")
-  referralRewardsCaused  ReferralReward[]        @relation("ReferralRewardReferredUser")
+  wallets               Wallet[]
+  watchlists            WatchlistItem[]
+  snipeConfigs          SnipeConfig[]
+  copyConfigs           CopyTradeConfig[]
+  auditLogs             AuditLog[]
+  ledgerEntries         LedgerEntry[]
+  performanceFees       PerformanceFeeLedger[]
+  referralRewardsEarned ReferralReward[]       @relation("ReferralRewardReferrer")
+  referralRewardsCaused ReferralReward[]       @relation("ReferralRewardReferredUser")
 
   @@map("users")
 }
@@ -87,6 +87,12 @@ enum Dex {
   JUPITER
   PUMPSWAP
   METEORA
+  RAYDIUM_CLMM
+  OPENBOOK
+  MOONSHOT
+  PHOENIX
+  LIFINITY
+  FLUXBEAM
 }
 
 enum DiscoverySource {
@@ -95,40 +101,40 @@ enum DiscoverySource {
 }
 
 model Token {
-  id              String   @id @default(cuid())
-  mint            String   @unique
-  symbol          String?
-  name            String?
-  decimals        Int      @default(9)
-  dex             Dex
-  poolAddress     String?
-  createdAt       DateTime @default(now())
-  firstSeenAt     DateTime @default(now())
+  id          String   @id @default(cuid())
+  mint        String   @unique
+  symbol      String?
+  name        String?
+  decimals    Int      @default(9)
+  dex         Dex
+  poolAddress String?
+  createdAt   DateTime @default(now())
+  firstSeenAt DateTime @default(now())
 
   // How this token was first discovered — ON_CHAIN (pump.fun log / DEX pool-creation
   // scanner) is the default and covers every token created before this field existed.
   // TELEGRAM means a signal source (see apps/api/src/social/telegramTrend.ts) surfaced
   // the mint first; the token still went through the exact same risk/AI/buy pipeline
   // as any ON_CHAIN detection — this field is provenance only, never a gate.
-  discoverySource     DiscoverySource @default(ON_CHAIN)
-  telegramChannel     String?
-  telegramMessageUrl  String?
+  discoverySource    DiscoverySource @default(ON_CHAIN)
+  telegramChannel    String?
+  telegramMessageUrl String?
 
-  liquidityUsd        Float?
-  marketCapUsd         Float?
-  mintAuthorityRevoked Boolean?
+  liquidityUsd           Float?
+  marketCapUsd           Float?
+  mintAuthorityRevoked   Boolean?
   freezeAuthorityRevoked Boolean?
-  lpBurnedOrLocked     Boolean?
-  top10HolderPercent   Float?
+  lpBurnedOrLocked       Boolean?
+  top10HolderPercent     Float?
   // Count of non-zero accounts among Solana's top-20-largest-accounts read (see
   // getHolderConcentration) — a real signal, but not a true total holder count;
   // trade cards label it "Top Holders" accordingly, not "Total Holders".
-  holderCount          Int?
-  isHoneypotSuspected  Boolean?
-  aiScore              Float?
-  aiSummary            String?
+  holderCount            Int?
+  isHoneypotSuspected    Boolean?
+  aiScore                Float?
+  aiSummary              String?
   // DexScreener's own pair.info.imageUrl — used for the trade card's token logo.
-  imageUrl             String?
+  imageUrl               String?
 
   trades    Trade[]
   positions Position[]
@@ -151,22 +157,22 @@ enum TradeStatus {
 }
 
 model Trade {
-  id          String      @id @default(cuid())
-  walletId    String
-  wallet      Wallet      @relation(fields: [walletId], references: [id])
-  tokenId     String
-  token       Token       @relation(fields: [tokenId], references: [id])
-  side        OrderSide
-  status      TradeStatus @default(PENDING)
-  amountSol   Float
-  amountToken Float?
-  priceUsd    Float?
-  txSignature String?     @unique
-  slippageBps Int         @default(100)
-  jitoTip     Float?
-  isPaperTrade Boolean    @default(false)
-  createdAt   DateTime    @default(now())
-  confirmedAt DateTime?
+  id           String      @id @default(cuid())
+  walletId     String
+  wallet       Wallet      @relation(fields: [walletId], references: [id])
+  tokenId      String
+  token        Token       @relation(fields: [tokenId], references: [id])
+  side         OrderSide
+  status       TradeStatus @default(PENDING)
+  amountSol    Float
+  amountToken  Float?
+  priceUsd     Float?
+  txSignature  String?     @unique
+  slippageBps  Int         @default(100)
+  jitoTip      Float?
+  isPaperTrade Boolean     @default(false)
+  createdAt    DateTime    @default(now())
+  confirmedAt  DateTime?
 
   @@index([walletId])
   @@index([tokenId])
@@ -179,33 +185,74 @@ enum PositionStatus {
 }
 
 model Position {
-  id                   String         @id @default(cuid())
-  walletId             String
-  wallet               Wallet         @relation(fields: [walletId], references: [id])
-  tokenId              String
-  token                Token          @relation(fields: [tokenId], references: [id])
-  status               PositionStatus @default(OPEN)
-  entryPriceUsd        Float
-  amountToken           Float
-  amountSolInvested     Float
-  takeProfitPercent    Float?
-  stopLossPercent      Float?
-  trailingStopPercent  Float?
+  id                  String         @id @default(cuid())
+  walletId            String
+  wallet              Wallet         @relation(fields: [walletId], references: [id])
+  tokenId             String
+  token               Token          @relation(fields: [tokenId], references: [id])
+  status              PositionStatus @default(OPEN)
+  entryPriceUsd       Float
+  amountToken         Float
+  amountSolInvested   Float
+  takeProfitPercent   Float?
+  stopLossPercent     Float?
+  trailingStopPercent Float?
   // Frozen at open time, same convention as the three fields above — a position's
   // exit strategy doesn't retroactively change if the user edits their SnipeConfig
   // later. Null means "not using a preset" (today's default behavior, unchanged).
-  trailingStopPreset   String?
-  highWaterMarkUsd     Float?
-  realizedPnlUsd       Float?
+  trailingStopPreset  String?
+  highWaterMarkUsd    Float?
+  // Running total: incremented by each partial exit (see PositionPartialExit)
+  // plus the final close, rather than "set once at close" — backward compatible,
+  // since a position with no partial exits still gets exactly one assignment.
+  realizedPnlUsd      Float?
   // The exact ready-to-share caption generated for the SELL trade card at close
   // time — persisted so the 🔗 Share button can resend the identical text anytime
   // afterward without needing to reconstruct it (and without a Trade->Position
   // link, which doesn't exist). Null for OPEN positions and any closed before this.
-  shareCaption         String?
-  isPaperTrade         Boolean        @default(false)
-  closedAt             DateTime?
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @updatedAt
+  shareCaption        String?
+  isPaperTrade        Boolean        @default(false)
+  closedAt            DateTime?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  // --- Institutional Mode (Profit Optimization Engine) — all nullable/defaulted,
+  // frozen from SnipeConfig at open time same as trailingStopPreset above. Every
+  // existing read of amountToken is unaffected: it keeps meaning "the amount
+  // bought," and remainingAmountToken (falling back to amountToken when null) is
+  // the new "how much is actually still held" figure, so a position that never
+  // partially exits computes identically to before this field existed.
+  institutionalModeEnabled  Boolean @default(false)
+  originalAmountToken       Float?
+  remainingAmountToken      Float?
+  moonbagReserveAmountToken Float?
+  // Persists the ExitReason that closed (or partially closed) this position —
+  // previously transient, notification-only. Null for OPEN positions.
+  exitReason                String?
+  // The combined min(ruleScore, aiScore) that actually gated+sized this trade
+  // (see autoTrader.ts) — frozen at open, since Token.aiScore is a live/mutable
+  // snapshot that drifts and can't be used to reconstruct history later.
+  // Reporting's "Risk Score" field.
+  riskScoreAtEntry          Float?
+  // Frozen at open, same convention as trailingStopPreset above — the ladder
+  // that applied to THIS position doesn't retroactively change if the user
+  // edits their SnipeConfig later. {gainPercent:number, sellPercent:number}[].
+  partialTakeProfitTiers    Json?
+
+  // --- Emergency Exit Engine — best-effort "developer wallet" dump proxy,
+  // captured only for institutional-mode positions at open time (see
+  // emergencyExitMonitor.ts). devWalletAddress is the largest real (non-pool,
+  // non-bonding-curve-vault) token-account holder at entry — a proxy, not a
+  // cryptographically verified deployer identity (this codebase has no way to
+  // parse pump.fun's true creator field — see emergencyExit.ts's doc comment).
+  // devWalletAmountRawAtEntry is that account's raw (pre-decimals) balance at
+  // entry, stored as a string since it can exceed safe-integer range.
+  // Both null when resolution failed or the position isn't institutional.
+  devWalletAddress          String?
+  devWalletAmountRawAtEntry String?
+
+  partialExits      PositionPartialExit[]
+  emergencyExitLogs EmergencyExitLog[]
 
   @@index([walletId, status])
   // Also DB-enforced: at most one OPEN position per (walletId, tokenId) via a
@@ -213,6 +260,95 @@ model Position {
   // — not expressible here since Prisma's schema DSL has no WHERE-clause index
   // support, so it won't show up as a diff/drift warning by design.
   @@map("positions")
+}
+
+/// One row per partial take-profit sell against an Institutional Mode position
+/// (see partialExitEngine.ts) — normalized log, same style as
+/// PerformanceFeeLedger/ReferralReward, rather than a JSON blob, so trade
+/// reporting can sum/list them directly.
+model PositionPartialExit {
+  id              String   @id @default(cuid())
+  positionId      String
+  position        Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  tierIndex       Int
+  gainPercent     Float
+  tokenAmountSold Float
+  priceUsd        Float
+  realizedPnlUsd  Float
+  txSignature     String?
+  createdAt       DateTime @default(now())
+
+  @@index([positionId])
+  @@map("position_partial_exits")
+}
+
+/// One row per Emergency Exit Engine trigger (see emergencyExitMonitor.ts) —
+/// the audit trail for "why did this position get force-closed," since
+/// Position.exitReason='emergency' alone doesn't capture which of the 6
+/// conditions fired or the diagnostic numbers behind it. Same
+/// one-row-per-event convention as PositionPartialExit, rather than a JSON
+/// blob, so this is directly queryable for reporting.
+model EmergencyExitLog {
+  id           String   @id @default(cuid())
+  positionId   String
+  position     Position @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  // 'liquidity_removed' | 'trading_disabled' | 'mint_reenabled' |
+  // 'freeze_reenabled' | 'critical_rug_score' | 'dev_wallet_dump' — see
+  // emergencyExit.ts's EmergencyExitReason. Plain String, not a DB enum,
+  // same convention as Position.exitReason above.
+  reason       String
+  // Human-readable diagnostic, e.g. "liquidityUsd=120 < 500".
+  detail       String
+  liquidityUsd Float?
+  ruleScore    Float?
+  txSignature  String?
+  createdAt    DateTime @default(now())
+
+  @@index([positionId])
+  @@map("emergency_exit_logs")
+}
+
+/// Production blocking fix (2026-07-14) — mutual-exclusion claim for every
+/// money-moving action on a Position (full close via closePosition, partial
+/// sell via executePartialSell). positionId as the primary key IS the DB-level
+/// concurrency guarantee: a claim attempt is a plain INSERT, which two
+/// concurrent callers (e.g. PriceMonitor's normal TP/SL tick racing
+/// EmergencyExitMonitor's tick, both running in the same nova-api process —
+/// see worker.ts) can never both win, since Postgres enforces the primary key
+/// uniqueness itself. Deliberately a separate table rather than columns on
+/// Position — this is a transient lock record, not position business data,
+/// and keeping it separate means it never leaks into any existing
+/// `{...position}` API/serialization spread. Row deleted on release; a row
+/// older than the lock's stale-TTL (see positionCloseLock.ts) is treated as
+/// an abandoned claim (the holder crashed mid-swap) and can be reclaimed.
+model PositionCloseClaim {
+  /// The position being claimed — also the unique/primary key, so at most
+  /// one live claim can ever exist per position.
+  positionId String   @id
+  /// Idempotency token identifying which attempt holds this claim — release()
+  /// only ever deletes a claim carrying its own token, never a newer one that
+  /// already reclaimed a stale lock out from under it.
+  token      String
+  claimedAt  DateTime @default(now())
+
+  @@map("position_close_claims")
+}
+
+/// Production blocking fix (2026-07-14) — the DB-level idempotency guard for
+/// maybeActivateReferralReward (packages/shared/src/referral.ts). Previously
+/// the only "already rewarded" check was a plain AuditLog.findFirst, which is
+/// check-then-act: two referred users signing up for the same referrer at
+/// nearly the same moment could both observe "not yet rewarded" and both
+/// create a reward SnipeConfig. referrerUserId as the primary key makes the
+/// grant itself a single atomic INSERT — Postgres's own uniqueness check
+/// means two concurrent grant attempts for the same referrer can never both
+/// succeed, so the SnipeConfig it guards can never be created twice either.
+model ReferralRewardGrant {
+  referrerUserId String   @id
+  referredCount  Int
+  createdAt      DateTime @default(now())
+
+  @@map("referral_reward_grants")
 }
 
 model SnipeConfig {
@@ -242,11 +378,24 @@ model SnipeConfig {
   // evaluated anyway) — enabling this is a deliberate per-user choice, not a
   // silent global behavior change on deploy. Also gated by the global
   // ENTRY_FILTER_ENABLED env flag (see config/env.ts).
-  entryFilterEnabled     Boolean @default(false)
-  minBuySellRatio        Float   @default(0)
-  minHolderCount         Int     @default(0)
-  minRecentVolumeUsd     Float   @default(0)
-  maxTop10HolderPercent  Float   @default(100)
+  entryFilterEnabled    Boolean @default(false)
+  minBuySellRatio       Float   @default(0)
+  minHolderCount        Int     @default(0)
+  minRecentVolumeUsd    Float   @default(0)
+  maxTop10HolderPercent Float   @default(100)
+
+  // Institutional Mode (Profit Optimization Engine) — single per-config opt-in,
+  // also gated by the global INSTITUTIONAL_MODE_ENABLED env flag (double
+  // opt-in, same convention as entryFilterEnabled/ENTRY_FILTER_ENABLED above).
+  // Defaults reproduce today's behavior exactly for every existing config.
+  institutionalModeEnabled Boolean @default(false)
+  // % of the original position permanently reserved as a moonbag once the
+  // partial-exit ladder starts (see partialExitEngine.ts). 0 = no moonbag,
+  // same as today's all-or-nothing close.
+  moonbagPercent           Float   @default(0)
+  // {gainPercent:number, sellPercent:number}[] — null means "use the built-in
+  // default ladder" (DEFAULT_PARTIAL_EXIT_TIERS in partialExitEngine.ts).
+  partialTakeProfitTiers   Json?
 
   @@index([userId])
   @@map("snipe_configs")
@@ -330,15 +479,15 @@ enum AuditStatus {
 /// verified against the whole codebase before this change — so this is
 /// purely additive and cannot break anything that already works.
 model AuditLog {
-  id     String  @id @default(cuid())
-  userId String?
-  user   User?   @relation(fields: [userId], references: [id])
+  id          String      @id @default(cuid())
+  userId      String?
+  user        User?       @relation(fields: [userId], references: [id])
   // Nullable — most existing events (auth.login, etc.) aren't wallet-scoped.
   // SetNull (not Cascade) on wallet deletion so the audit trail survives even
   // if the wallet row it references is ever hard-deleted.
-  walletId String?
-  wallet   Wallet? @relation(fields: [walletId], references: [id], onDelete: SetNull)
-  action   String
+  walletId    String?
+  wallet      Wallet?     @relation(fields: [walletId], references: [id], onDelete: SetNull)
+  action      String
   // Defaults to SUCCESS so every pre-existing call site (which never set this)
   // reads as a successful event, matching what actually happened in each case.
   status      AuditStatus @default(SUCCESS)
@@ -360,6 +509,27 @@ enum LedgerEntryType {
   PROFIT_CREDIT
   OWNER_FEE
   LEDGER_ADJUSTMENT
+  // Added for the Profit Distribution Engine (see
+  // apps/api/src/business/profitDistributionEngine.ts) — purely additive,
+  // existing values/rows are untouched. PROFIT_CREDIT/OWNER_FEE/
+  // REFERRAL_CREDIT above remain the fee system's own entries; these three
+  // are the distribution engine's own bookkeeping on top of them, so no
+  // existing entry type is ever double-written for the same close.
+  PLATFORM_FEE
+  REFERRAL_REWARD
+  NET_PROFIT
+  // Added for the Withdrawal Engine (see
+  // apps/api/src/business/withdrawalEngine.ts) — purely additive. Distinct
+  // from the pre-existing WITHDRAWAL type above, which records an admin
+  // manually logging a real SOL transfer already sent out-of-band from a
+  // Wallet (see routes/wallets.ts's POST /wallets/:id/withdrawals). These
+  // five instead track the new USD "Withdrawable Balance" request/review/
+  // approval queue — no blockchain transfer happens yet in this phase.
+  WITHDRAW_REQUEST
+  WITHDRAW_APPROVED
+  WITHDRAW_REJECTED
+  WITHDRAW_COMPLETED
+  WITHDRAW_FAILED
 }
 
 enum LedgerAsset {
@@ -403,16 +573,16 @@ model LedgerEntry {
   // the wallet's cached balance immediately after this entry was recorded.
   balanceAfterLamports BigInt?
 
-  txSignature String?
+  txSignature   String?
   // Reused from AuditLog's own enum rather than duplicated.
-  status      AuditStatus @default(SUCCESS)
+  status        AuditStatus @default(SUCCESS)
   // Links back to PerformanceFeeLedger.id / ReferralReward.id / a manual
   // withdrawal record — never a hard FK (different target tables per type),
   // same convention as Position.exitReason being a plain string.
   referenceType String?
   referenceId   String?
   metadata      Json?
-  createdAt     DateTime @default(now())
+  createdAt     DateTime    @default(now())
 
   @@index([userId])
   @@index([walletId])
@@ -531,4 +701,200 @@ model ReferralReward {
   @@index([referrerUserId])
   @@index([performanceFeeLedgerId])
   @@map("referral_rewards")
+}
+
+// =====================================================================
+// Profit Distribution Engine (additive on top of the fee/referral system
+// above — see apps/api/src/business/profitDistributionEngine.ts). This
+// module never re-derives PROFIT_CREDIT/OWNER_FEE/REFERRAL_CREDIT: it reads
+// the PerformanceFeeLedger/ReferralReward rows the fee system already wrote
+// and turns them into (a) a permanent per-close distribution record, and
+// (b) atomically-maintained running balances, which didn't exist anywhere
+// in the schema before (profit/fee/referral totals were always derived on
+// read from ledger aggregates — see referrals.ts/feeDashboard.ts). Deliberate
+// loose references (userId/walletId/positionId/performanceFeeLedgerId as
+// plain String, no @relation) — same "polymorphic, no hard FK" convention
+// LedgerEntry.referenceType/referenceId already uses — so none of these
+// models require adding a back-relation field to User/Wallet/
+// PerformanceFeeLedger.
+// =====================================================================
+
+/// Admin-configurable split of the platform fee's owner-retained remainder
+/// (feeUsd minus what referral rewards already paid out) between the Owner
+/// Wallet and the Platform Ledger, plus this engine's own hard activation
+/// cutover — same "never reprocess history" guarantee as
+/// BusinessSettings.feeSystemActivatedAt (see fee.ts's
+/// isEligibleForFeeProcessing), applied to PerformanceFeeLedger rows created
+/// before this engine existed.
+model DistributionSettings {
+  id                      String   @id @default(cuid())
+  platformShareBps        Int      @default(2000)
+  distributionActivatedAt DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@map("distribution_settings")
+}
+
+/// One immutable row per profitable position close, written exactly once
+/// (positionId/performanceFeeLedgerId are both unique — the idempotency
+/// guard, same pattern as PerformanceFeeLedger.positionId). This is the
+/// full Gross Profit -> Trading Costs -> Net Profit -> Platform Fee ->
+/// Referral Reward -> Owner Earnings -> User Profit breakdown the Profit
+/// Distribution Engine computes for that single close, sourced from the
+/// existing PerformanceFeeLedger/ReferralReward rows (never recomputed
+/// independently, so it can never drift from the fee system's own numbers).
+/// Reconciliation invariant: netProfitUsd == userProfitUsd +
+/// referralRewardUsd + ownerEarningsUsd + platformFeeUsd.
+model ProfitDistribution {
+  id                     String   @id @default(cuid())
+  performanceFeeLedgerId String   @unique
+  positionId             String   @unique
+  userId                 String
+  walletId               String
+  grossProfitUsd         Float
+  tradingCostsUsd        Float
+  netProfitUsd           Float
+  platformFeeUsd         Float
+  referralRewardUsd      Float
+  ownerEarningsUsd       Float
+  userProfitUsd          Float
+  createdAt              DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("profit_distributions")
+}
+
+/// Running per-user balances credited by the Profit Distribution Engine —
+/// profitBalanceUsd/referralBalanceUsd/withdrawableBalanceUsd are always
+/// updated together, atomically, inside the same transaction as the
+/// ProfitDistribution row and the new ledger entries (see
+/// profitDistributionEngine.ts). userId is a plain unique String, not a
+/// hard FK to User (same loose-reference convention as the rest of this
+/// section) — one row per user, upserted (never a race-prone
+/// read-then-write) via a single atomic increment.
+model UserDistributionBalance {
+  userId                 String   @id
+  profitBalanceUsd       Float    @default(0)
+  referralBalanceUsd     Float    @default(0)
+  withdrawableBalanceUsd Float    @default(0)
+  updatedAt              DateTime @updatedAt
+
+  @@map("user_distribution_balances")
+}
+
+/// Singleton row (fixed id — see profitDistributionEngine.ts) tracking the
+/// owner's cumulative share of platform fees, credited atomically alongside
+/// every ProfitDistribution row.
+model OwnerBalance {
+  id         String   @id @default("owner")
+  balanceUsd Float    @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@map("owner_balance")
+}
+
+/// Singleton row (fixed id), same pattern as OwnerBalance, tracking the
+/// platform's own cumulative fee share.
+model PlatformBalance {
+  id         String   @id @default("platform")
+  balanceUsd Float    @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@map("platform_balance")
+}
+
+// =====================================================================
+// Withdrawal Engine (additive, downstream of the Profit Distribution
+// Engine above — see apps/api/src/business/withdrawalEngine.ts). Draws
+// down UserDistributionBalance.withdrawableBalanceUsd, never adds a column
+// to it. NO blockchain transfer happens in this phase — this is the
+// secure request/review/approval workflow and its accounting only; real
+// signing/broadcasting is a later phase. Loose references (userId/walletId
+// as plain String, no @relation), same convention as the rest of this file
+// — no back-relation field needed on User/Wallet.
+// =====================================================================
+
+enum WithdrawalStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+/// Admin-configurable withdrawal limits — lazily seeded singleton, same
+/// convention as BusinessSettings/DistributionSettings.
+model WithdrawalSettings {
+  id                      String   @id @default(cuid())
+  minWithdrawalUsd        Float    @default(10)
+  maxWithdrawalUsd        Float    @default(5000)
+  dailyWithdrawalLimitUsd Float    @default(10000)
+  updatedAt               DateTime @updatedAt
+
+  @@map("withdrawal_settings")
+}
+
+/// One row per withdrawal request. amountUsd is reserved (debited) from
+/// UserDistributionBalance.withdrawableBalanceUsd atomically at creation
+/// time (see withdrawalEngine.ts's requestWithdrawal) and refunded
+/// (credited back) on REJECTED/FAILED/CANCELLED — never touched again on
+/// COMPLETED, since the reservation already represents the funds leaving
+/// the withdrawable balance. idempotencyKey is optional client-supplied
+/// replay protection; the real, always-on duplicate-request guard is the
+/// partial unique index enforcing at most one ACTIVE (PENDING/
+/// UNDER_REVIEW/APPROVED/PROCESSING) request per user at a time — not
+/// expressible in this DSL (no WHERE-clause index support), added via raw
+/// SQL in this same migration, same convention as
+/// positions_wallet_token_open_unique (migration
+/// 20260711033928_position_one_open_per_token).
+model WithdrawalRequest {
+  id                 String           @id @default(cuid())
+  userId             String
+  walletId           String
+  destinationAddress String
+  amountUsd          Float
+  status             WithdrawalStatus @default(PENDING)
+  idempotencyKey     String?          @unique
+  riskScore          Float            @default(0)
+  fraudFlags         Json?
+  rejectionReason    String?
+  reviewedByUserId   String?
+  requestedAt        DateTime         @default(now())
+  reviewedAt         DateTime?
+  approvedAt         DateTime?
+  processingAt       DateTime?
+  completedAt        DateTime?
+  failedAt           DateTime?
+  cancelledAt        DateTime?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  /// Set exactly once, immediately after a real transfer is signed and sent
+  /// to the network — deliberately written BEFORE waiting for confirmation
+  /// (see withdrawals/executor.ts), so a crash between send and confirm
+  /// leaves a durable record to resume against instead of resending.
+  /// @unique is the hard DB-level duplicate-execution guard: two
+  /// WithdrawalRequest rows can never end up pointing at the same signature.
+  txSignature        String?          @unique
+  /// The real lamports amount actually transferred on-chain — distinct from
+  /// amountUsd (the ledger reservation), since the USD->SOL price used at
+  /// execution time can differ from whatever it was at request time.
+  executionLamports  BigInt?
+  /// Set only once the signature above is confirmed on-chain with no error —
+  /// i.e. exactly when status transitions to COMPLETED via the executor
+  /// (never set by the admin-simulated markCompleted path, if that's ever
+  /// invoked directly without a real transfer).
+  executedAt         DateTime?
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  // Also DB-enforced: at most one ACTIVE withdrawal request per user via a
+  // partial unique index (added by raw SQL in this migration) — not
+  // expressible here, so it won't show up as a diff/drift warning by design.
+  @@map("withdrawal_requests")
 }

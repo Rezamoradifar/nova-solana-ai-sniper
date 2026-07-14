@@ -34,30 +34,54 @@ export interface SwapBuildOptions {
    * Jupiter won't exceed, so a caller's configured ceiling is always respected.
    */
   dynamicSlippage?: boolean;
+  /**
+   * Production Bug Fix (2026-07-14): both HTTP calls below were previously
+   * unbounded — a hung Jupiter response blocked the caller (and, for the
+   * SELL path, the entire PriceMonitor tick, since it awaits one position at
+   * a time) indefinitely. Optional and undefined by default so every
+   * pre-existing caller (in particular the BUY path in positionManager.ts,
+   * which never passes this) keeps its exact current unbounded behavior —
+   * only callers that explicitly opt in get a bounded worst case.
+   */
+  timeoutMs?: number;
+}
+
+function withTimeoutSignal(timeoutMs: number | undefined): AbortSignal | undefined {
+  return timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs);
 }
 
 export class JupiterClient {
   constructor(private readonly config: JupiterClientConfig) {}
 
-  async getQuote(params: QuoteParams): Promise<QuoteResponse> {
+  async getQuote(
+    params: QuoteParams,
+    options?: Pick<SwapBuildOptions, 'timeoutMs'>,
+  ): Promise<QuoteResponse> {
     const url = new URL(`${this.config.apiBase}/swap/v1/quote`);
     url.searchParams.set('inputMint', params.inputMint);
     url.searchParams.set('outputMint', params.outputMint);
     url.searchParams.set('amount', params.amountLamports.toString());
     url.searchParams.set('slippageBps', params.slippageBps.toString());
 
-    const res = await fetch(url, { method: 'GET' });
+    const res = await fetch(url, { method: 'GET', signal: withTimeoutSignal(options?.timeoutMs) });
     if (!res.ok) {
       throw new Error(`Jupiter quote failed: ${res.status} ${await res.text()}`);
     }
     return (await res.json()) as QuoteResponse;
   }
 
+  /**
+   * `lastValidBlockHeight` (Jupiter computes this alongside the transaction's
+   * baked-in blockhash) lets broadcastTransaction confirm against the exact
+   * height this specific transaction expires at, instead of the ambiguous
+   * signature-only confirmation strategy — see broadcastTransaction's doc
+   * comment in positionManager.ts.
+   */
   async buildSwapTransaction(
     quote: QuoteResponse,
     userPublicKey: string,
     options?: SwapBuildOptions,
-  ): Promise<VersionedTransaction> {
+  ): Promise<{ transaction: VersionedTransaction; lastValidBlockHeight?: number }> {
     const prioritizationFeeLamports = options?.maxPriorityFeeLamports
       ? {
           priorityLevelWithMaxLamports: {
@@ -70,6 +94,7 @@ export class JupiterClient {
     const res = await fetch(`${this.config.apiBase}/swap/v1/swap`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: withTimeoutSignal(options?.timeoutMs),
       body: JSON.stringify({
         quoteResponse: quote,
         userPublicKey,
@@ -82,9 +107,12 @@ export class JupiterClient {
     if (!res.ok) {
       throw new Error(`Jupiter swap build failed: ${res.status} ${await res.text()}`);
     }
-    const { swapTransaction } = (await res.json()) as { swapTransaction: string };
+    const { swapTransaction, lastValidBlockHeight } = (await res.json()) as {
+      swapTransaction: string;
+      lastValidBlockHeight?: number;
+    };
     const buf = Buffer.from(swapTransaction, 'base64');
-    return VersionedTransaction.deserialize(buf);
+    return { transaction: VersionedTransaction.deserialize(buf), lastValidBlockHeight };
   }
 
   /** Quote + build + sign + simulate, ready to send (directly or via Jito bundle). */
@@ -93,9 +121,13 @@ export class JupiterClient {
     signer: Keypair,
     params: QuoteParams,
     options?: SwapBuildOptions,
-  ): Promise<{ quote: QuoteResponse; transaction: VersionedTransaction }> {
-    const quote = await this.getQuote(params);
-    const transaction = await this.buildSwapTransaction(
+  ): Promise<{
+    quote: QuoteResponse;
+    transaction: VersionedTransaction;
+    lastValidBlockHeight?: number;
+  }> {
+    const quote = await this.getQuote(params, options);
+    const { transaction, lastValidBlockHeight } = await this.buildSwapTransaction(
       quote,
       signer.publicKey.toBase58(),
       options,
@@ -107,6 +139,6 @@ export class JupiterClient {
       throw new Error(`Swap simulation failed: ${JSON.stringify(sim.value.err)}`);
     }
 
-    return { quote, transaction };
+    return { quote, transaction, lastValidBlockHeight };
   }
 }

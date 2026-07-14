@@ -68,3 +68,37 @@ export async function getHolderConcentration(
     holderCount: realHolders.filter((a) => Number(a.amount) > 0).length,
   };
 }
+
+export interface TopHolder {
+  address: string;
+  amountRaw: bigint;
+}
+
+/**
+ * Institutional Mode position-open time. This is NOT a verified deployer
+ * identity: pump.fun's bonding-curve account layout this codebase decodes
+ * (see pumpfunBondingCurve.ts) doesn't include a parsed `creator` field, so
+ * there's no cryptographic way here to name the true deployer wallet. On a
+ * freshly-launched token the largest real holder is very often the deployer
+ * in practice, but this can also resolve to an early sniper or (if
+ * `excludeAddresses` is incomplete) a pool vault — a documented limitation,
+ * not a guarantee. Reuses the same `getTokenLargestAccounts` call
+ * `getHolderConcentration` already makes; callers that need both should
+ * fetch once and reuse the raw result themselves rather than calling both.
+ */
+export async function getTopHolder(
+  connection: Connection,
+  mint: string,
+  excludeAddresses: string[] = [],
+): Promise<TopHolder | undefined> {
+  const mintPubkey = new PublicKey(mint);
+  const largest = await connection.getTokenLargestAccounts(mintPubkey);
+
+  const excluded = new Set(excludeAddresses);
+  const top = largest.value.find(
+    (a) => !excluded.has(a.address.toBase58()) && BigInt(a.amount) > 0n,
+  );
+  if (!top) return undefined;
+
+  return { address: top.address.toBase58(), amountRaw: BigInt(top.amount) };
+}
