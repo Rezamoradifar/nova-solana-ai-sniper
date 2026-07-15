@@ -45,6 +45,11 @@ export interface NewTokenNotification {
   liquidityUsd?: number;
   marketCapUsd?: number;
   aiScore?: number;
+  // 2026-07-15 Telegram alert audit: true when `aiScore` came from a real AI
+  // provider call, false/undefined when it's the rule-based fallback score
+  // (no AI provider configured, or the AI call was skipped) — see
+  // formatNewTokenMessage, which must never label a rule score "AI Score".
+  isAiScore?: boolean;
   isHoneypotSuspected?: boolean;
   mintAuthorityRevoked?: boolean;
   freezeAuthorityRevoked?: boolean;
@@ -60,6 +65,8 @@ export interface AiHighScoreNotification {
   name?: string;
   symbol?: string;
   aiScore: number;
+  // See NewTokenNotification.isAiScore's doc comment — same meaning here.
+  isAiScore?: boolean;
   liquidityUsd?: number;
 }
 
@@ -131,7 +138,9 @@ export function formatNewTokenMessage(token: NewTokenNotification): string {
   const marketCapLine =
     token.marketCapUsd !== undefined ? `\nMarket Cap: $${token.marketCapUsd.toFixed(0)}` : '';
   const scoreLine =
-    token.aiScore !== undefined ? `\nAI Score: ${token.aiScore.toFixed(0)}/100` : '';
+    token.aiScore !== undefined
+      ? `\n${token.isAiScore ? 'AI Score' : 'Rule Score (no AI provider)'}: ${token.aiScore.toFixed(0)}/100`
+      : '';
   const riskParts: string[] = [];
   if (token.mintAuthorityRevoked !== undefined) {
     riskParts.push(`Mint ${token.mintAuthorityRevoked ? '✅' : '⚠️'}`);
@@ -176,8 +185,9 @@ export function formatAiHighScoreMessage(token: AiHighScoreNotification): string
       : '';
   const liquidityLine =
     token.liquidityUsd !== undefined ? `\nLiquidity: $${token.liquidityUsd.toFixed(0)}` : '';
+  const label = token.isAiScore ? 'AI High Score' : 'High Rule Score (no AI provider)';
   return (
-    `⭐ *AI High Score* (${token.aiScore.toFixed(0)}/100)${nameLine}\n` +
+    `⭐ *${label}* (${token.aiScore.toFixed(0)}/100)${nameLine}\n` +
     `${escapeMd(token.dex)}\n` +
     `\`${token.mint}\`${liquidityLine}\n` +
     linksLine(token.mint, token.dex)

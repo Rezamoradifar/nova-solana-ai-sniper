@@ -336,6 +336,14 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
 
     let aiScoringStartAt: number | undefined;
     let aiScoringEndAt: number | undefined;
+    // 2026-07-15 Telegram alert audit: distinct from aiScoreValue itself —
+    // aiScoreValue always holds a number (falls back to ruleScore when no AI
+    // provider is configured), so a caller can't tell from that alone whether
+    // it's a real AI verdict or a rule-based approximation. Threaded through
+    // to notifyAndAutoTrade so alert text never mislabels a rule score as an
+    // "AI Score" (found live: ANTHROPIC_API_KEY/OPENAI_API_KEY both blank in
+    // the running process, so every alert since was silently doing this).
+    let usedRealAi = false;
     if (aiProvider && hardGatePassed) {
       aiScoringStartAt = Date.now();
       const aiScore = await scoreToken(
@@ -345,13 +353,14 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       );
       aiScoringEndAt = Date.now();
       aiScoreValue = aiScore.score;
+      usedRealAi = true;
       await app.prisma.token.update({
         where: { id: token.id },
         data: { aiScore: aiScore.score, aiSummary: aiScore.summary },
       });
     }
 
-    await notifyAndAutoTrade(mint, dex, token.id, riskFlags, aiScoreValue, {
+    await notifyAndAutoTrade(mint, dex, token.id, riskFlags, aiScoreValue, usedRealAi, {
       tokenDetectedAt,
       aiScoringStartAt,
       aiScoringEndAt,
@@ -376,6 +385,12 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     tokenId: string,
     riskFlags: RiskFlags,
     aiScoreValue: number,
+    // 2026-07-15 Telegram alert audit: true only when aiScoreValue came from a
+    // real AI provider call, false when it's the ruleScore fallback (no AI
+    // provider configured, or the token failed the hard gate before AI would've
+    // been called) — see formatNewTokenMessage/formatAiHighScoreMessage, which
+    // label the score accordingly instead of always claiming "AI Score".
+    usedRealAi: boolean,
     pipelineTimestamps?: {
       tokenDetectedAt?: number;
       aiScoringStartAt?: number;
@@ -410,6 +425,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
         liquidityUsd: riskFlags.liquidityUsd,
         marketCapUsd: riskFlags.marketCapUsd,
         aiScore: aiScoreValue,
+        isAiScore: usedRealAi,
         isHoneypotSuspected: riskFlags.isHoneypotSuspected,
         mintAuthorityRevoked: riskFlags.mintAuthorityRevoked,
         freezeAuthorityRevoked: riskFlags.freezeAuthorityRevoked,
@@ -427,6 +443,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
           name: riskFlags.name,
           symbol: riskFlags.symbol,
           aiScore: aiScoreValue,
+          isAiScore: usedRealAi,
           liquidityUsd: riskFlags.liquidityUsd,
         });
       }
@@ -537,6 +554,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     let aiSummary: string | undefined;
     let aiScoringStartAt: number | undefined;
     let aiScoringEndAt: number | undefined;
+    let usedRealAi = false;
     if (aiProvider) {
       aiScoringStartAt = Date.now();
       const aiScore = await scoreToken(
@@ -552,6 +570,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       aiScoringEndAt = Date.now();
       aiScoreValue = aiScore.score;
       aiSummary = aiScore.summary;
+      usedRealAi = true;
     }
 
     // AI Filter, part 2: the AI score itself (when a provider is configured) can
@@ -614,6 +633,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       token.id,
       riskFlags,
       aiScoreValue,
+      usedRealAi,
       { tokenDetectedAt, aiScoringStartAt, aiScoringEndAt },
     );
     metrics.increment('executedTrades', boughtCount);

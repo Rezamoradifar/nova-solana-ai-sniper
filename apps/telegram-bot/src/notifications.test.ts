@@ -44,6 +44,7 @@ describe('formatNewTokenMessage', () => {
       liquidityUsd: 12345,
       marketCapUsd: 67890,
       aiScore: 82,
+      isAiScore: true,
       isHoneypotSuspected: false,
       mintAuthorityRevoked: true,
       freezeAuthorityRevoked: true,
@@ -61,6 +62,20 @@ describe('formatNewTokenMessage', () => {
     expect(text).toContain('[Chart](https://dexscreener.com/solana/MintABC)');
     expect(text).toContain('[Buy](https://pump.fun/coin/MintABC)');
     expect(text).not.toContain('Honeypot');
+  });
+
+  it('regression (2026-07-15 Telegram alert audit): labels the score "Rule Score" instead of "AI Score" when isAiScore is not true, so a rule-based fallback is never mislabeled as a real AI verdict', () => {
+    const withoutFlag = formatNewTokenMessage({ mint: 'MintABC', dex: 'PUMPFUN', aiScore: 82 });
+    expect(withoutFlag).toContain('Rule Score (no AI provider): 82/100');
+    expect(withoutFlag).not.toContain('AI Score:');
+
+    const explicitFalse = formatNewTokenMessage({
+      mint: 'MintABC',
+      dex: 'PUMPFUN',
+      aiScore: 82,
+      isAiScore: false,
+    });
+    expect(explicitFalse).toContain('Rule Score (no AI provider): 82/100');
   });
 
   it('flags honeypot risk and omits fields that were never resolved', () => {
@@ -110,6 +125,7 @@ describe('formatAiHighScoreMessage', () => {
       name: 'Rage Guy',
       symbol: 'RAGEGUY',
       aiScore: 92,
+      isAiScore: true,
       liquidityUsd: 50000,
     });
     expect(text).toContain('AI High Score');
@@ -118,6 +134,12 @@ describe('formatAiHighScoreMessage', () => {
     expect(text).toContain('MintABC');
     expect(text).toContain('Liquidity: $50000');
     expect(text).toContain('[Buy](https://pump.fun/coin/MintABC)');
+  });
+
+  it('regression (2026-07-15 Telegram alert audit): labels it "High Rule Score" instead of "AI High Score" when isAiScore is not true', () => {
+    const text = formatAiHighScoreMessage({ mint: 'MintABC', dex: 'PUMPFUN', aiScore: 92 });
+    expect(text).toContain('High Rule Score (no AI provider)');
+    expect(text).not.toContain('AI High Score');
   });
 
   it('regression: escapes an on-chain token name/symbol containing "_" so Telegram Markdown parsing never breaks', () => {
