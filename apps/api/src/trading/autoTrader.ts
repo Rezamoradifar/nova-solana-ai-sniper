@@ -68,7 +68,24 @@ export interface AutoTraderDeps {
 export class AutoTrader {
   constructor(private readonly deps: AutoTraderDeps) {}
 
-  async evaluateAndMaybeBuy(mint: string, tokenId: string, riskFlags: RiskFlags, aiScore: number) {
+  async evaluateAndMaybeBuy(
+    mint: string,
+    tokenId: string,
+    riskFlags: RiskFlags,
+    aiScore: number,
+    /**
+     * Latency Optimization Stage 1 (2026-07-14): epoch-ms timestamps captured
+     * upstream in worker.ts, before this function's own per-user filter loop
+     * even runs — token detection and AI scoring happen once per token, not
+     * once per user, so they're passed in rather than re-measured here.
+     * Optional so every existing/test caller that omits it is unaffected.
+     */
+    pipelineTimestamps?: {
+      tokenDetectedAt?: number;
+      aiScoringStartAt?: number;
+      aiScoringEndAt?: number;
+    },
+  ) {
     const configs = await this.deps.prisma.snipeConfig.findMany({
       where: { isActive: true, autoBuyOnLaunch: true },
       include: {
@@ -205,6 +222,9 @@ export class AutoTrader {
           trailingStopPreset: preset,
           aiScore,
           ...exitParams,
+          tokenDetectedAt: pipelineTimestamps?.tokenDetectedAt,
+          aiScoringStartAt: pipelineTimestamps?.aiScoringStartAt,
+          aiScoringEndAt: pipelineTimestamps?.aiScoringEndAt,
         });
         // positionManager.openPosition itself already logs the canonical
         // "BUY EXECUTED\nSignature:\n<signature>" line; this ties that outcome

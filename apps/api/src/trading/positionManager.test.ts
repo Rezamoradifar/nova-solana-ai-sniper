@@ -13,6 +13,12 @@ vi.mock('../detection/onchain.js', () => ({
 
 import { PositionManager } from './positionManager.js';
 import { getTopHolder } from '../detection/onchain.js';
+import { unsealKeypair } from '@nova/shared';
+import { latencyTracker } from '../lib/latencyTracker.js';
+
+beforeEach(() => {
+  latencyTracker.reset();
+});
 
 function fakeLogger() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
@@ -68,6 +74,7 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn() },
     } as never;
@@ -119,6 +126,7 @@ describe('PositionManager live-swap fallback (openPosition)', () => {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: {
         findUnique: vi.fn().mockResolvedValue({
@@ -306,6 +314,7 @@ describe('PositionManager Institutional Mode — Emergency Exit Engine dev-walle
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
       position: { create: positionCreate },
       token: { findUnique: vi.fn() },
     } as never;
@@ -414,6 +423,7 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
       position: { create: positionCreate },
       token: { findUnique: vi.fn().mockResolvedValue(undefined) },
     } as never;
@@ -467,6 +477,7 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
       position: { create: positionCreate },
       token: { findUnique: vi.fn().mockResolvedValue(undefined) },
     } as never;
@@ -522,6 +533,7 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
       position: { create: positionCreate },
       token: { findUnique: vi.fn().mockResolvedValue(undefined) },
     } as never;
@@ -580,6 +592,7 @@ describe('PositionManager Jito bundle broadcast', () => {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn() },
     } as never;
@@ -635,6 +648,7 @@ describe('PositionManager Jito bundle broadcast', () => {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn() },
     } as never;
@@ -753,6 +767,7 @@ describe('PositionManager notification content', () => {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn().mockResolvedValue({ dex: 'PUMPSWAP' }) },
     } as never;
@@ -805,6 +820,7 @@ describe('PositionManager notification content', () => {
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: {
         findUnique: vi.fn().mockResolvedValue({
@@ -1300,6 +1316,7 @@ describe('PositionManager unverified-swap lock (regression: live incident 2026-0
         update: vi.fn(),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
       positionPartialExit: { findFirst: vi.fn().mockResolvedValue(null) },
     } as never;
     const notifier = { notifyError: vi.fn() } as never;
@@ -1420,6 +1437,7 @@ describe('PositionManager unverified-swap lock (regression: live incident 2026-0
       trade: { create: tradeCreate },
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn().mockResolvedValue(undefined) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
     } as never;
     const notifyError = vi.fn();
     const notifier = { notifyError, notifyTrade: vi.fn() } as never;
@@ -1480,6 +1498,7 @@ describe('PositionManager unverified-swap lock (regression: live incident 2026-0
       trade: { create: tradeCreate },
       position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
       token: { findUnique: vi.fn().mockResolvedValue(undefined) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
     } as never;
     const notifier = { notifyError: vi.fn(), notifyTrade: vi.fn() } as never;
 
@@ -1683,6 +1702,7 @@ describe('PositionManager concurrent close protection (production blocking fix, 
         }),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
     } as never;
 
     return { prisma, position };
@@ -1844,6 +1864,7 @@ describe('PositionManager SELL pre-broadcast retry (production bug fix 2026-07-1
         update: vi.fn().mockResolvedValue({ id: 'position-retry', status: 'CLOSED' }),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
     };
     return { sendTransaction, connection, dexScreener, prisma };
   }
@@ -1911,8 +1932,10 @@ describe('PositionManager SELL pre-broadcast retry (production bug fix 2026-07-1
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
-  it('does not apply the SELL retry policy to a BUY (openPosition) — a transient failure fails on the first attempt, matching pre-fix behavior', async () => {
-    const prepareSwap = vi.fn().mockRejectedValue(new Error('fetch failed: ETIMEDOUT'));
+  it('never retries a deterministic, non-retryable failure on a BUY either (route_unavailable) — fails fast on the first attempt', async () => {
+    const prepareSwap = vi
+      .fn()
+      .mockRejectedValue(new Error('Jupiter quote failed: 400 could not find any route'));
     const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
     const connection = { sendTransaction: vi.fn() } as never;
     const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
@@ -1936,7 +1959,463 @@ describe('PositionManager SELL pre-broadcast retry (production bug fix 2026-07-1
       false,
     );
 
-    await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow(/ETIMEDOUT/);
+    await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow(/could not find any route/);
     expect(prepareSwap).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PositionManager BUY pre-broadcast retry (BUY Engine V2, 2026-07-14)', () => {
+  function baseOpenPositionMocks() {
+    const sendTransaction = vi.fn().mockResolvedValue('sig123');
+    const connection = {
+      sendTransaction,
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi.fn().mockResolvedValue({
+        meta: { preTokenBalances: [], postTokenBalances: [] },
+      }),
+    };
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
+      token: { findUnique: vi.fn() },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
+    };
+    return { sendTransaction, connection, dexScreener, prisma };
+  }
+
+  it('retries a transient pre-broadcast failure (rpc_timeout) with its own policy, and broadcasts exactly once', async () => {
+    const prepareSwap = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('fetch failed: ETIMEDOUT'))
+      .mockResolvedValueOnce({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const { sendTransaction, connection, dexScreener, prisma } = baseOpenPositionMocks();
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    const { trade } = await manager.openPosition(BASE_PARAMS);
+
+    expect(trade.id).toBe('trade-1');
+    expect(prepareSwap).toHaveBeenCalledTimes(2);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a bare "Simulation failed" pre-broadcast error — the most common live production BUY failure this policy targets (2026-07-14)', async () => {
+    const prepareSwap = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error('Simulation failed. Message: Transaction simulation failed.'),
+      )
+      .mockResolvedValueOnce({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const { sendTransaction, connection, dexScreener, prisma } = baseOpenPositionMocks();
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    const { trade } = await manager.openPosition(BASE_PARAMS);
+
+    expect(trade.id).toBe('trade-1');
+    expect(prepareSwap).toHaveBeenCalledTimes(2);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a blockhash-expired pre-broadcast error on a BUY, same as it already did for SELL', async () => {
+    const prepareSwap = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Blockhash not found'))
+      .mockResolvedValueOnce({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const { sendTransaction, connection, dexScreener, prisma } = baseOpenPositionMocks();
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    const { trade } = await manager.openPosition(BASE_PARAMS);
+
+    expect(trade.id).toBe('trade-1');
+    expect(prepareSwap).toHaveBeenCalledTimes(2);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up after exhausting BUY_SEND_SWAP_OPTIONS.maxAttempts (3) and never sends a transaction', async () => {
+    const prepareSwap = vi.fn().mockRejectedValue(new Error('fetch failed: ETIMEDOUT'));
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const { sendTransaction, connection, dexScreener, prisma } = baseOpenPositionMocks();
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow(/ETIMEDOUT/);
+    expect(prepareSwap).toHaveBeenCalledTimes(3);
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('PositionManager concurrent open protection (BUY Engine V2, 2026-07-14 — never create duplicate positions)', () => {
+  it('two concurrent openPosition calls for the same wallet+token never both execute a swap — exactly one proceeds, the other is rejected', async () => {
+    const prepareSwap = vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const { connection, dexScreener, prisma } = baseOpenPositionMocksForConcurrency();
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    const first = manager.openPosition(BASE_PARAMS);
+    await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow(/already in progress/);
+    await expect(first).resolves.toBeDefined();
+    expect(prepareSwap).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the open lock after a failed attempt, so a later (non-concurrent) retry is never permanently blocked', async () => {
+    const prepareSwap = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('no route found'))
+      .mockResolvedValueOnce({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const { connection, dexScreener, prisma } = baseOpenPositionMocksForConcurrency();
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow(/no route found/);
+    // A fully separate, later call for the same wallet+token — not concurrent
+    // with the first, which has already finished (rejected) — must succeed.
+    await expect(manager.openPosition(BASE_PARAMS)).resolves.toBeDefined();
+  });
+});
+
+function baseOpenPositionMocksForConcurrency() {
+  const connection = {
+    sendTransaction: vi.fn().mockResolvedValue('sig123'),
+    confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+    getParsedTransaction: vi.fn().mockResolvedValue({
+      meta: { preTokenBalances: [], postTokenBalances: [] },
+    }),
+  };
+  const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+  const prisma = {
+    positionCloseClaim: {
+      create: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn().mockResolvedValue(null),
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+    position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
+    token: { findUnique: vi.fn() },
+    $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
+  };
+  return { connection, dexScreener, prisma };
+}
+
+describe('PositionManager atomic trade+position write (BUY Engine V2, 2026-07-14 — ACID-safe DB writes)', () => {
+  it('when the atomic trade+position write fails after a real swap already landed on-chain, the trade is still recorded, admin is notified, and the error propagates', async () => {
+    const prepareSwap = vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const connection = {
+      sendTransaction: vi.fn().mockResolvedValue('sig123'),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi.fn().mockResolvedValue({
+        meta: { preTokenBalances: [], postTokenBalances: [] },
+      }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-1' });
+    const notifyError = vi.fn();
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      trade: { create: tradeCreate },
+      position: { create: vi.fn() },
+      token: { findUnique: vi.fn() },
+      $transaction: vi.fn().mockRejectedValue(new Error('unique constraint violated')),
+    } as never;
+    const notifier = {
+      notifyError,
+      notifyTrade: vi.fn(),
+      notifyBuyCard: vi.fn(),
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      notifier,
+      false,
+    );
+
+    await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow(/unique constraint violated/);
+    // Called twice: once as part of building the (mocked, rejected) $transaction's
+    // argument array, once more as the fallback create outside it. Against a real
+    // PrismaClient the first is a lazy, never-executed query (rolled back with the
+    // rest of the failed transaction, never hits the DB) — this mock resolves
+    // eagerly instead, so the count differs from production, but the fallback
+    // create firing at all is exactly the behavior under test: the real on-chain
+    // buy is never left with zero DB record of it.
+    expect(tradeCreate).toHaveBeenCalledTimes(2);
+    expect(notifyError).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Latency Optimization Stage 1 (2026-07-14) — end-to-end trace wiring', () => {
+  it('a successful live BUY records a complete trace with every stage in order, and never traces a paper trade', async () => {
+    const prepareSwap = vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const connection = {
+      sendTransaction: vi.fn().mockResolvedValue('sig123'),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi.fn().mockResolvedValue({
+        meta: { preTokenBalances: [], postTokenBalances: [] },
+      }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      position: { create: vi.fn().mockResolvedValue({ id: 'position-1' }) },
+      token: { findUnique: vi.fn() },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
+    } as never;
+
+    const liveManager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false, // live trading
+    );
+    const tokenDetectedAt = Date.now() - 500;
+    await liveManager.openPosition({
+      ...BASE_PARAMS,
+      tokenDetectedAt,
+      aiScoringStartAt: tokenDetectedAt + 50,
+      aiScoringEndAt: tokenDetectedAt + 150,
+    });
+
+    const liveTraces = latencyTracker.getCompleted();
+    expect(liveTraces).toHaveLength(1);
+    const [trace] = liveTraces;
+    expect(trace).toMatchObject({ side: 'BUY', outcome: 'success' });
+    // quote_request/quote_received/tx_build/tx_sign are jupiter.ts's own marks
+    // (see jupiter.test.ts) — this test mocks jupiter.prepareSwap directly
+    // (this file's existing convention), so those four never fire here. What
+    // this test proves is positionManager.ts's own side of the wiring: the
+    // upstream token/AI-scoring timestamps flow through, filters_complete and
+    // broadcast/rpc_confirmation/position_opened all mark correctly, and
+    // everything lands in the right order.
+    expect(Object.keys(trace!.marks)).toEqual([
+      'token_detected',
+      'ai_scoring_start',
+      'ai_scoring_end',
+      'filters_complete',
+      'broadcast',
+      'rpc_confirmation',
+      'position_opened',
+    ]);
+    expect(trace!.marks.token_detected).toBe(tokenDetectedAt);
+    // Monotonically non-decreasing — every stage happens at or after the one before it.
+    const values = Object.values(trace!.marks) as number[];
+    for (let i = 1; i < values.length; i++) {
+      expect(values[i]!).toBeGreaterThanOrEqual(values[i - 1]!);
+    }
+
+    // A paper-trading buy on a fresh manager must add zero traces.
+    latencyTracker.reset();
+    const paperPrisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-2' }) },
+      position: { create: vi.fn().mockResolvedValue({ id: 'position-2' }) },
+      token: { findUnique: vi.fn() },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
+    } as never;
+    const paperJupiter = { getQuote: vi.fn().mockResolvedValue({ outAmount: '1000' }) } as never;
+    const paperManager = new PositionManager(
+      paperPrisma,
+      connection,
+      paperJupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      true, // paper trading
+    );
+    await paperManager.openPosition(BASE_PARAMS);
+    expect(latencyTracker.getCompleted()).toHaveLength(0);
+  });
+
+  it('a successful live SELL records a complete trace ending in position_closed', async () => {
+    // getActualSolDelta matches the signer against the confirmed transaction's
+    // own accountKeys — unsealKeypair is globally mocked to return a random
+    // fresh Keypair per call, so it must be pinned here to a known value that
+    // the accountKeys fixture below can reference.
+    const fixedKeypair = Keypair.generate();
+    vi.mocked(unsealKeypair).mockReturnValueOnce(fixedKeypair);
+
+    const prepareSwap = vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const connection = {
+      getParsedTokenAccountsByOwner: vi.fn().mockResolvedValue({
+        value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: '1000' } } } } } }],
+      }),
+      sendTransaction: vi.fn().mockResolvedValue('sell-sig-1'),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi.fn().mockResolvedValue({
+        meta: {
+          preTokenBalances: [],
+          postTokenBalances: [],
+          preBalances: [1_000_000_000],
+          postBalances: [1_020_000_000],
+        },
+        transaction: {
+          message: {
+            accountKeys: [{ pubkey: { toBase58: () => fixedKeypair.publicKey.toBase58() } }],
+          },
+        },
+      }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          status: 'OPEN',
+          id: 'position-sell-1',
+          tokenId: 'token-1',
+          walletId: 'wallet-1',
+          entryPriceUsd: 0.001,
+          amountToken: 1000,
+          amountSolInvested: 0.01,
+          highWaterMarkUsd: 0.001,
+          trailingStopPercent: null,
+          realizedPnlUsd: null,
+          closedAt: null,
+          createdAt: new Date('2026-07-10T00:00:00Z'),
+          token: {
+            mint: 'CkWryeENpbbz6Lj4LFQ1ya6U7bJoAbtBkAnSzaeaXCP5',
+            dex: 'PUMPFUN',
+            poolAddress: null,
+            symbol: 'FOO',
+            name: 'Foo',
+            decimals: 9,
+          },
+        }),
+        update: vi.fn().mockResolvedValue({ id: 'position-sell-1', status: 'CLOSED' }),
+      },
+      trade: {
+        create: vi.fn().mockResolvedValue({ id: 'sell-trade-1' }),
+        findFirst: vi.fn().mockResolvedValue(undefined),
+        findMany: vi.fn().mockResolvedValue([{ amountSol: 0.02 }]),
+      },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false, // live trading
+      undefined,
+      undefined,
+      undefined,
+      0,
+    );
+
+    await manager.closePosition('position-sell-1', 'wallet-1', 'enc', 'key', {
+      currentPriceUsd: 0.002,
+      reason: 'take_profit',
+    });
+
+    const traces = latencyTracker.getCompleted();
+    expect(traces).toHaveLength(1);
+    expect(traces[0]).toMatchObject({ side: 'SELL', outcome: 'success' });
+    // quote_request/quote_received/tx_build/tx_sign are jupiter.ts's own marks
+    // (see jupiter.test.ts) — this test mocks jupiter.prepareSwap directly, so
+    // those four never fire here; see the equivalent BUY trace test above for
+    // the same reasoning.
+    expect(Object.keys(traces[0]!.marks)).toEqual([
+      'exit_decision',
+      'broadcast',
+      'rpc_confirmation',
+      'position_closed',
+    ]);
   });
 });

@@ -1,0 +1,85 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Theme tokens as CSS custom properties, not literal Tailwind colors — this is
+ * what lets lib/telegram.ts's syncTelegramTheme() flip the whole palette at
+ * runtime (stamping data-theme on <html>) when Telegram's own theme changes,
+ * with zero JS re-render of every component. Dark is the default or the
+ * fallback when Telegram's colorScheme is unavailable (design brief: "dark-
+ * first... fall back to your dark theme when colorScheme is unavailable").
+ */
+:root,
+[data-theme='dark'] {
+  --nova-background: 10 10 15; /* #0A0A0F */
+  --nova-surface: 255 255 255; /* base for the glass surface, see .glass below */
+  --nova-surface-border: 255 255 255;
+  --nova-text-primary: 245 245 250;
+  --nova-text-secondary: 162 162 178;
+  --nova-glass-bg: rgba(255, 255, 255, 0.04);
+  --nova-glass-border: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme='light'] {
+  --nova-background: 246 246 249; /* Telegram's typical light chrome tone */
+  --nova-surface: 10 10 15;
+  --nova-surface-border: 10 10 15;
+  --nova-text-primary: 15 15 20;
+  --nova-text-secondary: 100 100 112;
+  /* Glassmorphism on a light background reads correctly as translucent DARK,
+   * not translucent white — a straight copy of the dark theme's glass here
+   * would look like a foggy white smear over a light page. */
+  --nova-glass-bg: rgba(10, 10, 15, 0.04);
+  --nova-glass-border: rgba(10, 10, 15, 0.08);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-text-primary font-sans antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--nova-glass-border);
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  /* The one literal implementation of the "Surface (glass)" design token —
+   * every card-like surface in the app should compose this, not hand-roll
+   * background/blur/border values inline. */
+  .glass {
+    background: var(--nova-glass-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--nova-glass-border);
+  }
+}
+
+/* Apple HIG's "respect reduce motion" — the ambient background blobs are
+ * decorative, so the correct response is to freeze them, not substitute a
+ * different animation. Every other transition in the app goes through
+ * framer-motion, which already honors this via its own matchMedia check. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-aurora,
+  .animate-aurora-delayed,
+  .animate-aurora-slow {
+    animation: none;
+  }
+}

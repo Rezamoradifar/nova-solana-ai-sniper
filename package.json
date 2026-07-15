@@ -17,6 +17,7 @@
     "dev:bot": "npm run dev --workspace apps/telegram-bot",
     "dev:marketing": "npm run dev --workspace apps/marketing-engine",
     "dev:dashboard": "npm run dev --workspace apps/dashboard",
+    "dev:miniapp": "npm run dev --workspace apps/miniapp",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

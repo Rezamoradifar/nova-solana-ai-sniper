@@ -1,6 +1,9 @@
 import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
+import { latencyTracker } from '../lib/latencyTracker.js';
 
 export const SOL_MINT = 'So11111111111111111111111111111111111111112';
+/** Used only by warmConnection() below — a highly-liquid, always-routable pair for a quote-only warmup call. */
+const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 
 export interface JupiterClientConfig {
   apiBase: string;
@@ -44,6 +47,14 @@ export interface SwapBuildOptions {
    * only callers that explicitly opt in get a bounded worst case.
    */
   timeoutMs?: number;
+  /**
+   * Latency Optimization Stage 1 (2026-07-14): when set, records
+   * quote_request/quote_received/tx_build/tx_sign timestamps against this
+   * trace via latencyTracker — pure measurement, no new await/no reordering
+   * of the calls below. Undefined for any caller that hasn't opted in (every
+   * pre-existing call site), so behavior is byte-identical without it.
+   */
+  traceId?: string;
 }
 
 function withTimeoutSignal(timeoutMs: number | undefined): AbortSignal | undefined {
@@ -53,9 +64,35 @@ function withTimeoutSignal(timeoutMs: number | undefined): AbortSignal | undefin
 export class JupiterClient {
   constructor(private readonly config: JupiterClientConfig) {}
 
+  /**
+   * Stage 2 latency optimization (2026-07-14): fires one best-effort,
+   * quote-only request at process startup so the underlying TCP+TLS
+   * connection to Jupiter's API host is already warm (Node's fetch/undici
+   * keeps connections alive and reuses them for same-host requests that
+   * follow) by the time the first real BUY/SELL needs a quote, instead of
+   * that first real trade paying the handshake cost. SOL->USDC is used
+   * purely because it's always routable and liquid on every network
+   * condition — the quote is never built into a transaction or acted on.
+   * Never throws and never blocks its caller: a failure here (DNS hiccup,
+   * Jupiter briefly unreachable at boot) just means the connection isn't
+   * pre-warmed this time — identical to today's behavior either way.
+   */
+  async warmConnection(): Promise<void> {
+    try {
+      await this.getQuote({
+        inputMint: SOL_MINT,
+        outputMint: USDC_MINT,
+        amountLamports: 1_000_000n, // 0.001 SOL — quote-only, never executed
+        slippageBps: 50,
+      });
+    } catch {
+      // Best-effort — see doc comment above.
+    }
+  }
+
   async getQuote(
     params: QuoteParams,
-    options?: Pick<SwapBuildOptions, 'timeoutMs'>,
+    options?: Pick<SwapBuildOptions, 'timeoutMs' | 'traceId'>,
   ): Promise<QuoteResponse> {
     const url = new URL(`${this.config.apiBase}/swap/v1/quote`);
     url.searchParams.set('inputMint', params.inputMint);
@@ -63,11 +100,14 @@ export class JupiterClient {
     url.searchParams.set('amount', params.amountLamports.toString());
     url.searchParams.set('slippageBps', params.slippageBps.toString());
 
+    latencyTracker.mark(options?.traceId, 'quote_request');
     const res = await fetch(url, { method: 'GET', signal: withTimeoutSignal(options?.timeoutMs) });
     if (!res.ok) {
       throw new Error(`Jupiter quote failed: ${res.status} ${await res.text()}`);
     }
-    return (await res.json()) as QuoteResponse;
+    const quote = (await res.json()) as QuoteResponse;
+    latencyTracker.mark(options?.traceId, 'quote_received');
+    return quote;
   }
 
   /**
@@ -112,6 +152,7 @@ export class JupiterClient {
       lastValidBlockHeight?: number;
     };
     const buf = Buffer.from(swapTransaction, 'base64');
+    latencyTracker.mark(options?.traceId, 'tx_build');
     return { transaction: VersionedTransaction.deserialize(buf), lastValidBlockHeight };
   }
 
@@ -133,6 +174,7 @@ export class JupiterClient {
       options,
     );
     transaction.sign([signer]);
+    latencyTracker.mark(options?.traceId, 'tx_sign');
 
     const sim = await connection.simulateTransaction(transaction, { sigVerify: false });
     if (sim.value.err) {

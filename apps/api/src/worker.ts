@@ -5,6 +5,13 @@ import { getConnection } from './solana/connection.js';
 declare module 'fastify' {
   interface FastifyInstance {
     solanaConnection?: Connection;
+    // Exposed so routes (positions.ts's manual sell/partial-sell/emergency-sell
+    // actions) can call the existing, already-tested PositionManager methods
+    // directly — same instance the background PriceMonitor/AutoTrader use, not
+    // a second one. Only set once background workers actually start (mirrors
+    // solanaConnection's own optionality above), so routes must check for it.
+    positionManager?: PositionManager;
+    dexScreener?: DexScreenerClient;
   }
 }
 import { PumpFunMonitor } from './solana/pumpfun.js';
@@ -15,7 +22,12 @@ import { RiskAnalyzer, type LaunchableDex } from './detection/riskAnalyzer.js';
 import { extractMintFromParsedTx } from './detection/extractMint.js';
 import { MigrationMonitor } from './detection/migrationMonitor.js';
 import { DexRegistry } from './solana/dex/registry.js';
+import { PUMPSWAP_PROGRAM_ID } from './solana/dex/pumpswap.js';
+import { RAYDIUM_CPMM_PROGRAM_ID } from './solana/dex/raydium.js';
+import { ORCA_WHIRLPOOL_PROGRAM_ID } from './solana/dex/orca.js';
+import { METEORA_DLMM_PROGRAM_ID } from './solana/dex/meteora.js';
 import { PumpSwapExecutor } from './solana/dex/pumpswapExecutor.js';
+import { SourceHealthMonitor } from './detection/sourceHealthMonitor.js';
 import { JitoClient } from './solana/jito.js';
 import { PositionManager } from './trading/positionManager.js';
 import { AutoTrader } from './trading/autoTrader.js';
@@ -67,6 +79,10 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
 
   const dexScreener = new DexScreenerClient(app.config.DEXSCREENER_API_BASE);
   const jupiter = new JupiterClient({ apiBase: app.config.JUPITER_API_BASE });
+  // Stage 2 latency optimization (2026-07-14) — fire-and-forget, never
+  // delays startup or the caller; see JupiterClient.warmConnection's doc
+  // comment.
+  void jupiter.warmConnection();
   const dexRegistry = new DexRegistry(connection, dexScreener, app.log as never, {
     PUMPSWAP: new PumpSwapExecutor(),
   });
@@ -154,6 +170,12 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     jito,
     app.config.MAX_PRIORITY_FEE_LAMPORTS,
   );
+  if (!app.hasDecorator('positionManager')) {
+    app.decorate('positionManager', positionManager);
+  }
+  if (!app.hasDecorator('dexScreener')) {
+    app.decorate('dexScreener', dexScreener);
+  }
   const autoTrader = new AutoTrader({
     prisma: app.prisma,
     riskAnalyzer,
@@ -261,6 +283,11 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     // through this one function, so this line firing confirms a scanner actually
     // produced a launch event for this mint, before any filtering happens.
     app.log.debug({ mint, dex, poolAddress }, 'Scanner: handleNewTokenLaunch reached');
+    // Latency Optimization Stage 1 (2026-07-14): first pipeline-stage
+    // timestamp — see latencyTracker.ts. Captured here rather than at the
+    // scanner callback that invoked this function, since this is the one
+    // place every detection source (on-chain and Telegram-trend) converges.
+    const tokenDetectedAt = Date.now();
     const riskFlags = await riskAnalyzer.analyze({ mint, dex, poolAddress });
 
     const token = await app.prisma.token.upsert({
@@ -307,12 +334,16 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       minLiquidityUsd: app.config.NOTIFY_MIN_LIQUIDITY_USD,
     }).allowed;
 
+    let aiScoringStartAt: number | undefined;
+    let aiScoringEndAt: number | undefined;
     if (aiProvider && hardGatePassed) {
+      aiScoringStartAt = Date.now();
       const aiScore = await scoreToken(
         aiProvider,
         { mint, decimals: 9, createdAt: detectedAt, dex: dex.toLowerCase() as Dex },
         riskFlags,
       );
+      aiScoringEndAt = Date.now();
       aiScoreValue = aiScore.score;
       await app.prisma.token.update({
         where: { id: token.id },
@@ -320,7 +351,11 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       });
     }
 
-    await notifyAndAutoTrade(mint, dex, token.id, riskFlags, aiScoreValue);
+    await notifyAndAutoTrade(mint, dex, token.id, riskFlags, aiScoreValue, {
+      tokenDetectedAt,
+      aiScoringStartAt,
+      aiScoringEndAt,
+    });
   }
 
   /**
@@ -341,6 +376,11 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     tokenId: string,
     riskFlags: RiskFlags,
     aiScoreValue: number,
+    pipelineTimestamps?: {
+      tokenDetectedAt?: number;
+      aiScoringStartAt?: number;
+      aiScoringEndAt?: number;
+    },
   ): Promise<{ boughtCount: number }> {
     const notifyGate = evaluateNotifyGate(
       {
@@ -398,7 +438,13 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       );
     }
 
-    const results = await autoTrader.evaluateAndMaybeBuy(mint, tokenId, riskFlags, aiScoreValue);
+    const results = await autoTrader.evaluateAndMaybeBuy(
+      mint,
+      tokenId,
+      riskFlags,
+      aiScoreValue,
+      pipelineTimestamps,
+    );
     return { boughtCount: results.filter((r) => r.bought).length };
   }
 
@@ -415,6 +461,10 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
 
   async function handleTelegramSignal(candidate: TelegramSignalCandidate): Promise<void> {
     const { mint, channel, messageUrl } = candidate;
+    // Latency Optimization Stage 1 (2026-07-14) — see handleNewTokenLaunch's
+    // identical tokenDetectedAt capture above; this is the Telegram-trend
+    // source's own convergence point.
+    const tokenDetectedAt = Date.now();
 
     if (telegramDedupeCache.has(mint) || telegramAiCooldownCache.has(mint)) {
       metrics.increment('duplicateRejected');
@@ -485,7 +535,10 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
 
     let aiScoreValue = ruleScore;
     let aiSummary: string | undefined;
+    let aiScoringStartAt: number | undefined;
+    let aiScoringEndAt: number | undefined;
     if (aiProvider) {
+      aiScoringStartAt = Date.now();
       const aiScore = await scoreToken(
         aiProvider,
         {
@@ -496,6 +549,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
         },
         riskFlags,
       );
+      aiScoringEndAt = Date.now();
       aiScoreValue = aiScore.score;
       aiSummary = aiScore.summary;
     }
@@ -560,6 +614,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       token.id,
       riskFlags,
       aiScoreValue,
+      { tokenDetectedAt, aiScoringStartAt, aiScoringEndAt },
     );
     metrics.increment('executedTrades', boughtCount);
   }
@@ -590,7 +645,43 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     app.log.warn('TELEGRAM_TREND_SOURCE_ENABLED not set — Telegram trend channel monitor disabled');
   }
 
+  // Discovery source health: alerts if any on-chain source goes silent for
+  // 30+ minutes. Fed from raw program traffic, not qualifying "new token"
+  // discoveries — Orca/Raydium/Meteora routinely go well past 30 minutes
+  // between real launches even when fully healthy (see the 2026-07-14
+  // production audit), so gating on discovery count would false-alarm
+  // constantly on those; a live program still emits swap/other traffic
+  // continuously, so raw traffic is what actually distinguishes "quiet
+  // market" from "dead subscription." Pump.fun's own onEvent below already
+  // fires on every raw log; PumpSwap/Raydium/Orca/Meteora get a dedicated
+  // raw onLogs heartbeat here, separate from DexRegistry's own
+  // pool-creation-filtered monitors, so this never touches existing
+  // detection/trading logic.
+  const sourceHealthMonitor = new SourceHealthMonitor(
+    ['PUMPFUN', 'PUMPSWAP', 'RAYDIUM', 'ORCA', 'METEORA'],
+    30 * 60 * 1000,
+    app.log as never,
+    async ({ source, silentForMs }) => {
+      const minutes = Math.round(silentForMs / 60_000);
+      await notifier?.notifyError(
+        'Discovery source health',
+        `${source} has produced no on-chain activity for ${minutes} minutes — websocket/RPC may be down.`,
+      );
+    },
+  );
+  const heartbeatProgramIds: Array<[string, typeof PUMPSWAP_PROGRAM_ID]> = [
+    ['PUMPSWAP', PUMPSWAP_PROGRAM_ID],
+    ['RAYDIUM', RAYDIUM_CPMM_PROGRAM_ID],
+    ['ORCA', ORCA_WHIRLPOOL_PROGRAM_ID],
+    ['METEORA', METEORA_DLMM_PROGRAM_ID],
+  ];
+  const heartbeatSubscriptionIds = heartbeatProgramIds.map(([source, programId]) =>
+    connection.onLogs(programId, () => sourceHealthMonitor.recordActivity(source), 'processed'),
+  );
+  sourceHealthMonitor.start();
+
   monitor.start(async (event) => {
+    sourceHealthMonitor.recordActivity('PUMPFUN');
     const detection = classifier.classify(event);
     if (!detection) return;
 
@@ -650,6 +741,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // direct launch on that DEX; a new pool for a mint already tracked as PUMPFUN is
   // the migration signal, same handling as the pump.fun-side hint above.
   dexRegistry.startAll(async (event) => {
+    sourceHealthMonitor.recordActivity(event.dex);
     try {
       const tx = await connection.getParsedTransaction(event.signature, {
         maxSupportedTransactionVersion: 0,
@@ -681,6 +773,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     priceMonitor.stop();
     migrationMonitor.stop();
     depositMonitor?.stop();
+    sourceHealthMonitor.stop();
+    await Promise.all(heartbeatSubscriptionIds.map((id) => connection.removeOnLogsListener(id)));
     await dexRegistry.stopAll();
   };
 }
