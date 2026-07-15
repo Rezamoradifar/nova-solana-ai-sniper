@@ -57,6 +57,20 @@ describe('DexRegistry', () => {
     }
   });
 
+  it('passes a per-DEX onRawActivity callback through to each monitor when given (2026-07-15 Helius credit audit)', () => {
+    const registry = new DexRegistry({} as never, {} as never, fakeLogger());
+    const onLaunch = vi.fn();
+    const onRawActivity = vi.fn();
+    registry.startAll(onLaunch, onRawActivity);
+
+    for (const [dex, monitor] of registry.monitors) {
+      expect(monitor.start).toHaveBeenCalledWith(onLaunch, expect.any(Function));
+      const rawActivityArg = vi.mocked(monitor.start).mock.calls[0]![1] as () => void;
+      rawActivityArg();
+      expect(onRawActivity).toHaveBeenCalledWith(dex);
+    }
+  });
+
   it('returns undefined liquidity for a dex with no native reader (PUMPFUN/JUPITER)', async () => {
     const registry = new DexRegistry({} as never, {} as never, fakeLogger());
     expect(await registry.getLiquidity('PUMPFUN', 'anyPool')).toBeUndefined();

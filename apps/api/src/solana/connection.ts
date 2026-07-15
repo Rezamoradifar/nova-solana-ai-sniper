@@ -140,6 +140,15 @@ export function getConnection(config: SolanaConfig, logger?: Logger): Connection
         // real wsEndpoint resolved; the rest are only ever called for ordinary
         // request/response RPC methods.
         wsEndpoint: endpoint === endpoints[0] ? endpoint.wsUrl : undefined,
+        // 2026-07-15 Helius credit audit: web3.js's own Connection has a built-in
+        // retry-on-429 loop (up to 5 attempts against the SAME endpoint, 500ms
+        // doubling to 8s, no jitter) that runs BEFORE resilientConnection.ts's own
+        // rotate-immediately-on-429 logic ever sees the error — so a rate-limited
+        // provider was getting hammered up to 5 more times by web3.js, then
+        // ALSO retried/rotated by resilientConnection.ts on top. Disabling it here
+        // makes resilientConnection.ts's own bounded retry+rotation the only retry
+        // layer, exactly as its module doc comment already assumes.
+        disableRetryOnRateLimit: true,
       }),
     }));
     connection = logger

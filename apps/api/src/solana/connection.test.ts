@@ -1,5 +1,19 @@
-import { describe, expect, it } from 'vitest';
-import { resolveAllRpcEndpoints, resolveRpcUrl, resolveWsUrl } from './connection.js';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { Connection } from '@solana/web3.js';
+import {
+  resolveAllRpcEndpoints,
+  resolveRpcUrl,
+  resolveWsUrl,
+  getConnection,
+} from './connection.js';
+
+vi.mock('@solana/web3.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@solana/web3.js')>();
+  return {
+    ...actual,
+    Connection: vi.fn((url: string, opts: unknown) => new actual.Connection(url, opts as never)),
+  };
+});
 
 describe('resolveAllRpcEndpoints', () => {
   it('puts Helius first (with its wss endpoint) when it is the only provider configured', () => {
@@ -106,5 +120,34 @@ describe('resolveAllRpcEndpoints', () => {
     });
     const configuredRpc = endpoints.find((e) => e.label === 'configured-rpc');
     expect(configuredRpc?.tier).toBe('primary');
+  });
+});
+
+describe('getConnection', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.mocked(Connection).mockClear();
+  });
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it('disables web3.js internal 429 retry on every constructed Connection (2026-07-15 Helius credit audit)', async () => {
+    // web3.js's own Connection retries a 429 up to 5x against the same
+    // endpoint before resilientConnection.ts's rotate-immediately-on-429
+    // logic ever sees the error — this option makes resilientConnection.ts
+    // the only retry layer, as its own doc comment already assumes.
+    const fresh = await import('./connection.js');
+    fresh.getConnection(
+      {
+        heliusApiKey: 'key123',
+        quicknodeRpcUrl: 'https://quicknode.example.com',
+      },
+      { warn: vi.fn() } as never,
+    );
+    expect(Connection).toHaveBeenCalled();
+    for (const call of vi.mocked(Connection).mock.calls) {
+      expect(call[1]).toMatchObject({ disableRetryOnRateLimit: true });
+    }
   });
 });

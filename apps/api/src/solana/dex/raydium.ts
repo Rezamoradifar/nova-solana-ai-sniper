@@ -153,11 +153,12 @@ export class RaydiumCpmmMonitor implements DexMonitor {
     private readonly logger: Logger,
   ) {}
 
-  start(onEvent: DexLaunchHandler): void {
+  start(onEvent: DexLaunchHandler, onRawActivity?: () => void): void {
     if (this.subscriptionId !== undefined) return;
     this.subscriptionId = this.connection.onLogs(
       RAYDIUM_CPMM_PROGRAM_ID,
       (logInfo, ctx) => {
+        onRawActivity?.();
         if (logInfo.err) return;
         if (!isRaydiumCpmmPoolCreation(logInfo.logs)) return;
         void onEvent({

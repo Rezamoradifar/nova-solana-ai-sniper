@@ -154,11 +154,12 @@ export class PumpSwapMonitor implements DexMonitor {
     private readonly logger: Logger,
   ) {}
 
-  start(onEvent: DexLaunchHandler): void {
+  start(onEvent: DexLaunchHandler, onRawActivity?: () => void): void {
     if (this.subscriptionId !== undefined) return;
     this.subscriptionId = this.connection.onLogs(
       PUMPSWAP_PROGRAM_ID,
       (logInfo, ctx) => {
+        onRawActivity?.();
         if (logInfo.err) return;
         if (!isPumpSwapPoolCreation(logInfo.logs)) return;
         void onEvent({

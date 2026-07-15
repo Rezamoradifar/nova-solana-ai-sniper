@@ -94,4 +94,23 @@ describe('SourceHealthMonitor', () => {
     expect(onAlert).toHaveBeenCalledWith(expect.objectContaining({ source: 'METEORA' }));
     monitor.stop();
   });
+
+  it('snapshot() reports last-seen time and alert state per source (2026-07-15 Helius credit audit)', async () => {
+    const logger = fakeLogger();
+    const monitor = new SourceHealthMonitor(['PUMPFUN', 'METEORA'], 30 * 60 * 1000, logger);
+    monitor.start(1000);
+
+    monitor.recordActivity('PUMPFUN');
+    let snapshot = monitor.snapshot();
+    expect(snapshot.PUMPFUN?.alerted).toBe(false);
+    expect(snapshot.METEORA?.alerted).toBe(false);
+    expect(typeof snapshot.PUMPFUN?.lastSeenAtMs).toBe('number');
+
+    vi.advanceTimersByTime(31 * 60 * 1000);
+    await vi.runOnlyPendingTimersAsync();
+
+    snapshot = monitor.snapshot();
+    expect(snapshot.METEORA?.alerted).toBe(true);
+    monitor.stop();
+  });
 });

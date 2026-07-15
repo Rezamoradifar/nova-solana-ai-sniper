@@ -12,6 +12,10 @@ declare module 'fastify' {
     // solanaConnection's own optionality above), so routes must check for it.
     positionManager?: PositionManager;
     dexScreener?: DexScreenerClient;
+    // 2026-07-15 Helius credit audit: exposed so /metrics/rpc can report
+    // "last successful event received from each discovery source" — same
+    // instance the background detection pipeline feeds, not a second one.
+    sourceHealthMonitor?: SourceHealthMonitor;
   }
 }
 import { PumpFunMonitor } from './solana/pumpfun.js';
@@ -22,10 +26,6 @@ import { RiskAnalyzer, type LaunchableDex } from './detection/riskAnalyzer.js';
 import { extractMintFromParsedTx } from './detection/extractMint.js';
 import { MigrationMonitor } from './detection/migrationMonitor.js';
 import { DexRegistry } from './solana/dex/registry.js';
-import { PUMPSWAP_PROGRAM_ID } from './solana/dex/pumpswap.js';
-import { RAYDIUM_CPMM_PROGRAM_ID } from './solana/dex/raydium.js';
-import { ORCA_WHIRLPOOL_PROGRAM_ID } from './solana/dex/orca.js';
-import { METEORA_DLMM_PROGRAM_ID } from './solana/dex/meteora.js';
 import { PumpSwapExecutor } from './solana/dex/pumpswapExecutor.js';
 import { SourceHealthMonitor } from './detection/sourceHealthMonitor.js';
 import { JitoClient } from './solana/jito.js';
@@ -652,11 +652,16 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // production audit), so gating on discovery count would false-alarm
   // constantly on those; a live program still emits swap/other traffic
   // continuously, so raw traffic is what actually distinguishes "quiet
-  // market" from "dead subscription." Pump.fun's own onEvent below already
-  // fires on every raw log; PumpSwap/Raydium/Orca/Meteora get a dedicated
-  // raw onLogs heartbeat here, separate from DexRegistry's own
-  // pool-creation-filtered monitors, so this never touches existing
-  // detection/trading logic.
+  // market" from "dead subscription." Pump.fun's own onEvent below fires on
+  // every raw log; PumpSwap/Raydium/Orca/Meteora are fed the same way via
+  // DexRegistry's `onRawActivity` callback (see dexRegistry.startAll below)
+  // instead of a second, independent onLogs subscription per DEX program —
+  // 2026-07-15 Helius credit audit: that second subscription doubled WS
+  // registration and full raw-log delivery volume for all 4 DEX programs
+  // (Meteora alone: ~100+ events/sec) purely to get a signal DexRegistry's
+  // own subscription already receives; onRawActivity taps the same
+  // subscription before its pool-creation filter, so liveness tracking is
+  // unchanged, just no longer duplicated at the WS layer.
   const sourceHealthMonitor = new SourceHealthMonitor(
     ['PUMPFUN', 'PUMPSWAP', 'RAYDIUM', 'ORCA', 'METEORA'],
     30 * 60 * 1000,
@@ -669,16 +674,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       );
     },
   );
-  const heartbeatProgramIds: Array<[string, typeof PUMPSWAP_PROGRAM_ID]> = [
-    ['PUMPSWAP', PUMPSWAP_PROGRAM_ID],
-    ['RAYDIUM', RAYDIUM_CPMM_PROGRAM_ID],
-    ['ORCA', ORCA_WHIRLPOOL_PROGRAM_ID],
-    ['METEORA', METEORA_DLMM_PROGRAM_ID],
-  ];
-  const heartbeatSubscriptionIds = heartbeatProgramIds.map(([source, programId]) =>
-    connection.onLogs(programId, () => sourceHealthMonitor.recordActivity(source), 'processed'),
-  );
   sourceHealthMonitor.start();
+  app.decorate('sourceHealthMonitor', sourceHealthMonitor);
 
   monitor.start(async (event) => {
     sourceHealthMonitor.recordActivity('PUMPFUN');
@@ -740,31 +737,33 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // PumpSwap/Raydium/Orca/Meteora: a new pool for a mint we've never tracked is a
   // direct launch on that DEX; a new pool for a mint already tracked as PUMPFUN is
   // the migration signal, same handling as the pump.fun-side hint above.
-  dexRegistry.startAll(async (event) => {
-    sourceHealthMonitor.recordActivity(event.dex);
-    try {
-      const tx = await connection.getParsedTransaction(event.signature, {
-        maxSupportedTransactionVersion: 0,
-      });
-      if (!tx) return;
-      const pool = await dexRegistry.resolveNewPool(event.dex, tx);
-      if (!pool) return;
+  dexRegistry.startAll(
+    async (event) => {
+      try {
+        const tx = await connection.getParsedTransaction(event.signature, {
+          maxSupportedTransactionVersion: 0,
+        });
+        if (!tx) return;
+        const pool = await dexRegistry.resolveNewPool(event.dex, tx);
+        if (!pool) return;
 
-      const existing = await app.prisma.token.findUnique({ where: { mint: pool.baseMint } });
-      if (existing?.dex === 'PUMPFUN') {
-        await migrationMonitor.checkOne(existing.id, pool.baseMint);
-        return;
+        const existing = await app.prisma.token.findUnique({ where: { mint: pool.baseMint } });
+        if (existing?.dex === 'PUMPFUN') {
+          await migrationMonitor.checkOne(existing.id, pool.baseMint);
+          return;
+        }
+        if (existing) return;
+
+        await handleNewTokenLaunch(pool.baseMint, event.dex, event.detectedAt, pool.poolAddress);
+      } catch (err) {
+        app.log.error(
+          { err, signature: event.signature, dex: event.dex },
+          'failed to process DEX launch event',
+        );
       }
-      if (existing) return;
-
-      await handleNewTokenLaunch(pool.baseMint, event.dex, event.detectedAt, pool.poolAddress);
-    } catch (err) {
-      app.log.error(
-        { err, signature: event.signature, dex: event.dex },
-        'failed to process DEX launch event',
-      );
-    }
-  });
+    },
+    (dex) => sourceHealthMonitor.recordActivity(dex),
+  );
 
   return async () => {
     await monitor.stop();
@@ -774,7 +773,6 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     migrationMonitor.stop();
     depositMonitor?.stop();
     sourceHealthMonitor.stop();
-    await Promise.all(heartbeatSubscriptionIds.map((id) => connection.removeOnLogsListener(id)));
     await dexRegistry.stopAll();
   };
 }

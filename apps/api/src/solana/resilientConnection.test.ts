@@ -3,6 +3,7 @@ import {
   wrapWithMultiProviderFailover,
   rpcLatencyRegistry,
   rpcRequestCounters,
+  rpcCooldownRegistry,
   type RpcProviderConfig,
 } from './resilientConnection.js';
 
@@ -21,6 +22,7 @@ function provider(
 beforeEach(() => {
   rpcLatencyRegistry.reset();
   rpcRequestCounters.reset();
+  rpcCooldownRegistry.reset();
 });
 
 describe('wrapWithMultiProviderFailover', () => {
@@ -164,6 +166,56 @@ describe('wrapWithMultiProviderFailover', () => {
     expect(reliable.getSlot).toHaveBeenCalledTimes(1);
   });
 
+  it('jitters a provider cooldown to within ±20% of the computed backoff (2026-07-15 Helius credit audit)', async () => {
+    // Pure exponential backoff with no jitter means every caller that failed
+    // at the same moment retries in lockstep — jitter spreads that out. The
+    // logged cooldownUntil is the only externally observable readout of the
+    // jittered backoff value (backoffFor/withJitter are module-private).
+    const flaky = { getSlot: vi.fn().mockRejectedValue(new Error('429 too many requests')) };
+    const logger = fakeLogger();
+    const wrapped = wrapWithMultiProviderFailover([provider('flaky', flaky)], logger, {
+      retryDelayMs: 0,
+      baseBackoffMs: 60_000,
+      maxBackoffMs: 1_000_000, // high enough that the default 30s cap doesn't clip the value under test
+    });
+
+    const before = Date.now();
+    await expect((wrapped as unknown as typeof flaky).getSlot()).rejects.toThrow();
+    const after = Date.now();
+
+    const [warnArg] = logger.warn.mock.calls[0]!;
+    const cooldownDelay = (warnArg as { cooldownUntil: number }).cooldownUntil - before;
+    // baseBackoffMs(60_000) * 2^1 = 120_000, jittered to 0.8x-1.2x => [96_000, 144_000],
+    // plus the small real wall-clock slack between `before` and when cooldownUntil
+    // was actually computed (bounded by `after - before`).
+    expect(cooldownDelay).toBeGreaterThanOrEqual(96_000);
+    expect(cooldownDelay).toBeLessThanOrEqual(144_000 + (after - before));
+  });
+
+  it('applies jitter within a bounded range rather than a fixed multiple of the base delay', async () => {
+    const randomSpy = vi.spyOn(Math, 'random');
+    const flaky = { getSlot: vi.fn().mockRejectedValue(new Error('429 too many requests')) };
+    const logger = fakeLogger();
+
+    for (const rand of [0, 0.5, 1]) {
+      randomSpy.mockReturnValue(rand);
+      logger.warn.mockClear();
+      const wrapped = wrapWithMultiProviderFailover([provider('flaky', flaky)], logger, {
+        retryDelayMs: 0,
+        baseBackoffMs: 1_000,
+      });
+      const before = Date.now();
+      await expect((wrapped as unknown as typeof flaky).getSlot()).rejects.toThrow();
+      const [warnArg] = logger.warn.mock.calls[0]!;
+      const cooldownDelay = (warnArg as { cooldownUntil: number }).cooldownUntil - before;
+      // baseBackoffMs(1000) * 2^1 = 2000, factor = 0.8 + rand*0.4 => [0.8, 1.2]
+      expect(cooldownDelay).toBeGreaterThanOrEqual(2000 * 0.8 - 5);
+      expect(cooldownDelay).toBeLessThanOrEqual(2000 * 1.2 + 5);
+    }
+
+    randomSpy.mockRestore();
+  });
+
   it('round-robins across healthy providers instead of always hitting the first one', async () => {
     const a = { getSlot: vi.fn().mockResolvedValue(1) };
     const b = { getSlot: vi.fn().mockResolvedValue(2) };
@@ -224,6 +276,45 @@ describe('wrapWithMultiProviderFailover', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('dedupes concurrent getParsedTransaction calls for the same signature (2026-07-15 Helius credit audit)', async () => {
+    // Real production gap this closes: worker.ts's migration-hint path and
+    // its DEX pool-creation path can both fetch the same signature within
+    // the same event tick.
+    let resolveCall: (v: unknown) => void;
+    const pending = new Promise((resolve) => {
+      resolveCall = resolve;
+    });
+    const primary = { getParsedTransaction: vi.fn().mockReturnValue(pending) };
+    const wrapped = wrapWithMultiProviderFailover([provider('primary', primary)], fakeLogger());
+
+    const call1 = (wrapped as unknown as typeof primary).getParsedTransaction('sig1');
+    const call2 = (wrapped as unknown as typeof primary).getParsedTransaction('sig1');
+    resolveCall!({ meta: {} });
+
+    await expect(call1).resolves.toEqual({ meta: {} });
+    await expect(call2).resolves.toEqual({ meta: {} });
+    expect(primary.getParsedTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('never caches a null getParsedTransaction result — a not-yet-visible tx must be retried fresh, not served stale null', async () => {
+    // Guards positionManager.ts's withVerificationRetry, which retries
+    // getParsedTransaction up to 3x, 2000ms apart, specifically because a
+    // transaction can transiently resolve null before it's visible yet.
+    // Caching that null for cacheTtlMs would silently defeat that retry and
+    // reintroduce the wallet-lock bug it was built to fix.
+    const primary = {
+      getParsedTransaction: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ meta: {} }),
+    };
+    const wrapped = wrapWithMultiProviderFailover([provider('primary', primary)], fakeLogger());
+
+    const first = await (wrapped as unknown as typeof primary).getParsedTransaction('sig1');
+    expect(first).toBeNull();
+
+    const second = await (wrapped as unknown as typeof primary).getParsedTransaction('sig1');
+    expect(second).toEqual({ meta: {} });
+    expect(primary.getParsedTransaction).toHaveBeenCalledTimes(2);
   });
 
   it('never caches a method outside the cacheable safelist (e.g. getBalance)', async () => {
@@ -403,6 +494,75 @@ describe('rpcRequestCounters (2026-07-15 429 fix)', () => {
     ]);
 
     expect(rpcRequestCounters.snapshot().attemptsByProvider.p).toBe(1);
+  });
+
+  it('counts a rate-limited rotate-away as a retry, distinct from a plain first-try success (2026-07-15 Helius credit audit)', async () => {
+    const rateLimited = {
+      getSlot: vi.fn().mockRejectedValue(new Error('429 Too Many Requests')),
+    };
+    const healthy = { getSlot: vi.fn().mockResolvedValue(1) };
+    const wrapped = wrapWithMultiProviderFailover(
+      [provider('limited', rateLimited), provider('healthy', healthy)],
+      fakeLogger(),
+    );
+
+    await (wrapped as unknown as typeof healthy).getSlot();
+
+    const snapshot = rpcRequestCounters.snapshot();
+    expect(snapshot.retriesByProvider.limited).toBe(1);
+    expect(snapshot.retriesByProvider.healthy).toBeUndefined();
+  });
+
+  it('counts a same-provider retry on a non-rate-limit transient error', async () => {
+    const flaky = {
+      getSlot: vi.fn().mockRejectedValueOnce(new Error('ECONNRESET')).mockResolvedValueOnce(9),
+    };
+    const wrapped = wrapWithMultiProviderFailover([provider('flaky', flaky)], fakeLogger(), {
+      retryDelayMs: 0,
+    });
+
+    await (wrapped as unknown as typeof flaky).getSlot();
+
+    expect(rpcRequestCounters.snapshot().retriesByProvider.flaky).toBe(1);
+  });
+});
+
+describe('rpcCooldownRegistry (2026-07-15 Helius credit audit)', () => {
+  it('records a provider cooldown when it is rate-limited', async () => {
+    const rateLimited = {
+      getSlot: vi.fn().mockRejectedValue(new Error('429 Too Many Requests')),
+    };
+    const healthy = { getSlot: vi.fn().mockResolvedValue(1) };
+    const wrapped = wrapWithMultiProviderFailover(
+      [provider('limited', rateLimited), provider('healthy', healthy)],
+      fakeLogger(),
+      { baseBackoffMs: 60_000, maxBackoffMs: 1_000_000 },
+    );
+
+    const before = Date.now();
+    await (wrapped as unknown as typeof healthy).getSlot();
+
+    const snapshot = rpcCooldownRegistry.snapshot();
+    expect(snapshot.limited).toBeGreaterThan(before);
+    // `healthy` succeeded on its first try, so its cooldown is explicitly
+    // cleared to 0 (present, not on cooldown) rather than never recorded.
+    expect(snapshot.healthy).toBe(0);
+  });
+
+  it('clears a provider back to 0 once it succeeds again', async () => {
+    const flaky = {
+      getSlot: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('429 Too Many Requests'))
+        .mockResolvedValueOnce(1),
+    };
+    const wrapped = wrapWithMultiProviderFailover([provider('flaky', flaky)], fakeLogger());
+
+    await expect((wrapped as unknown as typeof flaky).getSlot()).rejects.toThrow();
+    expect(rpcCooldownRegistry.snapshot().flaky).toBeGreaterThan(0);
+
+    await (wrapped as unknown as typeof flaky).getSlot();
+    expect(rpcCooldownRegistry.snapshot().flaky).toBe(0);
   });
 });
 

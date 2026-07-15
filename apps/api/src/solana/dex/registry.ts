@@ -103,8 +103,24 @@ export class DexRegistry {
     ]);
   }
 
-  startAll(onLaunch: Parameters<DexMonitor['start']>[0]): void {
-    for (const monitor of this.monitors.values()) monitor.start(onLaunch);
+  /**
+   * `onRawActivity`, if given, is called with the DEX label on every raw log
+   * delivery from that DEX's existing subscription (see DexMonitor.start's
+   * doc comment) — 2026-07-15 Helius credit audit: lets a caller feed
+   * source-health liveness tracking off this one subscription instead of
+   * opening a second, redundant one per DEX just to get the same signal.
+   */
+  startAll(
+    onLaunch: Parameters<DexMonitor['start']>[0],
+    onRawActivity?: (dex: NativeDex) => void,
+  ): void {
+    for (const [dex, monitor] of this.monitors) {
+      if (onRawActivity) {
+        monitor.start(onLaunch, () => onRawActivity(dex));
+      } else {
+        monitor.start(onLaunch);
+      }
+    }
   }
 
   async stopAll(): Promise<void> {

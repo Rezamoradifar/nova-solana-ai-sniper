@@ -83,6 +83,12 @@ export interface RpcProviderConfig {
 class RpcRequestCounters {
   private readonly attemptsByLabel = new Map<string, number>();
   private readonly rateLimitedByLabel = new Map<string, number>();
+  // 2026-07-15 Helius credit audit: distinct from rateLimitedByLabel — this
+  // counts every same-provider-retry or rotate-to-next-provider attempt
+  // (i.e. every attempt beyond the first for a single logical call),
+  // regardless of whether the failure that triggered it was a rate limit or
+  // any other retryable error (timeout, 5xx, ...).
+  private readonly retriesByLabel = new Map<string, number>();
   private readonly startedAt = Date.now();
 
   recordAttempt(label: string): void {
@@ -93,10 +99,15 @@ class RpcRequestCounters {
     this.rateLimitedByLabel.set(label, (this.rateLimitedByLabel.get(label) ?? 0) + 1);
   }
 
+  recordRetry(label: string): void {
+    this.retriesByLabel.set(label, (this.retriesByLabel.get(label) ?? 0) + 1);
+  }
+
   snapshot(): {
     sinceMs: number;
     attemptsByProvider: Record<string, number>;
     rateLimitedByProvider: Record<string, number>;
+    retriesByProvider: Record<string, number>;
     attemptsPerSecondByProvider: Record<string, number>;
   } {
     const sinceMs = Date.now() - this.startedAt;
@@ -109,6 +120,7 @@ class RpcRequestCounters {
       sinceMs,
       attemptsByProvider: Object.fromEntries(this.attemptsByLabel),
       rateLimitedByProvider: Object.fromEntries(this.rateLimitedByLabel),
+      retriesByProvider: Object.fromEntries(this.retriesByLabel),
       attemptsPerSecondByProvider,
     };
   }
@@ -117,10 +129,38 @@ class RpcRequestCounters {
   reset(): void {
     this.attemptsByLabel.clear();
     this.rateLimitedByLabel.clear();
+    this.retriesByLabel.clear();
   }
 }
 
 export const rpcRequestCounters = new RpcRequestCounters();
+
+/**
+ * 2026-07-15 Helius credit audit: process-wide readout of each provider's
+ * current backoff cooldown — previously trapped inside
+ * wrapWithMultiProviderFailover's closure-private `state` map. "Provider X is
+ * on cooldown until Y" is a more directly actionable signal for diagnosing
+ * exhaustion than raw counts alone. Same plain-singleton convention as
+ * RpcLatencyRegistry.
+ */
+class RpcCooldownRegistry {
+  private readonly cooldownUntilByLabel = new Map<string, number>();
+
+  record(label: string, cooldownUntil: number): void {
+    this.cooldownUntilByLabel.set(label, cooldownUntil);
+  }
+
+  snapshot(): Record<string, number> {
+    return Object.fromEntries(this.cooldownUntilByLabel);
+  }
+
+  /** Test-only: clears all recorded samples so tests never leak into each other. */
+  reset(): void {
+    this.cooldownUntilByLabel.clear();
+  }
+}
+
+export const rpcCooldownRegistry = new RpcCooldownRegistry();
 
 /**
  * Stage 2 (2026-07-14): shared, process-wide record of each provider's most
@@ -214,6 +254,16 @@ const SUBSCRIPTION_METHODS = new Set([
  * call (getBalance, getLatestBlockhash, getSignatureStatus(es)) and anything
  * that isn't a pure read (sendTransaction, confirmTransaction, simulateTransaction) —
  * caching those would change trading semantics, not just save RPC calls.
+ *
+ * getParsedTransaction (added 2026-07-15 Helius credit audit): content for a
+ * fixed signature is immutable once returned, unlike account-info reads that
+ * change over time — safe to cache/dedupe. The concrete gap this closes: the
+ * pump.fun migration-hint path and the DEX pool-creation path in worker.ts
+ * can both fetch the same signature within the same tick. This is ONLY safe
+ * because runCached (below) never caches a null/undefined result — a
+ * transaction can transiently resolve null before it's visible yet
+ * (positionManager.ts's withVerificationRetry retries specifically for this),
+ * and caching that null for cacheTtlMs would silently defeat that retry.
  */
 const CACHEABLE_METHODS = new Set([
   'getAccountInfo',
@@ -224,6 +274,7 @@ const CACHEABLE_METHODS = new Set([
   'getTokenAccountBalance',
   'getParsedTokenAccountsByOwner',
   'getMinimumBalanceForRentExemption',
+  'getParsedTransaction',
 ]);
 
 function keyPart(arg: unknown): string {
@@ -289,8 +340,13 @@ export function wrapWithMultiProviderFailover(
   const inFlight = new Map<string, Promise<unknown>>();
   let rotation = 0;
 
+  /** ±20% jitter so many callers backing off at once don't retry in lockstep. */
+  function withJitter(ms: number): number {
+    return Math.round(ms * (0.8 + Math.random() * 0.4));
+  }
+
   function backoffFor(failureCount: number): number {
-    return Math.min(maxBackoffMs, baseBackoffMs * 2 ** failureCount);
+    return withJitter(Math.min(maxBackoffMs, baseBackoffMs * 2 ** failureCount));
   }
 
   // Stage 2 (2026-07-14): continuous latency benchmarking, opt-in via
@@ -397,6 +453,13 @@ export function wrapWithMultiProviderFailover(
     const st = state.get(provider.label)!;
     st.failureCount += 1;
     st.cooldownUntil = Date.now() + backoffFor(st.failureCount);
+    rpcCooldownRegistry.record(provider.label, st.cooldownUntil);
+  }
+
+  function clearCooldown(provider: RpcProviderConfig, st: ProviderState): void {
+    st.failureCount = 0;
+    st.cooldownUntil = 0;
+    rpcCooldownRegistry.record(provider.label, 0);
   }
 
   async function runWithFailover(prop: string, args: unknown[]): Promise<unknown> {
@@ -409,8 +472,7 @@ export function wrapWithMultiProviderFailover(
       const hasMore = i < candidates.length - 1;
       try {
         const result = await callProvider(provider, prop, args);
-        st.failureCount = 0;
-        st.cooldownUntil = 0;
+        clearCooldown(provider, st);
         return result;
       } catch (firstErr) {
         lastErr = firstErr;
@@ -421,6 +483,7 @@ export function wrapWithMultiProviderFailover(
           // only adds load to an endpoint already over its limit — rotate
           // immediately instead of sleeping+retrying in place.
           rpcRequestCounters.recordRateLimited(provider.label);
+          rpcRequestCounters.recordRetry(provider.label);
           failAndCooldown(provider);
           logger.warn(
             {
@@ -441,13 +504,13 @@ export function wrapWithMultiProviderFailover(
           { method: prop, provider: provider.label, err: firstErr },
           'RPC call failed — retrying against the same provider',
         );
+        rpcRequestCounters.recordRetry(provider.label);
         options.onFailover?.({ method: prop, attempt: 1, provider: provider.label });
-        await sleep(retryDelayMs);
+        await sleep(withJitter(retryDelayMs));
 
         try {
           const result = await callProvider(provider, prop, args);
-          st.failureCount = 0;
-          st.cooldownUntil = 0;
+          clearCooldown(provider, st);
           return result;
         } catch (secondErr) {
           lastErr = secondErr;
@@ -466,6 +529,7 @@ export function wrapWithMultiProviderFailover(
               ? 'RPC call still failing — rotating to the next provider'
               : 'RPC call still failing — no more providers left to try',
           );
+          rpcRequestCounters.recordRetry(provider.label);
           options.onFailover?.({ method: prop, attempt: 2, provider: provider.label });
           // fall through to the next candidate
         }
@@ -488,7 +552,15 @@ export function wrapWithMultiProviderFailover(
 
     const promise = runWithFailover(prop, args)
       .then((value) => {
-        cache.set(key, { value, cachedAt: Date.now() });
+        // Never cache a null/undefined result — a not-yet-visible read (e.g.
+        // getParsedTransaction before the tx has landed from this provider's
+        // point of view) must be retried fresh, not served back a stale
+        // "not found" for the rest of the TTL window. In-flight de-dup above
+        // still applies regardless (cleared in .finally() either way), so
+        // concurrent identical calls still collapse into one real request.
+        if (value !== null && value !== undefined) {
+          cache.set(key, { value, cachedAt: Date.now() });
+        }
         return value;
       })
       .finally(() => {
