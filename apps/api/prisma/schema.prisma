@@ -139,10 +139,41 @@ model Token {
   trades    Trade[]
   positions Position[]
   snipes    SnipeConfig[]
+  opportunityScoreLogs OpportunityScoreLog[]
 
   @@index([dex])
   @@index([createdAt])
   @@map("tokens")
+}
+
+/// Final Opportunity Score (Section 7, 2026-07-18) — one row per token
+/// evaluation, both accepted AND rejected (a rejected token never becomes a
+/// Position, so this can't live only there the way Position.riskScoreAtEntry
+/// does). Frozen at evaluation time: Token's own aiScore/aiSummary are a
+/// live/mutable snapshot that drifts on re-detection, so this is the durable
+/// record of "why did this specific evaluation score what it did."
+model OpportunityScoreLog {
+  id      String @id @default(cuid())
+  tokenId String
+  token   Token  @relation(fields: [tokenId], references: [id])
+  mint    String // denormalized for convenient querying without a join
+
+  safetyScore   Float // RiskAnalyzer.ruleBasedScore — always present, RiskAnalyzer always runs
+  momentumScore Float? // null until Section 3 (Momentum Engine) exists
+  walletScore   Float? // null until Section 4 (Wallet Intelligence) exists
+  socialScore   Float? // null until Section 5 (Social/Trend Signals) exists
+  aiScore       Float? // null when no AI provider is configured (matches today's rule-score-only fallback)
+  finalScore    Float
+
+  /// {safetyBps, momentumBps, walletBps, socialBps, aiBps} actually applied —
+  /// BusinessSettings' weights can change over time, so this is a permanent
+  /// snapshot, not a value that would drift out of sync with a live setting.
+  weightsSnapshot Json
+  createdAt       DateTime @default(now())
+
+  @@index([tokenId])
+  @@index([createdAt])
+  @@map("opportunity_score_logs")
 }
 
 enum OrderSide {
@@ -406,6 +437,14 @@ model SnipeConfig {
   // default ladder" (DEFAULT_PARTIAL_EXIT_TIERS in partialExitEngine.ts).
   partialTakeProfitTiers   Json?
 
+  // Final Opportunity Score (Section 7, 2026-07-18) — opt-in per config, also
+  // gated by the global OPPORTUNITY_SCORE_GATE_ENABLED env flag (same
+  // double opt-in convention as entryFilterEnabled/institutionalModeEnabled
+  // above). Default false reproduces today's exact Math.min(ruleScore,
+  // aiScore) gate — a weighted composite is NOT the same value and would
+  // silently move every existing user's effective bar if applied by default.
+  useOpportunityScoreGate Boolean @default(false)
+
   @@index([userId])
   @@map("snipe_configs")
 }
@@ -641,6 +680,24 @@ model BusinessSettings {
   // step required. Existing users are never excluded by this — the check is
   // purely on when the TRADE closed, never on the user's own createdAt.
   feeSystemActivatedAt DateTime @default(now())
+
+  // Final Opportunity Score (Section 7, 2026-07-18) — admin-configurable
+  // weights for the 5-component weighted composite (see
+  // packages/shared/src/opportunityScore.ts's calculateOpportunityScore).
+  // momentum/wallet/social default to 0% since no engine feeds those scores
+  // yet (Sections 3-5, not built) — a component with 0 weight is excluded
+  // from the log's weightsSnapshot math the same as one that's simply
+  // undefined, so this is a safe, honest default, not a placeholder that
+  // silently does something once those engines exist (someone must
+  // deliberately raise these off 0 first). safety+ai default to 50/50,
+  // summing to 10000bps with the other three at 0 — but this composite is
+  // NOT the default auto-buy gate (see SnipeConfig.useOpportunityScoreGate);
+  // it's computed and persisted for every token regardless.
+  safetyWeightBps   Int @default(5000)
+  momentumWeightBps Int @default(0)
+  walletWeightBps   Int @default(0)
+  socialWeightBps   Int @default(0)
+  aiWeightBps       Int @default(5000)
 
   referralLevels ReferralLevelConfig[]
 
