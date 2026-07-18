@@ -2,7 +2,8 @@ import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
 import {
   calculatePerformanceFee,
-  calculateReferralRewards,
+  calculateFixedProfitDistribution,
+  FIXED_USER_SHARE_BPS,
   getOrCreateBusinessSettings,
   isEligibleForFeeProcessing,
   resolveReferralChain,
@@ -185,12 +186,20 @@ export async function processProfitableClose(
   const chain = settings.referralProgramEnabled
     ? await resolveReferralChain(deps.prisma, position.wallet.userId, settings.maxReferralDepth)
     : [];
-  const referralDistribution = calculateReferralRewards(
-    feeResult.feeUsd,
-    chain,
-    settings.referralLevels,
-    settings.maxReferralDepth,
-  );
+  // Section 14 (2026-07-18): the actual credited amounts (user/L1/L2/platform)
+  // now come from the fixed 80/10/5/5 split, not from feeResult's
+  // performanceFeeBps-derived feeUsd/userShareUsd — calculatePerformanceFee is
+  // still called above only for its real-cost reconciliation (netProfitUsd
+  // clamped to the real on-chain SOL delta) and its "no fee on a loss" gate.
+  // poolUsd is the fixed 20% non-user pool (never derived from
+  // settings.performanceFeeBps) — used for both the PerformanceFeeLedger row
+  // and the OWNER_FEE debit below, same convention as before: the full pool
+  // is debited regardless of how much of it is subsequently paid to
+  // referrers, so the platform's own implicit net stays `poolUsd -
+  // referralPayouts` exactly as it always has.
+  const distribution = calculateFixedProfitDistribution(feeResult.netProfitUsd, chain);
+  const poolUsd = feeResult.netProfitUsd - distribution.userShareUsd;
+  const poolBps = 10_000 - FIXED_USER_SHARE_BPS;
 
   const ledger = await deps.prisma
     .$transaction(async (tx) => {
@@ -204,9 +213,9 @@ export async function processProfitableClose(
           grossProfitUsd: feeResult.grossProfitUsd,
           tradingCostsUsd: feeResult.tradingCostsUsd,
           netProfitUsd: feeResult.netProfitUsd,
-          feeBps: feeResult.feeBps,
-          feeUsd: feeResult.feeUsd,
-          userShareUsd: feeResult.userShareUsd,
+          feeBps: poolBps,
+          feeUsd: poolUsd,
+          userShareUsd: distribution.userShareUsd,
         },
       });
 
@@ -219,7 +228,7 @@ export async function processProfitableClose(
         type: 'PROFIT_CREDIT',
         asset: 'USD',
         direction: 'CREDIT',
-        amountUsd: feeResult.userShareUsd,
+        amountUsd: distribution.userShareUsd,
         userId: position.wallet.userId,
         walletId: position.walletId,
         referenceType: 'performance_fee_ledger',
@@ -230,7 +239,7 @@ export async function processProfitableClose(
         type: 'OWNER_FEE',
         asset: 'USD',
         direction: 'DEBIT',
-        amountUsd: feeResult.feeUsd,
+        amountUsd: poolUsd,
         userId: position.wallet.userId,
         walletId: position.walletId,
         referenceType: 'performance_fee_ledger',
@@ -238,7 +247,7 @@ export async function processProfitableClose(
         action: 'fee.owner_fee_charged',
       });
 
-      for (const reward of referralDistribution) {
+      for (const reward of distribution.referralRewards) {
         const referralReward = await tx.referralReward.create({
           data: {
             performanceFeeLedgerId: created.id,
@@ -278,10 +287,10 @@ export async function processProfitableClose(
     grossProfitUsd: feeResult.grossProfitUsd,
     tradingCostsUsd: feeResult.tradingCostsUsd,
     netProfitUsd: feeResult.netProfitUsd,
-    feeBps: feeResult.feeBps,
-    feeUsd: feeResult.feeUsd,
-    userShareUsd: feeResult.userShareUsd,
-    referralRewardsTotalUsd: referralDistribution.reduce((sum, r) => sum + r.rewardUsd, 0),
+    feeBps: poolBps,
+    feeUsd: poolUsd,
+    userShareUsd: distribution.userShareUsd,
+    referralRewardsTotalUsd: distribution.referralRewards.reduce((sum, r) => sum + r.rewardUsd, 0),
     referenceId: ledger.id,
   };
   await notifier?.notifyTradeReport(position.wallet.userId, report);

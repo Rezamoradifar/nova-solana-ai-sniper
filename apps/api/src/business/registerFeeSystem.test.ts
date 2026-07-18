@@ -15,7 +15,10 @@ vi.mock('../lib/eventBus.js', () => ({
 
 vi.mock('@nova/telegram-bot', () => ({
   createBot: vi.fn(),
-  NotificationService: vi.fn().mockImplementation(() => ({ notifyTradeReport: vi.fn() })),
+  NotificationService: vi.fn().mockImplementation(() => ({
+    notifyTradeReport: vi.fn(),
+    notifyReferralEarned: vi.fn(),
+  })),
 }));
 
 vi.mock('../solana/pumpfunBondingCurve.js', () => ({
@@ -59,6 +62,11 @@ function fakePrisma(overrides: {
    * decision; isEligibleForFeeProcessing never takes a user/account-age
    * parameter at all. */
   userCreatedAt?: Date;
+  /** Overrides the default user-1 (trader) -> user-2 (L1) -> (no L2) chain —
+   * for exercising a 2-deep chain, or no referrer at all. */
+  userFindUniqueImpl?: (args: {
+    where: { id?: string; referralCode?: string };
+  }) => Promise<{ id?: string; referredByCode: string | null } | null>;
 }) {
   const ledgerCreate = overrides.ledgerCreate ?? vi.fn().mockResolvedValue({ id: 'ledger-1' });
   // Stateful, not a fixed return value: introspects ledgerCreate's own call
@@ -124,14 +132,15 @@ function fakePrisma(overrides: {
   // user-1 (the trader) was referred by user-2 (referralCode 'REF-2') — exercises
   // the referral-reward path by default; individual tests can still override
   // businessSettings.referralProgramEnabled to turn it off.
-  const userFindUnique = vi
-    .fn()
-    .mockImplementation(({ where }: { where: { id?: string; referralCode?: string } }) => {
-      if (where.id === 'user-1') return Promise.resolve({ referredByCode: 'REF-2' });
-      if (where.referralCode === 'REF-2')
-        return Promise.resolve({ id: 'user-2', referredByCode: null });
-      return Promise.resolve(null);
-    });
+  const userFindUnique = vi.fn().mockImplementation(
+    overrides.userFindUniqueImpl ??
+      (({ where }: { where: { id?: string; referralCode?: string } }) => {
+        if (where.id === 'user-1') return Promise.resolve({ referredByCode: 'REF-2' });
+        if (where.referralCode === 'REF-2')
+          return Promise.resolve({ id: 'user-2', referredByCode: null });
+        return Promise.resolve(null);
+      }),
+  );
 
   const prisma = {
     performanceFeeLedger: { findUnique: performanceFeeLedgerFindUnique },
@@ -242,6 +251,63 @@ describe('registerFeeSystem', () => {
       feeBps: 2000,
     });
     expect(referralRewardCreate).toHaveBeenCalledTimes(1);
+    // Section 14 (2026-07-18): netProfitUsd here clamps to the real on-chain
+    // figure ((1.1-1.0)*150 = 15, smaller than the 100 gross), so L1's fixed
+    // 10%-of-profit reward is 1.5, not 10% of the old (smaller) fee-based
+    // computation.
+    expect(referralRewardCreate.mock.calls[0]![0].data).toMatchObject({
+      level: 1,
+      percentBps: 1000,
+      rewardUsd: expect.closeTo(1.5, 8),
+    });
+    expect(ledgerCreate.mock.calls[0]![0].data.userShareUsd).toBeCloseTo(12, 8); // 80% of 15
+    expect(ledgerCreate.mock.calls[0]![0].data.feeUsd).toBeCloseTo(3, 8); // 20% of 15
+  });
+
+  describe('Section 14 (2026-07-18): fixed 80/10/5/5 profit split', () => {
+    it('pays both Level-1 and Level-2 referrers 10%/5% of net profit when a 2-deep chain exists', async () => {
+      const { referralRewardCreate } = await fireEvent(
+        { positionId: 'position-1', status: 'CLOSED', realizedPnlUsd: 100 },
+        {
+          userFindUniqueImpl: ({ where }) => {
+            if (where.id === 'user-1') return Promise.resolve({ referredByCode: 'REF-2' });
+            if (where.referralCode === 'REF-2')
+              return Promise.resolve({ id: 'user-2', referredByCode: 'REF-3' });
+            if (where.referralCode === 'REF-3')
+              return Promise.resolve({ id: 'user-3', referredByCode: null });
+            return Promise.resolve(null);
+          },
+        },
+      );
+      expect(referralRewardCreate).toHaveBeenCalledTimes(2);
+      const [l1, l2] = referralRewardCreate.mock.calls.map((c) => c[0].data);
+      expect(l1).toMatchObject({
+        referrerUserId: 'user-2',
+        level: 1,
+        rewardUsd: expect.closeTo(1.5, 8),
+      }); // 10% of 15
+      expect(l2).toMatchObject({
+        referrerUserId: 'user-3',
+        level: 2,
+        rewardUsd: expect.closeTo(0.75, 8),
+      }); // 5% of 15
+    });
+
+    it('rolls the full 20% pool to the platform (no ReferralReward rows) when the trader has no referrer at all', async () => {
+      const { referralRewardCreate, ledgerCreate, ledgerEntryCreate } = await fireEvent(
+        { positionId: 'position-1', status: 'CLOSED', realizedPnlUsd: 100 },
+        { userFindUniqueImpl: () => Promise.resolve({ referredByCode: null }) },
+      );
+      expect(referralRewardCreate).not.toHaveBeenCalled();
+      // Only PROFIT_CREDIT + OWNER_FEE — no REFERRAL_CREDIT at all.
+      expect(ledgerEntryCreate).toHaveBeenCalledTimes(2);
+      const ledgerTypes = ledgerEntryCreate.mock.calls.map((c) => c[0].data.type).sort();
+      expect(ledgerTypes).toEqual(['OWNER_FEE', 'PROFIT_CREDIT']);
+      const ownerFee = ledgerEntryCreate.mock.calls.find((c) => c[0].data.type === 'OWNER_FEE')![0]
+        .data;
+      expect(ownerFee.amountUsd).toBeCloseTo(3, 8); // the full 20% pool, unclaimed by any referrer
+      expect(ledgerCreate.mock.calls[0]![0].data.userShareUsd).toBeCloseTo(12, 8); // still 80%
+    });
   });
 
   it('writes an immutable LedgerEntry + AuditLog pair for PROFIT_CREDIT, OWNER_FEE, and each REFERRAL_CREDIT', async () => {
