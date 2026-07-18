@@ -1,6 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import type { ExitReason } from '../trading/exitEngine.js';
 
 const updateSchema = z.object({
   takeProfitPercent: z.number().positive().optional(),
@@ -181,7 +180,7 @@ export default async function positionRoutes(fastify: FastifyInstance) {
           position.walletId,
           position.wallet.encryptedSecret,
           fastify.config.ENCRYPTION_KEY,
-          { currentPriceUsd, reason: 'manual_emergency' as ExitReason },
+          { currentPriceUsd, reason: 'manual_emergency' },
         );
         return reply.send(result);
       } catch (err) {

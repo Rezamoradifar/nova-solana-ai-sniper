@@ -7,7 +7,13 @@ export interface ExitCheckInput {
   trailingStopPercent?: number | null;
 }
 
-export type ExitReason = 'take_profit' | 'stop_loss' | 'trailing_stop';
+export type EvaluateExitReason = 'take_profit' | 'stop_loss' | 'trailing_stop';
+
+// 'emergency' is set by EmergencyExitMonitor (a triggered on-chain/liquidity
+// safety signal); 'manual_emergency' by a user-initiated emergency close from
+// the API (see routes/positions.ts). Neither is ever returned by evaluateExit
+// itself — only accepted by closePosition's exit reason.
+export type ExitReason = EvaluateExitReason | 'emergency' | 'manual_emergency';
 
 export type PriceReconciliationSource =
   'jupiter_reverse_quote' | 'native_dex_reserves' | 'forced_after_ceiling';
@@ -19,7 +25,7 @@ export interface PriceReconciliationResult {
 
 export interface ExitDecision {
   shouldExit: boolean;
-  reason?: ExitReason;
+  reason?: EvaluateExitReason;
   newHighWaterMarkUsd: number;
   pnlPercent: number;
 }

@@ -7,6 +7,7 @@ import {
   buildDexScreenerLink,
   formatNewTokenMessage,
   formatAiHighScoreMessage,
+  formatEmergencyExitMessage,
   AI_HIGH_SCORE_THRESHOLD,
   NotificationService,
 } from './notifications.js';
@@ -154,6 +155,73 @@ describe('formatAiHighScoreMessage', () => {
     expect(text).toContain('$RAGE\\_GUY');
     expect(text).not.toContain('Rage_Guy');
     expect(text).not.toContain('$RAGE_GUY');
+  });
+});
+
+describe('formatEmergencyExitMessage', () => {
+  it('renders an urgent header, the human-readable reason label, the detail, and PnL', () => {
+    const text = formatEmergencyExitMessage({
+      symbol: 'RAGEGUY',
+      mint: 'MintABC',
+      dex: 'PUMPFUN',
+      reason: 'liquidity_removed',
+      detail: 'liquidityUsd=120 < 500',
+      pnlPercent: -42.5,
+      pnlUsd: -12.34,
+    });
+    expect(text).toContain('EMERGENCY EXIT');
+    expect(text).toContain('Liquidity Removed');
+    expect(text).toContain('liquidityUsd=120 < 500');
+    expect(text).toContain('-42.50%');
+    expect(text).toContain('-12.34');
+    expect(text).toContain('[Chart]');
+  });
+
+  it('renders every emergency reason with a distinct human label', () => {
+    const reasons = [
+      'liquidity_removed',
+      'trading_disabled',
+      'mint_reenabled',
+      'freeze_reenabled',
+      'critical_rug_score',
+      'dev_wallet_dump',
+    ] as const;
+    const labels = new Set(
+      reasons.map((reason) =>
+        formatEmergencyExitMessage({
+          symbol: 'X',
+          mint: 'MintABC',
+          reason,
+          detail: 'd',
+          pnlPercent: 0,
+        }),
+      ),
+    );
+    expect(labels.size).toBe(reasons.length); // every reason renders distinct text
+  });
+
+  it('escapes a symbol containing "_" so Telegram Markdown parsing never breaks', () => {
+    const text = formatEmergencyExitMessage({
+      symbol: 'RAGE_GUY',
+      mint: 'MintABC',
+      reason: 'dev_wallet_dump',
+      detail: 'd',
+      pnlPercent: 0,
+    });
+    expect(text).toContain('RAGE\\_GUY');
+    expect(text).not.toContain('`RAGE_GUY`');
+  });
+
+  it('omits the pnlUsd segment cleanly when absent', () => {
+    const text = formatEmergencyExitMessage({
+      symbol: 'RAGEGUY',
+      mint: 'MintABC',
+      reason: 'trading_disabled',
+      detail: 'no route',
+      pnlPercent: -10,
+    });
+    expect(text).toContain('PnL: -10.00%');
+    expect(text).not.toContain('($');
   });
 });
 

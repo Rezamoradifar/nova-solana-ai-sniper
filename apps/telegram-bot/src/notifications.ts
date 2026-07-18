@@ -26,7 +26,7 @@ export interface PositionExitNotification {
   symbol: string;
   mint?: string;
   dex?: string;
-  reason: 'take_profit' | 'stop_loss' | 'trailing_stop';
+  reason: 'take_profit' | 'stop_loss' | 'trailing_stop' | 'emergency' | 'manual_emergency';
   pnlPercent: number;
   pnlUsd?: number;
   isPaperTrade?: boolean;
@@ -35,6 +35,27 @@ export interface PositionExitNotification {
   entryPriceUsd?: number;
   athUsd?: number;
   lockedProfitPercent?: number;
+}
+
+/** Sent by emergencyExitMonitor.ts — distinct from (and in addition to) the
+ * standard notifyExit alert every close already gets, since a plain "Reason:
+ * emergency" doesn't say WHY. `reason`/`detail` mirror
+ * EmergencyExitDecision from emergencyExit.ts. */
+export interface EmergencyExitNotification {
+  symbol: string;
+  mint: string;
+  dex?: string;
+  reason:
+    | 'liquidity_removed'
+    | 'trading_disabled'
+    | 'mint_reenabled'
+    | 'freeze_reenabled'
+    | 'critical_rug_score'
+    | 'dev_wallet_dump';
+  detail: string;
+  pnlPercent: number;
+  pnlUsd?: number;
+  isPaperTrade?: boolean;
 }
 
 export interface NewTokenNotification {
@@ -227,6 +248,31 @@ function formatExitMessage(exit: PositionExitNotification): string {
   );
 }
 
+const EMERGENCY_EXIT_REASON_LABELS: Record<EmergencyExitNotification['reason'], string> = {
+  liquidity_removed: 'Liquidity Removed',
+  trading_disabled: 'Trading Disabled (no sell route)',
+  mint_reenabled: 'Mint Authority Re-enabled',
+  freeze_reenabled: 'Freeze Authority Re-enabled',
+  critical_rug_score: 'Critical Rug Score',
+  dev_wallet_dump: 'Major Wallet Dumping Detected',
+};
+
+/** Pure so it's independently unit-tested, same convention as formatExitMessage.
+ * Deliberately more alarming than the standard exit alert (double-emoji, ALL
+ * CAPS header) — this fires only when the position was force-closed against
+ * a real detected rug signal, not a routine TP/SL/trailing-stop. */
+export function formatEmergencyExitMessage(exit: EmergencyExitNotification): string {
+  const paperTag = exit.isPaperTrade ? ' 📝 PAPER' : '';
+  const pnlUsdLine = exit.pnlUsd !== undefined ? ` ($${exit.pnlUsd.toFixed(2)})` : '';
+  const linkLine = `\n${linksLine(exit.mint, exit.dex)}`;
+  return (
+    `🚨🚨 *EMERGENCY EXIT*${paperTag} — \`${escapeMd(exit.symbol)}\`\n\n` +
+    `Reason: *${escapeMd(EMERGENCY_EXIT_REASON_LABELS[exit.reason])}*\n` +
+    `${escapeMd(exit.detail)}\n\n` +
+    `PnL: ${exit.pnlPercent.toFixed(2)}%${pnlUsdLine}${linkLine}`
+  );
+}
+
 /** Pure so it's independently unit-tested, same convention as formatNewTokenMessage. */
 export function formatTradeReportMessage(report: TradeReportData): string {
   const referralLine =
@@ -392,6 +438,10 @@ export class NotificationService {
 
   async notifyExit(exit: PositionExitNotification): Promise<void> {
     await this.sendToActiveUsers(formatExitMessage(exit));
+  }
+
+  async notifyEmergencyExit(exit: EmergencyExitNotification): Promise<void> {
+    await this.sendToActiveUsers(formatEmergencyExitMessage(exit));
   }
 
   async notifyNewToken(token: NewTokenNotification): Promise<void> {

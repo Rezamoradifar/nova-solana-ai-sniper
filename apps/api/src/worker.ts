@@ -33,6 +33,7 @@ import { PositionManager } from './trading/positionManager.js';
 import { AutoTrader } from './trading/autoTrader.js';
 import { TradingSafety, verifySafetySystemReady, type SafetyConfig } from './trading/safety.js';
 import { PriceMonitor } from './trading/priceMonitor.js';
+import { EmergencyExitMonitor } from './trading/emergencyExitMonitor.js';
 import { DepositMonitor } from './wallet/depositMonitor.js';
 import { hasAnyAiProvider, resolveAiProvider, scoreToken } from '@nova/ai';
 import type { Dex, RiskFlags } from '@nova/shared';
@@ -197,6 +198,35 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     dexRegistry,
   });
   priceMonitor.start(app.config.PRICE_CHECK_INTERVAL_MS);
+
+  // Institutional Mode's safety net — force-closes an OPEN institutional-mode
+  // position on a detected liquidity-removal/rug signal, independent of that
+  // position's own TP/SL/trailing-stop. Currently a no-op even when enabled:
+  // institutional mode has no wiring on the position-open side of this
+  // codebase yet (PositionManager's institutionalModeGloballyEnabled always
+  // resolves false below), so no position ever has institutionalModeEnabled
+  // set for this monitor's query to find. Ported and wired now so it's ready
+  // the moment that wiring lands, rather than left as another orphaned
+  // subsystem — see emergencyExitMonitor.ts's own doc comment.
+  let emergencyExitMonitor: EmergencyExitMonitor | undefined;
+  if (app.config.EMERGENCY_EXIT_ENABLED) {
+    emergencyExitMonitor = new EmergencyExitMonitor({
+      prisma: app.prisma,
+      connection,
+      dexScreener,
+      jupiter,
+      riskAnalyzer,
+      positionManager,
+      logger: app.log as never,
+      encryptionKey: app.config.ENCRYPTION_KEY,
+      notifier,
+    });
+    emergencyExitMonitor.start(app.config.EMERGENCY_EXIT_CHECK_INTERVAL_MS);
+  } else {
+    app.log.warn(
+      'EMERGENCY_EXIT_ENABLED not set — no rug-signal safety net for institutional positions (currently moot: institutional mode has no open-side wiring yet either)',
+    );
+  }
 
   // Detects pump.fun -> PumpSwap/Raydium/Orca/Meteora migration via the bonding
   // curve's own `complete` flag (ground truth, not log-guessing — see
@@ -792,6 +822,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     twitterMonitor?.stop();
     telegramTrendMonitor?.stop();
     priceMonitor.stop();
+    emergencyExitMonitor?.stop();
     migrationMonitor.stop();
     depositMonitor?.stop();
     sourceHealthMonitor.stop();

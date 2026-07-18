@@ -142,6 +142,16 @@ export const envSchema = z.object({
   // rarer than a price tick, so a longer default interval than PRICE_CHECK_INTERVAL_MS.
   MIGRATION_CHECK_INTERVAL_MS: z.coerce.number().min(10000).default(30000),
 
+  // EmergencyExitMonitor — Institutional Mode's safety net: force-closes an
+  // OPEN institutional-mode position on a detected liquidity-removal/rug
+  // signal, independent of that position's own TP/SL/trailing-stop (see
+  // emergencyExitMonitor.ts). Defaults off, same convention as the staged
+  // profitability flags above. On-chain/liquidity checks are slower and
+  // heavier than a plain price tick, hence its own, longer interval rather
+  // than reusing PRICE_CHECK_INTERVAL_MS.
+  EMERGENCY_EXIT_ENABLED: booleanFlag(false),
+  EMERGENCY_EXIT_CHECK_INTERVAL_MS: z.coerce.number().min(15000).default(45000),
+
   // DepositMonitor — polls every active wallet's live SOL balance and records
   // an increase as a DEPOSIT ledger/audit event (see
   // packages/shared/src/wallet/balanceLedger.ts). Defaults on: deposits are

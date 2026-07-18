@@ -164,20 +164,32 @@ export class RiskAnalyzer {
     private readonly dexRegistry?: DexRegistry,
   ) {}
 
-  async analyze(input: RiskAnalysisInput): Promise<RiskFlags> {
+  /**
+   * bypassCache, if true, skips both the cache read and write — for a caller
+   * that specifically needs a fresh on-chain read every call (e.g.
+   * EmergencyExitMonitor, which would otherwise see whatever an unrelated
+   * AutoBuy/Discovery call cached for this same mint up to 60s ago).
+   * Optional and undefined by default so every existing single-arg caller
+   * keeps its exact current cached behavior.
+   */
+  async analyze(input: RiskAnalysisInput, opts?: { bypassCache?: boolean }): Promise<RiskFlags> {
     const cacheKey = `${input.mint}|${input.dex ?? ''}|${input.poolAddress ?? ''}`;
-    const cached = this.resultCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) return cached.result;
+    if (!opts?.bypassCache) {
+      const cached = this.resultCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) return cached.result;
+    }
 
     const result = await this.analyzeUncached(input);
 
-    if (this.resultCache.size >= RISK_RESULT_CACHE_SWEEP_THRESHOLD) {
-      const now = Date.now();
-      for (const [key, entry] of this.resultCache) {
-        if (entry.expiresAt <= now) this.resultCache.delete(key);
+    if (!opts?.bypassCache) {
+      if (this.resultCache.size >= RISK_RESULT_CACHE_SWEEP_THRESHOLD) {
+        const now = Date.now();
+        for (const [key, entry] of this.resultCache) {
+          if (entry.expiresAt <= now) this.resultCache.delete(key);
+        }
       }
+      this.resultCache.set(cacheKey, { result, expiresAt: Date.now() + RISK_RESULT_TTL_MS });
     }
-    this.resultCache.set(cacheKey, { result, expiresAt: Date.now() + RISK_RESULT_TTL_MS });
 
     return result;
   }
