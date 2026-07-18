@@ -19,6 +19,7 @@ export const apiEnvSchema = envSchema.pick({
   DYNAMIC_SIZING_ENABLED: true,
   PARTIAL_EXITS_ENABLED: true,
   BEST_ROUTE_EXECUTION_ENABLED: true,
+  OPPORTUNITY_SCORE_GATE_ENABLED: true,
   JWT_SECRET: true,
   ENCRYPTION_KEY: true,
   SOLANA_RPC_URL: true,

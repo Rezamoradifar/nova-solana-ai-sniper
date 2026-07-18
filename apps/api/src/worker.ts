@@ -37,6 +37,7 @@ import { EmergencyExitMonitor } from './trading/emergencyExitMonitor.js';
 import { DepositMonitor } from './wallet/depositMonitor.js';
 import { hasAnyAiProvider, resolveAiProvider, scoreToken } from '@nova/ai';
 import type { Dex, RiskFlags } from '@nova/shared';
+import { calculateOpportunityScore, getOrCreateBusinessSettings } from '@nova/shared';
 import { createBot, NotificationService, AI_HIGH_SCORE_THRESHOLD } from '@nova/telegram-bot';
 import { eventBus } from './lib/eventBus.js';
 import { metrics } from './lib/metrics.js';
@@ -184,6 +185,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     logger: app.log as never,
     encryptionKey: app.config.ENCRYPTION_KEY,
     entryFilterGloballyEnabled: app.config.ENTRY_FILTER_ENABLED,
+    opportunityScoreGateGloballyEnabled: app.config.OPPORTUNITY_SCORE_GATE_ENABLED,
   });
 
   // Drives TP/SL/trailing-stop: without this loop those fields are just stored
@@ -429,6 +431,36 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       aiScoringEndAt?: number;
     },
   ): Promise<{ boughtCount: number }> {
+    // Final Opportunity Score (Section 7, 2026-07-18): computed and persisted
+    // for EVERY token that reaches this point, before the notify gate or any
+    // per-user SnipeConfig is evaluated — so a token that's rejected by every
+    // config (never becomes a Position) still leaves a durable record of why
+    // it scored what it did. aiScore is only included when it's a real AI
+    // verdict (usedRealAi), not the ruleScore fallback used when no provider
+    // is configured — matching aiScoreValue's own fallback semantics.
+    const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
+    const businessSettings = await getOrCreateBusinessSettings(app.prisma);
+    const opportunityScore = calculateOpportunityScore(
+      { safetyScore: ruleScore, aiScore: usedRealAi ? aiScoreValue : undefined },
+      businessSettings,
+    );
+    await app.prisma.opportunityScoreLog.create({
+      data: {
+        tokenId,
+        mint,
+        safetyScore: opportunityScore.breakdown.safetyScore,
+        momentumScore: opportunityScore.breakdown.momentumScore,
+        walletScore: opportunityScore.breakdown.walletScore,
+        socialScore: opportunityScore.breakdown.socialScore,
+        aiScore: opportunityScore.breakdown.aiScore,
+        finalScore: opportunityScore.finalScore,
+        // Prisma's Json input type wants a plain index-signature object, not
+        // the named OpportunityScoreWeights interface — round-tripping
+        // through JSON is the simplest way to satisfy that structurally.
+        weightsSnapshot: JSON.parse(JSON.stringify(opportunityScore.weightsUsed)),
+      },
+    });
+
     const notifyGate = evaluateNotifyGate(
       {
         liquidityUsd: riskFlags.liquidityUsd,
@@ -493,6 +525,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       riskFlags,
       aiScoreValue,
       pipelineTimestamps,
+      opportunityScore.finalScore,
     );
     return { boughtCount: results.filter((r) => r.bought).length };
   }
