@@ -112,6 +112,27 @@ describe('AutoTrader — trailing-stop preset wiring (optional exit strategy)', 
   });
 });
 
+describe('AutoTrader — riskScoreAtEntry persistence (production bug fix 2026-07-18)', () => {
+  it('passes riskScoreAtEntry as min(ruleScore, aiScore) — the same value that gated the buy', async () => {
+    const { trader, openPosition } = setup(fakeConfig());
+
+    // RISK_FLAGS -> ruleScore 90 (top10HolderPercent=40 is in the >30 band, -10);
+    // aiScore passed here is 80, so min(90, 80) = 80.
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ riskScoreAtEntry: 80 }));
+  });
+
+  it('takes the rule score, not the AI score, when the rule score is the lower of the two', async () => {
+    const { trader, openPosition } = setup(fakeConfig());
+
+    // aiScore=95 > ruleScore=90 this time -> min(90, 95) = 90.
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 95);
+
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ riskScoreAtEntry: 90 }));
+  });
+});
+
 describe('AutoTrader — Smart Entry Filter (opt-in, additive gate)', () => {
   it('never blocks when the global flag is off, even if a config has opted in and would otherwise fail', async () => {
     const { trader, openPosition } = setup(
@@ -304,5 +325,40 @@ describe('AutoTrader — root-cause investigation 2026-07-12: an accepted token 
       expect.anything(),
       expect.stringMatching(/^BUY CANCELLED\nReason:\nno active SnipeConfig/),
     );
+  });
+});
+
+describe('AutoTrader — per-config wallet selection (SnipeConfig.walletId)', () => {
+  const wallet1 = { id: 'wallet-1', publicKey: 'Pubkey1', encryptedSecret: 'enc1' };
+  const wallet2 = { id: 'wallet-2', publicKey: 'Pubkey2', encryptedSecret: 'enc2' };
+
+  it('old/existing configs (walletId null) buy from the first active wallet — unchanged behavior', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ walletId: null, user: { wallets: [wallet1, wallet2] } }),
+    );
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+    expect(openPosition).toHaveBeenCalledWith(
+      expect.objectContaining({ walletId: 'wallet-1', walletPublicKey: 'Pubkey1' }),
+    );
+  });
+
+  it('a config pinned to a specific still-active wallet buys from that wallet, not the first one', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ walletId: 'wallet-2', user: { wallets: [wallet1, wallet2] } }),
+    );
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+    expect(openPosition).toHaveBeenCalledWith(
+      expect.objectContaining({ walletId: 'wallet-2', walletPublicKey: 'Pubkey2' }),
+    );
+  });
+
+  it('falls back to the first active wallet when the pinned wallet is no longer active', async () => {
+    const { trader, openPosition } = setup(
+      // wallet-2 was deactivated — the `user.wallets` include already filters
+      // to isActive:true, so a deactivated pinned wallet simply isn't in this list.
+      fakeConfig({ walletId: 'wallet-2', user: { wallets: [wallet1] } }),
+    );
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ walletId: 'wallet-1' }));
   });
 });

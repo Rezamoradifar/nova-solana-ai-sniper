@@ -221,6 +221,12 @@ export class AutoTrader {
           slippageBps: config.maxSlippageBps,
           trailingStopPreset: preset,
           aiScore,
+          // Production bug fix (2026-07-18): this was never passed, leaving
+          // riskScoreAtEntry NULL on every auto-bought position (44 of 45 in
+          // production at the time this was found) — the one field meant to
+          // let a past accept decision be reconstructed later. Same value
+          // already used for the score gate above.
+          riskScoreAtEntry: Math.min(ruleScore, aiScore),
           ...exitParams,
           tokenDetectedAt: pipelineTimestamps?.tokenDetectedAt,
           aiScoringStartAt: pipelineTimestamps?.aiScoringStartAt,
