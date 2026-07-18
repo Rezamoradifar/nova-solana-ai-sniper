@@ -195,6 +195,15 @@ model Position {
   amountToken         Float
   amountSolInvested   Float
   takeProfitPercent   Float?
+  // Hard Loss Ceiling (2026-07-18): stopLossPercent above is always the
+  // *effective* value actually enforced — never null, never looser than
+  // DEFAULT_MAX_LOSS_PERCENT (see exitEngine.ts's resolveEffectiveStopLossPercent).
+  // This flag distinguishes "the 20% system ceiling protected you" (true — no
+  // value was set, or the configured/preset value was looser than 20%) from
+  // "your own tighter setting fired" (false) — needed for monitoring how often
+  // users actually rely on the default vs. their own choice, since both cases
+  // collapse to the same stored percent otherwise.
+  stopLossIsSystemDefault Boolean @default(false)
   stopLossPercent     Float?
   trailingStopPercent Float?
   // Frozen at open time, same convention as the three fields above — a position's
