@@ -4,6 +4,7 @@ import {
   isPlausiblePriceUpdate,
   reconcilePriceOutlier,
   resolveEffectiveStopLossPercent,
+  evaluateHardLossCeiling,
   DEFAULT_MAX_LOSS_PERCENT,
 } from './exitEngine.js';
 
@@ -215,5 +216,41 @@ describe('resolveEffectiveStopLossPercent', () => {
       effectiveStopLossPercent: 20,
       isSystemDefault: false,
     });
+  });
+});
+
+describe('evaluateHardLossCeiling', () => {
+  it('breaches when the candidate price implies a loss beyond the effective stop-loss percent', () => {
+    const result = evaluateHardLossCeiling(1, 0.5, 20); // -50% vs a 20% ceiling
+    expect(result.breached).toBe(true);
+    expect(result.pnlPercent).toBeCloseTo(-50);
+  });
+
+  it('does not breach when the loss is within the ceiling', () => {
+    const result = evaluateHardLossCeiling(1, 0.9, 20); // -10% vs a 20% ceiling
+    expect(result.breached).toBe(false);
+    expect(result.pnlPercent).toBeCloseTo(-10);
+  });
+
+  it('breaches exactly at the boundary (uses <=, so exactly -20% does breach)', () => {
+    expect(evaluateHardLossCeiling(100, 80, 20).breached).toBe(true); // exactly -20%
+    expect(evaluateHardLossCeiling(100, 81, 20).breached).toBe(false); // -19%, just inside
+  });
+
+  it('never breaches on a gain', () => {
+    const result = evaluateHardLossCeiling(1, 2, 20);
+    expect(result.breached).toBe(false);
+    expect(result.pnlPercent).toBeCloseTo(100);
+  });
+
+  it('never breaches from an unknown (zero/negative) entry price', () => {
+    expect(evaluateHardLossCeiling(0, 0.000002, 20)).toEqual({ breached: false, pnlPercent: 0 });
+    expect(evaluateHardLossCeiling(-1, 0.000002, 20)).toEqual({ breached: false, pnlPercent: 0 });
+  });
+
+  it('mirrors the real ANSEMCOIN incident: entry $0.0001915, crashed to $0.000002, 20% ceiling', () => {
+    const result = evaluateHardLossCeiling(0.0001915, 0.000002, 20);
+    expect(result.breached).toBe(true);
+    expect(result.pnlPercent).toBeLessThan(-98);
   });
 });

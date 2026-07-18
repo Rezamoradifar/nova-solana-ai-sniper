@@ -9,8 +9,11 @@ import type { PositionManager } from './positionManager.js';
 import {
   isPlausiblePriceUpdate,
   reconcilePriceOutlier,
+  evaluateHardLossCeiling,
   OUTLIER_RECONCILE_AFTER_CONSECUTIVE_REJECTIONS,
   OUTLIER_FORCE_ACCEPT_AFTER_MS,
+  DEFAULT_MAX_LOSS_PERCENT,
+  type PriceReconciliationResult,
 } from './exitEngine.js';
 
 export interface PriceMonitorDeps {
@@ -80,6 +83,51 @@ export class PriceMonitor {
           // isPlausiblePriceUpdate doc comment for the live-verified incident.
           const referencePriceUsd = position.highWaterMarkUsd ?? position.entryPriceUsd;
           if (!isPlausiblePriceUpdate(referencePriceUsd, currentPriceUsd)) {
+            // Hard Loss Ceiling (2026-07-18): a rejected tick doesn't wait for
+            // the normal 3-rejection/10-minute reconciliation cycle if it
+            // already implies a loss beyond this position's ceiling — that
+            // wait is exactly what let a real position (ANSEMCOIN) sit
+            // unprotected for hours before its stop-loss could even see a
+            // real price. Cheap arithmetic first; only pays for a
+            // corroboration probe when the answer is yes.
+            const hardLoss = evaluateHardLossCeiling(
+              position.entryPriceUsd,
+              currentPriceUsd,
+              position.stopLossPercent ?? DEFAULT_MAX_LOSS_PERCENT, // defensive fallback — Step 3 means this is always populated
+            );
+            if (hardLoss.breached) {
+              const reconciliation = await this.probeAndReconcile(
+                position.token,
+                currentPriceUsd,
+                false,
+              );
+              if (reconciliation.accepted) {
+                this.outlierState.delete(position.id);
+                this.deps.logger.error(
+                  {
+                    positionId: position.id,
+                    mint: position.token.mint,
+                    entryPriceUsd: position.entryPriceUsd,
+                    currentPriceUsd,
+                    pnlPercent: hardLoss.pnlPercent,
+                    effectiveStopLossPercent: position.stopLossPercent,
+                    isSystemDefault: position.stopLossIsSystemDefault,
+                    source: reconciliation.source,
+                  },
+                  'HARD_LOSS_CEILING_TRIGGERED — forcing immediate exit ahead of normal outlier reconciliation',
+                );
+                await this.deps.positionManager.closePosition(
+                  position.id,
+                  position.walletId,
+                  position.wallet.encryptedSecret,
+                  this.deps.encryptionKey,
+                  { currentPriceUsd, reason: 'stop_loss' },
+                );
+                continue;
+              }
+              // Not corroborated — fall through to the routine path below unchanged.
+            }
+
             const accepted = await this.handleOutlierRejection(
               position.id,
               position.token,
@@ -164,18 +212,8 @@ export class PriceMonitor {
       return false;
     }
 
-    const [jupiterReverseQuotePriceUsd, nativeDexReservesPriceUsd] = await Promise.all([
-      this.probeJupiterReversePrice(token),
-      this.probeNativeDexPrice(token),
-    ]);
-
     const forcedAfterCeiling = elapsedMs >= OUTLIER_FORCE_ACCEPT_AFTER_MS;
-    const reconciliation = reconcilePriceOutlier({
-      candidatePriceUsd: currentPriceUsd,
-      jupiterReverseQuotePriceUsd,
-      nativeDexReservesPriceUsd,
-      forcedAfterCeiling,
-    });
+    const reconciliation = await this.probeAndReconcile(token, currentPriceUsd, forcedAfterCeiling);
 
     if (!reconciliation.accepted) {
       this.deps.logger.warn(
@@ -185,8 +223,6 @@ export class PriceMonitor {
           referencePriceUsd,
           currentPriceUsd,
           consecutiveRejections: state.count,
-          jupiterReverseQuotePriceUsd,
-          nativeDexReservesPriceUsd,
         },
         'price tick rejected as implausible outlier — reconciliation attempted but no independent source corroborated it',
       );
@@ -211,6 +247,31 @@ export class PriceMonitor {
         : `PRICE OUTLIER RECONCILED — accepting tick, corroborated by ${reconciliation.source}`,
     );
     return true;
+  }
+
+  /**
+   * Runs both independent price-corroboration probes and hands the result to
+   * reconcilePriceOutlier — shared by handleOutlierRejection's normal
+   * 3-rejection/10-minute cycle and the Hard Loss Ceiling fast path (2026-07-18),
+   * which calls this immediately on a single rejection instead of waiting.
+   * Extracted so the two call sites can't drift apart on how corroboration
+   * actually works.
+   */
+  private async probeAndReconcile(
+    token: Token,
+    candidatePriceUsd: number,
+    forcedAfterCeiling: boolean,
+  ): Promise<PriceReconciliationResult> {
+    const [jupiterReverseQuotePriceUsd, nativeDexReservesPriceUsd] = await Promise.all([
+      this.probeJupiterReversePrice(token),
+      this.probeNativeDexPrice(token),
+    ]);
+    return reconcilePriceOutlier({
+      candidatePriceUsd,
+      jupiterReverseQuotePriceUsd,
+      nativeDexReservesPriceUsd,
+      forcedAfterCeiling,
+    });
   }
 
   /**

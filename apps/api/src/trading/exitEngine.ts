@@ -162,6 +162,29 @@ export function resolveEffectiveStopLossPercent(
   return { effectiveStopLossPercent: rawStopLossPercent, isSystemDefault: false };
 }
 
+export interface HardLossCeilingResult {
+  breached: boolean;
+  pnlPercent: number;
+}
+
+/**
+ * The fast-path check PriceMonitor runs on a tick that's already failed
+ * isPlausiblePriceUpdate, before waiting for the normal 3-rejection/10-minute
+ * reconciliation cycle — a rejected tick that would already blow through this
+ * position's effective stop-loss ceiling gets corroborated and force-closed
+ * immediately instead. Same zero/negative-entry-price guard as evaluateExit
+ * (an unknown entry price can never itself trigger an exit).
+ */
+export function evaluateHardLossCeiling(
+  entryPriceUsd: number,
+  candidatePriceUsd: number,
+  effectiveStopLossPercent: number,
+): HardLossCeilingResult {
+  if (entryPriceUsd <= 0) return { breached: false, pnlPercent: 0 };
+  const pnlPercent = ((candidatePriceUsd - entryPriceUsd) / entryPriceUsd) * 100;
+  return { breached: pnlPercent <= -Math.abs(effectiveStopLossPercent), pnlPercent };
+}
+
 /**
  * Pure function so TP/SL/trailing-stop logic can be exhaustively unit tested
  * without touching the DB or an RPC connection. Called on every price tick.
