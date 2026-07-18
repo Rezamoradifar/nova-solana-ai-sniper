@@ -1,5 +1,9 @@
 import { InlineKeyboard } from 'grammy';
-import { TRAILING_STOP_PRESETS, TRAILING_STOP_PRESET_LABELS } from '@nova/shared';
+import {
+  TRAILING_STOP_PRESETS,
+  TRAILING_STOP_PRESET_LABELS,
+  DEFAULT_MAX_LOSS_PERCENT,
+} from '@nova/shared';
 import { withNav } from '../keyboards.js';
 import { sol } from '../format.js';
 import type { PendingAction } from '../pending.js';
@@ -43,6 +47,21 @@ const FIELD_META: Record<
       return Number.isFinite(n) && n >= 0 && n <= 100 ? n : undefined;
     },
   },
+  // Hard Loss Ceiling (2026-07-18): a user may set a tighter stop loss than
+  // DEFAULT_MAX_LOSS_PERCENT, but never a looser one — PositionManager
+  // enforces this again at buy time regardless (see exitEngine.ts's
+  // resolveEffectiveStopLossPercent), so a value entered here that exceeds
+  // the ceiling would silently diverge from what actually protects the
+  // position; capping it here too keeps what the user sees consistent with
+  // what's actually enforced.
+  stopLossPercent: {
+    label: 'Stop loss',
+    prompt: `Send the new stop-loss percentage as a number (e.g. \`15\` for -15%). Never honored looser than ${DEFAULT_MAX_LOSS_PERCENT}% — a larger value is capped to ${DEFAULT_MAX_LOSS_PERCENT}.`,
+    parse: (raw) => {
+      const n = Number(raw);
+      return Number.isFinite(n) && n > 0 ? Math.min(n, DEFAULT_MAX_LOSS_PERCENT) : undefined;
+    },
+  },
 };
 
 export async function renderSettings(deps: ScreenDeps, user: ScreenUser): Promise<ScreenResult> {
@@ -62,6 +81,19 @@ export async function renderSettings(deps: ScreenDeps, user: ScreenUser): Promis
     ? TRAILING_STOP_PRESET_LABELS[config.trailingStopPreset]
     : 'Custom (manual TP/SL/trailing on each position)';
 
+  // A SnipeConfig with no stopLossPercent set (or one looser than the
+  // ceiling) still gets DEFAULT_MAX_LOSS_PERCENT enforced at buy time — see
+  // exitEngine.ts's resolveEffectiveStopLossPercent — this just reflects that
+  // truthfully rather than showing a blank/unset field.
+  const effectiveStopLossPercent = Math.min(
+    config.stopLossPercent ?? DEFAULT_MAX_LOSS_PERCENT,
+    DEFAULT_MAX_LOSS_PERCENT,
+  );
+  const stopLossLine =
+    config.stopLossPercent != null && config.stopLossPercent <= DEFAULT_MAX_LOSS_PERCENT
+      ? `🛑 Stop loss: *${effectiveStopLossPercent}%*`
+      : `🛑 Stop loss: *${effectiveStopLossPercent}%* _(system default — never looser than ${DEFAULT_MAX_LOSS_PERCENT}%)_`;
+
   const text =
     `⚙️ *Settings*\n\n` +
     `Editing your most recent snipe config:\n\n` +
@@ -69,6 +101,7 @@ export async function renderSettings(deps: ScreenDeps, user: ScreenUser): Promis
     `📉 Max slippage: *${config.maxSlippageBps} bps*\n` +
     `💧 Min liquidity: *$${config.minLiquidityUsd.toFixed(0)}*\n` +
     `🤖 Min AI score: *${config.minAiScore}*\n` +
+    `${stopLossLine}\n` +
     `📐 Exit strategy: *${presetLabel}*` +
     (isKnownPreset(config.trailingStopPreset)
       ? '\n_No fixed take-profit — trailing stop only, distance adapts to liquidity/holder concentration._'
@@ -77,6 +110,8 @@ export async function renderSettings(deps: ScreenDeps, user: ScreenUser): Promis
   const keyboard = new InlineKeyboard()
     .text('✏️ Buy amount', `a:settings:edit:buyAmountSol:${config.id}`)
     .text('✏️ Slippage', `a:settings:edit:maxSlippageBps:${config.id}`)
+    .row()
+    .text('✏️ Stop loss', `a:settings:edit:stopLossPercent:${config.id}`)
     .row()
     .text('✏️ Min liquidity', `a:settings:edit:minLiquidityUsd:${config.id}`)
     .text('✏️ Min AI score', `a:settings:edit:minAiScore:${config.id}`)

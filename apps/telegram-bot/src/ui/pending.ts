@@ -17,7 +17,8 @@ export type PendingAction =
   | {
       type: 'settings_edit';
       snipeConfigId: string;
-      field: 'buyAmountSol' | 'maxSlippageBps' | 'minLiquidityUsd' | 'minAiScore';
+      field:
+        'buyAmountSol' | 'maxSlippageBps' | 'minLiquidityUsd' | 'minAiScore' | 'stopLossPercent';
       returnTo: ScreenId;
     };
 
