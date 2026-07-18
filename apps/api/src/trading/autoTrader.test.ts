@@ -32,12 +32,17 @@ function fakeConfig(overrides: Partial<Record<string, unknown>> = {}) {
     minHolderCount: 0,
     minRecentVolumeUsd: 0,
     maxTop10HolderPercent: 100,
+    useOpportunityScoreGate: false,
     user: { wallets: [{ id: 'wallet-1', publicKey: 'Pubkey1', encryptedSecret: 'enc' }] },
     ...overrides,
   };
 }
 
-function setup(config: ReturnType<typeof fakeConfig>, entryFilterGloballyEnabled = false) {
+function setup(
+  config: ReturnType<typeof fakeConfig>,
+  entryFilterGloballyEnabled = false,
+  opportunityScoreGateGloballyEnabled = false,
+) {
   const openPosition = vi.fn().mockResolvedValue({ trade: {}, position: {} });
   const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([config]) } } as never;
   const positionManager = { openPosition } as never;
@@ -48,6 +53,7 @@ function setup(config: ReturnType<typeof fakeConfig>, entryFilterGloballyEnabled
     logger: fakeLogger(),
     encryptionKey: 'key',
     entryFilterGloballyEnabled,
+    opportunityScoreGateGloballyEnabled,
   });
   return { trader, openPosition };
 }
@@ -172,6 +178,99 @@ describe('AutoTrader — Smart Entry Filter (opt-in, additive gate)', () => {
     const { trader, openPosition } = setup(fakeConfig({ entryFilterEnabled: true }), true);
 
     await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(openPosition).toHaveBeenCalled();
+  });
+});
+
+describe('AutoTrader — Final Opportunity Score gate (Section 7, opt-in, additive)', () => {
+  // ruleScore for RISK_FLAGS is 90 (top10HolderPercent 40 > 30 => -10). aiScore
+  // 50 makes min(ruleScore, aiScore) = 50, which fails minAiScore=70; a
+  // finalOpportunityScore of 85 passes it — the two gates disagree on purpose,
+  // so a passing test proves which one actually decided the outcome.
+  it('never uses the opportunity score when the global flag is off, even if the config opted in', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ useOpportunityScoreGate: true, minAiScore: 70 }),
+      false,
+      false,
+    );
+
+    const results = await trader.evaluateAndMaybeBuy(
+      'MintABC',
+      'token-1',
+      RISK_FLAGS,
+      50,
+      undefined,
+      85,
+    );
+
+    expect(openPosition).not.toHaveBeenCalled();
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'score_below_threshold' }]);
+  });
+
+  it('never uses the opportunity score when the config itself has not opted in, even if the global flag is on', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ useOpportunityScoreGate: false, minAiScore: 70 }),
+      false,
+      true,
+    );
+
+    const results = await trader.evaluateAndMaybeBuy(
+      'MintABC',
+      'token-1',
+      RISK_FLAGS,
+      50,
+      undefined,
+      85,
+    );
+
+    expect(openPosition).not.toHaveBeenCalled();
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'score_below_threshold' }]);
+  });
+
+  it('uses the opportunity score instead of min(ruleScore, aiScore) once both are opted in', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ useOpportunityScoreGate: true, minAiScore: 70 }),
+      true,
+      true,
+    );
+
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 50, undefined, 85);
+
+    expect(openPosition).toHaveBeenCalled();
+  });
+
+  it('can also block a buy the old gate would have allowed, proving the switch runs both ways', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ useOpportunityScoreGate: true, minAiScore: 70 }),
+      true,
+      true,
+    );
+
+    // min(ruleScore=90, aiScore=95) = 90, which would pass minAiScore=70 —
+    // but a low finalOpportunityScore still blocks the buy.
+    const results = await trader.evaluateAndMaybeBuy(
+      'MintABC',
+      'token-1',
+      RISK_FLAGS,
+      95,
+      undefined,
+      50,
+    );
+
+    expect(openPosition).not.toHaveBeenCalled();
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'score_below_threshold' }]);
+  });
+
+  it('falls back to min(ruleScore, aiScore) when no opportunity score was computed upstream, even with both flags on', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ useOpportunityScoreGate: true, minAiScore: 70 }),
+      true,
+      true,
+    );
+
+    // finalOpportunityScore omitted entirely (undefined) — min(90, 95) = 90 passes.
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 95);
 
     expect(openPosition).toHaveBeenCalled();
   });

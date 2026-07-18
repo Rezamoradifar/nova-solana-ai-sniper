@@ -57,6 +57,11 @@ export interface AutoTraderDeps {
    * still must ALSO be true; both must opt in. Defaults to false (unchanged
    * behavior) so existing deployments need an explicit env change to activate. */
   entryFilterGloballyEnabled?: boolean;
+  /** Master switch (OPPORTUNITY_SCORE_GATE_ENABLED) — a config's own
+   * useOpportunityScoreGate still must ALSO be true; both must opt in.
+   * Defaults to false, reproducing today's exact Math.min(ruleScore, aiScore)
+   * gate for every existing config. */
+  opportunityScoreGateGloballyEnabled?: boolean;
 }
 
 /**
@@ -85,6 +90,14 @@ export class AutoTrader {
       aiScoringStartAt?: number;
       aiScoringEndAt?: number;
     },
+    /**
+     * Final Opportunity Score (Section 7, 2026-07-18): the weighted composite
+     * computed once per token upstream in worker.ts (persisted to
+     * OpportunityScoreLog regardless of what happens here). Optional so every
+     * existing/test caller that omits it is unaffected; only used below when a
+     * config has opted into useOpportunityScoreGate.
+     */
+    finalOpportunityScore?: number,
   ) {
     const configs = await this.deps.prisma.snipeConfig.findMany({
       where: { isActive: true, autoBuyOnLaunch: true },
@@ -127,11 +140,27 @@ export class AutoTrader {
         results.push({ userId: config.userId, bought: false, reason: 'liquidity_below_threshold' });
         continue;
       }
-      if (Math.min(ruleScore, aiScore) < config.minAiScore) {
+      // Final Opportunity Score (Section 7, 2026-07-18): opt-in, double-gated
+      // exactly like the Smart Entry Filter above — both the global
+      // OPPORTUNITY_SCORE_GATE_ENABLED flag AND this config's own
+      // useOpportunityScoreGate must be true, and a score must have actually
+      // been computed upstream. Any config that hasn't opted in (every
+      // existing config, which defaults to false) gets today's exact
+      // Math.min(ruleScore, aiScore) gate, unchanged.
+      const useOpportunityScoreGate =
+        Boolean(this.deps.opportunityScoreGateGloballyEnabled) &&
+        config.useOpportunityScoreGate &&
+        finalOpportunityScore !== undefined;
+      const effectiveScore = useOpportunityScoreGate
+        ? finalOpportunityScore
+        : Math.min(ruleScore, aiScore);
+      if (effectiveScore < config.minAiScore) {
         logBuyCancelled(this.deps.logger, {
           mint,
           userId: config.userId,
-          reason: `score_below_threshold: min(ruleScore=${ruleScore}, aiScore=${aiScore})=${Math.min(ruleScore, aiScore)} < config.minAiScore=${config.minAiScore}`,
+          reason: useOpportunityScoreGate
+            ? `score_below_threshold: opportunityScore=${effectiveScore} < config.minAiScore=${config.minAiScore}`
+            : `score_below_threshold: min(ruleScore=${ruleScore}, aiScore=${aiScore})=${effectiveScore} < config.minAiScore=${config.minAiScore}`,
           location: 'apps/api/src/trading/autoTrader.ts:evaluateAndMaybeBuy (score gate)',
         });
         results.push({ userId: config.userId, bought: false, reason: 'score_below_threshold' });
