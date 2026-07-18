@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateExit, isPlausiblePriceUpdate } from './exitEngine.js';
+import { evaluateExit, isPlausiblePriceUpdate, reconcilePriceOutlier } from './exitEngine.js';
 
 describe('evaluateExit', () => {
   it('triggers take profit when pnl exceeds threshold', () => {
@@ -117,5 +117,59 @@ describe('isPlausiblePriceUpdate', () => {
 
   it('accepts anything when there is no reference price yet (nothing to compare against)', () => {
     expect(isPlausiblePriceUpdate(0, 12345)).toBe(true);
+  });
+});
+
+describe('reconcilePriceOutlier', () => {
+  it('accepts when corroborated by a jupiter reverse quote within tolerance', () => {
+    const result = reconcilePriceOutlier({
+      candidatePriceUsd: 0.02151,
+      jupiterReverseQuotePriceUsd: 0.019,
+    });
+    expect(result).toEqual({ accepted: true, source: 'jupiter_reverse_quote' });
+  });
+
+  it('accepts when corroborated by native DEX reserves within tolerance', () => {
+    const result = reconcilePriceOutlier({
+      candidatePriceUsd: 0.02151,
+      nativeDexReservesPriceUsd: 0.05,
+    });
+    expect(result).toEqual({ accepted: true, source: 'native_dex_reserves' });
+  });
+
+  it('prefers jupiter corroboration when both sources agree', () => {
+    const result = reconcilePriceOutlier({
+      candidatePriceUsd: 1,
+      jupiterReverseQuotePriceUsd: 1.1,
+      nativeDexReservesPriceUsd: 0.9,
+    });
+    expect(result.source).toBe('jupiter_reverse_quote');
+  });
+
+  it('rejects when neither source is available', () => {
+    const result = reconcilePriceOutlier({ candidatePriceUsd: 0.02151 });
+    expect(result).toEqual({ accepted: false });
+  });
+
+  it('rejects when both sources disagree with the candidate outside tolerance', () => {
+    const result = reconcilePriceOutlier({
+      candidatePriceUsd: 0.02151,
+      jupiterReverseQuotePriceUsd: 0.000004079,
+      nativeDexReservesPriceUsd: 0.000004079,
+    });
+    expect(result).toEqual({ accepted: false });
+  });
+
+  it('force-accepts after the ceiling even with no corroborating source', () => {
+    const result = reconcilePriceOutlier({
+      candidatePriceUsd: 0.02151,
+      forcedAfterCeiling: true,
+    });
+    expect(result).toEqual({ accepted: true, source: 'forced_after_ceiling' });
+  });
+
+  it('never force-accepts unless the caller explicitly says the ceiling was hit', () => {
+    const result = reconcilePriceOutlier({ candidatePriceUsd: 0.02151, forcedAfterCeiling: false });
+    expect(result.accepted).toBe(false);
   });
 });

@@ -193,6 +193,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     positionManager,
     logger: app.log as never,
     encryptionKey: app.config.ENCRYPTION_KEY,
+    jupiter,
+    dexRegistry,
   });
   priceMonitor.start(app.config.PRICE_CHECK_INTERVAL_MS);
 
