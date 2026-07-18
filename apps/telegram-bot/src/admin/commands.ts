@@ -243,7 +243,9 @@ export function registerAdminCommands(
       `📊 *Business Report*\n\n` +
         `⚙️ *Settings*\nPerformance fee: ${(settings.performanceFeeBps / 100).toFixed(1)}%\n` +
         `Referral program: ${settings.referralProgramEnabled ? '✅ enabled' : '⏸ disabled'}\n` +
-        `Max referral depth: ${settings.maxReferralDepth}\n${levelLines}\n\n` +
+        `Max referral depth: ${settings.maxReferralDepth}\n${levelLines}\n` +
+        `_ℹ️ Referral/profit split is fixed at 80/10/5/5 by policy (Section 14) — ` +
+        `these settings are for reference only and no longer drive the actual split._\n\n` +
         `💰 *Revenue (Performance Fees)*\n` +
         `Today: $${(dailyAgg._sum.feeUsd ?? 0).toFixed(2)}\n` +
         `This week: $${(weeklyAgg._sum.feeUsd ?? 0).toFixed(2)}\n` +

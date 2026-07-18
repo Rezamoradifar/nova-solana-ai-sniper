@@ -29,11 +29,15 @@ export async function renderFeePolicyConsent(
     ? settings.referralLevels.filter((l) => l.enabled)
     : [];
 
+  // Section 14 (2026-07-18): referral rewards are now a fixed percentage of
+  // net profit directly (registerFeeSystem.ts's calculateFixedProfitDistribution),
+  // not a cut of the platform fee shown above — this wording used to say "of
+  // the platform fee," which stopped being true once that computation changed.
   const referralLines =
     enabledLevels.length > 0
       ? enabledLevels
           .map(
-            (l) => `  • Level ${l.level}: ${(l.percentBps / 100).toFixed(1)}% of the platform fee`,
+            (l) => `  • Level ${l.level}: ${(l.percentBps / 100).toFixed(1)}% of your net profit`,
           )
           .join('\n')
       : '  • Referral program is currently disabled';
@@ -47,7 +51,7 @@ export async function renderFeePolicyConsent(
     `👤 *Your Profit Share*\n` +
     `You keep *${userSharePercent}%* of net profit on every profitable trade.\n\n` +
     `🔗 *Referral Program*\n${referralLines}\n` +
-    `Referral rewards come out of the platform's own fee share — never an extra charge on your profit.\n\n` +
+    `Referral rewards come out of the platform's own ${feePercent}% share — never an extra charge on your profit.\n\n` +
     `Tap below to accept and enable auto-trading. If this policy ever changes, you'll be asked to accept again before it applies to you.`;
 
   const keyboard = new InlineKeyboard().text(
