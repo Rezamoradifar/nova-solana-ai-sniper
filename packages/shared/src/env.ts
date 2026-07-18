@@ -56,6 +56,11 @@ export const envSchema = z.object({
   DYNAMIC_SIZING_ENABLED: booleanFlag(false),
   PARTIAL_EXITS_ENABLED: booleanFlag(false),
   BEST_ROUTE_EXECUTION_ENABLED: booleanFlag(false),
+  // Final Opportunity Score (Section 7, 2026-07-18) gate — same double
+  // opt-in convention as the others above: this AND a config's own
+  // useOpportunityScoreGate must both be true before AutoTrader uses the
+  // weighted composite instead of today's Math.min(ruleScore, aiScore) gate.
+  OPPORTUNITY_SCORE_GATE_ENABLED: booleanFlag(false),
 
   // Auth / secrets
   JWT_SECRET: z.string().min(16),

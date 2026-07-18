@@ -243,6 +243,12 @@ export interface BusinessSettingsWithLevels {
   maxReferralDepth: number;
   feeSystemActivatedAt: Date;
   referralLevels: ReferralLevelInput[];
+  // Final Opportunity Score (Section 7) weights — see opportunityScore.ts.
+  safetyWeightBps: number;
+  momentumWeightBps: number;
+  walletWeightBps: number;
+  socialWeightBps: number;
+  aiWeightBps: number;
 }
 
 const DEFAULT_PERFORMANCE_FEE_BPS = 2000; // 20%
