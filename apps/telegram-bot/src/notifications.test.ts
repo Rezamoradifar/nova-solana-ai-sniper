@@ -8,6 +8,7 @@ import {
   formatNewTokenMessage,
   formatAiHighScoreMessage,
   formatEmergencyExitMessage,
+  formatReferralEarnedMessage,
   AI_HIGH_SCORE_THRESHOLD,
   NotificationService,
 } from './notifications.js';
@@ -222,6 +223,76 @@ describe('formatEmergencyExitMessage', () => {
     });
     expect(text).toContain('PnL: -10.00%');
     expect(text).not.toContain('($');
+  });
+});
+
+describe('formatReferralEarnedMessage', () => {
+  it('renders the level, reward amount, and source symbol', () => {
+    const text = formatReferralEarnedMessage({
+      level: 1,
+      rewardUsd: 1.5,
+      sourceSymbol: 'MOODENG',
+    });
+    expect(text).toContain('Referral reward earned');
+    expect(text).toContain('Level 1');
+    expect(text).toContain('$1.50');
+    expect(text).toContain('MOODENG');
+  });
+
+  it('renders a Level-2 reward distinctly from Level-1', () => {
+    const l1 = formatReferralEarnedMessage({ level: 1, rewardUsd: 1, sourceSymbol: 'X' });
+    const l2 = formatReferralEarnedMessage({ level: 2, rewardUsd: 1, sourceSymbol: 'X' });
+    expect(l1).not.toBe(l2);
+    expect(l2).toContain('Level 2');
+  });
+
+  it('escapes a symbol containing "_" so Telegram Markdown parsing never breaks', () => {
+    const text = formatReferralEarnedMessage({
+      level: 1,
+      rewardUsd: 1,
+      sourceSymbol: 'RAGE_GUY',
+    });
+    expect(text).toContain('RAGE\\_GUY');
+    expect(text).not.toContain('`RAGE_GUY`');
+  });
+});
+
+describe('NotificationService — notifyReferralEarned (single recipient, not fanned out)', () => {
+  function fakeSingleUserPrisma(telegramId: string | null) {
+    return {
+      user: { findUnique: vi.fn().mockResolvedValue(telegramId ? { telegramId } : null) },
+    } as unknown as PrismaClient;
+  }
+
+  it('sends the referral-earned message to only the referrer, not a fan-out', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = fakeSingleUserPrisma('REFERRER_CHAT');
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyReferralEarned('referrer-user-1', {
+      level: 1,
+      rewardUsd: 1.5,
+      sourceSymbol: 'MOODENG',
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]![0]).toBe('REFERRER_CHAT');
+    expect(sendMessage.mock.calls[0]![1]).toContain('MOODENG');
+  });
+
+  it('is a silent no-op when the referrer has no telegramId on file', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = fakeSingleUserPrisma(null);
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await expect(
+      service.notifyReferralEarned('referrer-user-1', {
+        level: 1,
+        rewardUsd: 1,
+        sourceSymbol: 'X',
+      }),
+    ).resolves.toBeUndefined();
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });
 

@@ -282,6 +282,14 @@ export async function processProfitableClose(
     });
   if (!ledger) return;
 
+  for (const reward of distribution.referralRewards) {
+    await notifier?.notifyReferralEarned(reward.referrerUserId, {
+      level: reward.level as 1 | 2,
+      rewardUsd: reward.rewardUsd,
+      sourceSymbol: position.token.symbol ?? position.token.mint.slice(0, 8),
+    });
+  }
+
   const report: TradeReportData = {
     symbol: position.token.symbol ?? position.token.mint.slice(0, 8),
     grossProfitUsd: feeResult.grossProfitUsd,

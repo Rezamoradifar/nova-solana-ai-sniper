@@ -113,6 +113,15 @@ export interface TradeReportData {
   referenceId: string;
 }
 
+/** Sent by registerFeeSystem.ts to a referrer, once per grant — Section 14
+ * (2026-07-18): a referrer earns a fixed 10%/5% of a referred trader's net
+ * profit at Level 1/2, independent of the platform's own performance fee. */
+export interface ReferralEarnedNotification {
+  level: 1 | 2;
+  rewardUsd: number;
+  sourceSymbol: string;
+}
+
 /** `https://dexscreener.com/solana/{mint}` — the one chart-link format used everywhere. */
 export function buildDexScreenerLink(mint: string): string {
   return `https://dexscreener.com/solana/${mint}`;
@@ -287,6 +296,16 @@ export function formatTradeReportMessage(report: TradeReportData): string {
     `Platform Performance Fee (${(report.feeBps / 100).toFixed(1)}%): $${report.feeUsd.toFixed(2)}${referralLine}\n` +
     `*Final Amount Credited: $${report.userShareUsd.toFixed(2)}*\n\n` +
     `_Ref: ${report.referenceId}_`
+  );
+}
+
+/** Pure so it's independently unit-tested, same convention as formatTradeReportMessage. */
+export function formatReferralEarnedMessage(data: ReferralEarnedNotification): string {
+  return (
+    `🔗 *Referral reward earned!*\n\n` +
+    `One of your Level ${data.level} referrals just closed a profitable trade on ` +
+    `\`${escapeMd(data.sourceSymbol)}\`.\n\n` +
+    `You earned: *$${data.rewardUsd.toFixed(2)}*`
   );
 }
 
@@ -499,6 +518,22 @@ export class NotificationService {
     });
     if (!user?.telegramId) return;
     await this.sendToChat(user.telegramId, formatTradeReportMessage(report));
+  }
+
+  /** Same single-recipient convention as notifyTradeReport — a referral
+   * grant is personal financial information for the referrer, not a
+   * DEX/trading alert, so never fanned out. Silent no-op if the referrer has
+   * no telegramId on file. */
+  async notifyReferralEarned(
+    referrerUserId: string,
+    data: ReferralEarnedNotification,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: referrerUserId },
+      select: { telegramId: true },
+    });
+    if (!user?.telegramId) return;
+    await this.sendToChat(user.telegramId, formatReferralEarnedMessage(data));
   }
 }
 
