@@ -59,6 +59,16 @@ export interface RiskFlags {
     'dexscreener' | 'native_dex' | 'pumpfun_bonding_curve' | 'jupiter_estimate' | 'unavailable';
 }
 
+/**
+ * Hard Loss Ceiling (2026-07-18): no position is ever allowed a stop loss
+ * looser than this — see apps/api/src/trading/exitEngine.ts's
+ * resolveEffectiveStopLossPercent (the actual enforcement point) and
+ * apps/telegram-bot's settings.ts (surfaces this in the edit prompt so a
+ * user isn't surprised their own looser value gets capped at buy time).
+ * Lives here, not duplicated in each app, since both need the same number.
+ */
+export const DEFAULT_MAX_LOSS_PERCENT = 20;
+
 /** Optional exit strategy — see apps/api/src/trading/adaptiveTrailingStop.ts. */
 export type TrailingStopPreset =
   'conservative' | 'balanced' | 'aggressive' | 'meme_coin' | 'custom';

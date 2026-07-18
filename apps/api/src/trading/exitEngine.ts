@@ -1,3 +1,7 @@
+import { DEFAULT_MAX_LOSS_PERCENT } from '@nova/shared';
+
+export { DEFAULT_MAX_LOSS_PERCENT };
+
 export interface ExitCheckInput {
   entryPriceUsd: number;
   currentPriceUsd: number;
@@ -120,6 +124,42 @@ export function reconcilePriceOutlier(params: {
     return { accepted: true, source: 'forced_after_ceiling' };
   }
   return { accepted: false };
+}
+
+/**
+ * Hard Loss Ceiling (2026-07-18): a real production loss (-99.2%, "ANSEMCOIN")
+ * exposed that a percentage-based stop loss is meaningless if the system can't
+ * see the real price in time to act on it — that position sat unprotected for
+ * hours in the outlier-rejection window (above) before its stop-loss could
+ * even evaluate a real price. No user-configured stop loss (or none at all)
+ * is ever honored looser than this — see resolveEffectiveStopLossPercent.
+ * (DEFAULT_MAX_LOSS_PERCENT itself lives in @nova/shared — the Telegram bot's
+ * settings-edit prompt needs the same number, so it isn't duplicated here.)
+ */
+export interface EffectiveStopLoss {
+  effectiveStopLossPercent: number;
+  /** True when the caller supplied no stopLossPercent, or one looser than
+   * DEFAULT_MAX_LOSS_PERCENT (including every preset that predates this
+   * ceiling — aggressive 35%, meme_coin 40%, balanced 25%) — i.e. the system
+   * ceiling is what's actually protecting this position, not the user's own
+   * choice. False when the user's own value was already at or under the
+   * ceiling and is honored as-is. */
+  isSystemDefault: boolean;
+}
+
+/**
+ * Pure so it's independently unit-tested — the single choke point every
+ * position-open path clamps through (see positionManager.ts's positionData
+ * construction) so no caller, present or future, can create a position with
+ * an unbounded or looser-than-ceiling stop loss.
+ */
+export function resolveEffectiveStopLossPercent(
+  rawStopLossPercent: number | null | undefined,
+): EffectiveStopLoss {
+  if (rawStopLossPercent == null || rawStopLossPercent > DEFAULT_MAX_LOSS_PERCENT) {
+    return { effectiveStopLossPercent: DEFAULT_MAX_LOSS_PERCENT, isSystemDefault: true };
+  }
+  return { effectiveStopLossPercent: rawStopLossPercent, isSystemDefault: false };
 }
 
 /**

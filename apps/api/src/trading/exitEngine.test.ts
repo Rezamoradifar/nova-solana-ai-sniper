@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateExit, isPlausiblePriceUpdate, reconcilePriceOutlier } from './exitEngine.js';
+import {
+  evaluateExit,
+  isPlausiblePriceUpdate,
+  reconcilePriceOutlier,
+  resolveEffectiveStopLossPercent,
+  DEFAULT_MAX_LOSS_PERCENT,
+} from './exitEngine.js';
 
 describe('evaluateExit', () => {
   it('triggers take profit when pnl exceeds threshold', () => {
@@ -171,5 +177,43 @@ describe('reconcilePriceOutlier', () => {
   it('never force-accepts unless the caller explicitly says the ceiling was hit', () => {
     const result = reconcilePriceOutlier({ candidatePriceUsd: 0.02151, forcedAfterCeiling: false });
     expect(result.accepted).toBe(false);
+  });
+});
+
+describe('resolveEffectiveStopLossPercent', () => {
+  it('defaults to the ceiling when no stop loss was ever set', () => {
+    expect(resolveEffectiveStopLossPercent(undefined)).toEqual({
+      effectiveStopLossPercent: DEFAULT_MAX_LOSS_PERCENT,
+      isSystemDefault: true,
+    });
+    expect(resolveEffectiveStopLossPercent(null)).toEqual({
+      effectiveStopLossPercent: DEFAULT_MAX_LOSS_PERCENT,
+      isSystemDefault: true,
+    });
+  });
+
+  it('clamps a looser-than-ceiling value (e.g. a preset default) down to the ceiling', () => {
+    expect(resolveEffectiveStopLossPercent(35)).toEqual({
+      effectiveStopLossPercent: DEFAULT_MAX_LOSS_PERCENT,
+      isSystemDefault: true,
+    });
+    expect(resolveEffectiveStopLossPercent(40)).toEqual({
+      effectiveStopLossPercent: DEFAULT_MAX_LOSS_PERCENT,
+      isSystemDefault: true,
+    });
+  });
+
+  it('honors a tighter-than-ceiling user value unchanged', () => {
+    expect(resolveEffectiveStopLossPercent(10)).toEqual({
+      effectiveStopLossPercent: 10,
+      isSystemDefault: false,
+    });
+  });
+
+  it('honors a value exactly at the ceiling as the user value, not a default', () => {
+    expect(resolveEffectiveStopLossPercent(20)).toEqual({
+      effectiveStopLossPercent: 20,
+      isSystemDefault: false,
+    });
   });
 });

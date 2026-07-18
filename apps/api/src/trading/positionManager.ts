@@ -15,7 +15,7 @@ import {
 import { getTopHolder } from '../detection/onchain.js';
 import type { DexRegistry } from '../solana/dex/registry.js';
 import { JitoClient } from '../solana/jito.js';
-import { evaluateExit, type ExitReason } from './exitEngine.js';
+import { evaluateExit, resolveEffectiveStopLossPercent, type ExitReason } from './exitEngine.js';
 import { positionCloseLock } from './positionCloseLock.js';
 import { classifySellFailure, type SellFailureCategory } from './sellFailureClassifier.js';
 import { computeTrailingStopDisplay, defaultExitParams } from './adaptiveTrailingStop.js';
@@ -981,6 +981,13 @@ export class PositionManager {
       isPaperTrade: this.paperTrading,
       confirmedAt: new Date(),
     };
+    // Hard Loss Ceiling (2026-07-18): the one choke point every open (auto-buy,
+    // copy-trade, any future caller) already passes through, so this can never
+    // be bypassed by a caller forgetting to clamp its own exit params — see
+    // exitEngine.ts's resolveEffectiveStopLossPercent doc comment.
+    const { effectiveStopLossPercent, isSystemDefault } = resolveEffectiveStopLossPercent(
+      params.stopLossPercent ?? fallbackExit?.stopLossPercent,
+    );
     const positionData = {
       walletId: params.walletId,
       tokenId: params.tokenId,
@@ -989,7 +996,8 @@ export class PositionManager {
       amountSolInvested: params.amountSol,
       highWaterMarkUsd: entryPriceUsd,
       takeProfitPercent: params.takeProfitPercent ?? fallbackExit?.takeProfitPercent,
-      stopLossPercent: params.stopLossPercent ?? fallbackExit?.stopLossPercent,
+      stopLossPercent: effectiveStopLossPercent,
+      stopLossIsSystemDefault: isSystemDefault,
       trailingStopPercent: params.trailingStopPercent ?? fallbackExit?.trailingStopPercent,
       trailingStopPreset: params.trailingStopPreset ?? (fallbackExit ? 'balanced' : undefined),
       isPaperTrade: this.paperTrading,

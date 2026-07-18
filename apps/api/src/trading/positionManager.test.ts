@@ -448,7 +448,11 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
       expect.objectContaining({
         data: expect.objectContaining({
           takeProfitPercent: undefined,
-          stopLossPercent: 25,
+          // Hard Loss Ceiling (2026-07-18): the balanced preset's own 25%
+          // default is now clamped to the 20% ceiling, same as any other
+          // looser-than-20% value — see the dedicated describe block below.
+          stopLossPercent: 20,
+          stopLossIsSystemDefault: true,
           trailingStopPercent: 15,
           trailingStopPreset: 'balanced',
         }),
@@ -505,6 +509,7 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
         data: expect.objectContaining({
           takeProfitPercent: undefined,
           stopLossPercent: 10,
+          stopLossIsSystemDefault: false,
           trailingStopPercent: 8,
           trailingStopPreset: 'meme_coin',
         }),
@@ -512,7 +517,7 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
     );
   });
 
-  it('respects a partial manual exit strategy (only one field set) without pulling in the default', async () => {
+  it('respects a partial manual exit strategy (only one field set) without pulling in the TP/trailing default — but the stop-loss ceiling still applies (2026-07-18 fix)', async () => {
     const jupiter = {
       prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
       getQuote: vi.fn(),
@@ -555,9 +560,92 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
       expect.objectContaining({
         data: expect.objectContaining({
           takeProfitPercent: 25,
-          stopLossPercent: undefined,
+          // This is the exact gap that let a live position (ANSEMCOIN,
+          // -99.2% PnL) exist with an unbounded stop loss: hasExitStrategy
+          // was true (takeProfitPercent was set), so defaultExitParams()
+          // never fired, and stopLossPercent stayed undefined forever. The
+          // 2026-07-18 fix clamps it to the ceiling unconditionally, not just
+          // as a last resort when every field is empty.
+          stopLossPercent: 20,
+          stopLossIsSystemDefault: true,
           trailingStopPercent: undefined,
         }),
+      }),
+    );
+  });
+});
+
+describe('PositionManager Hard Loss Ceiling (production incident 2026-07-18: ANSEMCOIN, -99.2% PnL)', () => {
+  function fakeOpenDeps() {
+    const jupiter = {
+      prepareSwap: vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() }),
+      getQuote: vi.fn(),
+    } as never;
+    const connection = {
+      sendTransaction: vi.fn().mockResolvedValue('sig123'),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi
+        .fn()
+        .mockResolvedValue({ meta: { preTokenBalances: [], postTokenBalances: [] } }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const positionCreate = vi.fn().mockResolvedValue({ id: 'position-1' });
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
+      position: { create: positionCreate },
+      token: { findUnique: vi.fn().mockResolvedValue(undefined) },
+    } as never;
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+    return { manager, positionCreate };
+  }
+
+  it('clamps a preset-derived stop loss looser than 20% (aggressive, 35%) down to the ceiling', async () => {
+    const { manager, positionCreate } = fakeOpenDeps();
+
+    await manager.openPosition({ ...BASE_PARAMS, stopLossPercent: 35, trailingStopPercent: 20 });
+
+    expect(positionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ stopLossPercent: 20, stopLossIsSystemDefault: true }),
+      }),
+    );
+  });
+
+  it('honors a user-set stop loss tighter than 20% exactly, unchanged', async () => {
+    const { manager, positionCreate } = fakeOpenDeps();
+
+    await manager.openPosition({ ...BASE_PARAMS, stopLossPercent: 10, trailingStopPercent: 8 });
+
+    expect(positionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ stopLossPercent: 10, stopLossIsSystemDefault: false }),
+      }),
+    );
+  });
+
+  it('a stop loss set exactly at the 20% ceiling is honored as the user value, not flagged as a system default', async () => {
+    const { manager, positionCreate } = fakeOpenDeps();
+
+    await manager.openPosition({ ...BASE_PARAMS, stopLossPercent: 20, trailingStopPercent: 15 });
+
+    expect(positionCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ stopLossPercent: 20, stopLossIsSystemDefault: false }),
       }),
     );
   });
