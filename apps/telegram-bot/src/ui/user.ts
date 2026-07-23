@@ -2,6 +2,7 @@ import type { User } from '@prisma/client';
 import { generateUniqueReferralCode, maybeActivateReferralReward } from '@nova/shared';
 import type { Context } from 'grammy';
 import { sendReferralRewardNotification } from '../notifications.js';
+import { resolveLocale } from '../i18n/index.js';
 import type { ScreenDeps } from './types.js';
 
 /**
@@ -24,12 +25,16 @@ export async function resolveOrCreateUser(
   const existing = await prisma.user.findUnique({ where: { telegramId } });
   if (existing) return existing;
 
-  let referrer: { id: string; referralCode: string | null; telegramId: string | null } | null =
-    null;
+  let referrer: {
+    id: string;
+    referralCode: string | null;
+    telegramId: string | null;
+    language: string;
+  } | null = null;
   if (referralPayload) {
     referrer = await prisma.user.findUnique({
       where: { referralCode: referralPayload.trim().toUpperCase() },
-      select: { id: true, referralCode: true, telegramId: true },
+      select: { id: true, referralCode: true, telegramId: true, language: true },
     });
   }
 
@@ -52,6 +57,7 @@ export async function resolveOrCreateUser(
         referrer.telegramId,
         reward.referredCount,
         logger,
+        resolveLocale(referrer.language),
       );
     }
   }

@@ -18,8 +18,23 @@
 
 export type LatencyStage =
   | 'token_detected'
+  // Two-stage discovery pipeline (2026-07-22): the four checkpoints between
+  // detection and the AI call, once Stage 2 (candidatePipeline.ts) runs its
+  // parallel deterministic checks. 'analysis_started' is marked the instant a
+  // discovery-queue worker picks the candidate up, so token_detected ->
+  // analysis_started is literally queue-wait/backlog latency.
+  | 'analysis_started'
+  | 'dex_validated'
+  | 'safety_completed'
+  | 'sellability_verified'
   | 'ai_scoring_start'
   | 'ai_scoring_end'
+  // Marked once the Opportunity Score is computed, right before AutoTrader's
+  // per-user SnipeConfig loop begins.
+  | 'decision'
+  // Marked at the existing 'BUY STARTED' checkpoint, right before
+  // positionManager.openPosition is called for a passing config.
+  | 'buy_submitted'
   | 'filters_complete'
   | 'exit_decision'
   | 'quote_request'
@@ -34,8 +49,14 @@ export type LatencyStage =
 /** Canonical stage order per side — also what the stage-to-stage report is computed over. */
 export const BUY_STAGE_ORDER: readonly LatencyStage[] = [
   'token_detected',
+  'analysis_started',
+  'dex_validated',
+  'safety_completed',
+  'sellability_verified',
   'ai_scoring_start',
   'ai_scoring_end',
+  'decision',
+  'buy_submitted',
   'filters_complete',
   'quote_request',
   'quote_received',
@@ -181,10 +202,38 @@ export interface SideLatencyReport {
   totalStats?: StageStats;
   /** Keyed "prevStage->stage" — the per-stage breakdown objective 2 asks for. */
   stageStats: Partial<Record<string, StageStats>>;
+  /**
+   * Two-stage discovery pipeline (2026-07-22): the three named cross-stage
+   * spans the latency objective explicitly asks for, in addition to the
+   * generic adjacent-pair breakdown above — each is token_detected -> the
+   * named stage, computed over every trace with both marks present (not just
+   * successful ones, since a SKIP still has a real detection->decision span).
+   * BUY-side only; always undefined on the SELL report (SELL traces have no
+   * token_detected mark).
+   */
+  detectionToAnalysisMs?: StageStats;
+  detectionToDecisionMs?: StageStats;
+  detectionToBuySubmissionMs?: StageStats;
   successRate: number;
   fastestMs?: number;
   slowestMs?: number;
   sampleSize: number;
+}
+
+/** Detection-relative span helper for the three named cross-stage metrics above. */
+function computeDetectionSpan(
+  traces: readonly CompletedTrace[],
+  targetStage: LatencyStage,
+): StageStats | undefined {
+  const durations: number[] = [];
+  for (const trace of traces) {
+    const from = trace.marks.token_detected;
+    const to = trace.marks[targetStage];
+    if (from !== undefined && to !== undefined && to >= from) {
+      durations.push(to - from);
+    }
+  }
+  return computeStats(durations);
 }
 
 export interface LatencyReport {
@@ -216,9 +265,16 @@ function buildSideReport(
     if (stats) stageStats[`${prevStage}->${stage}`] = stats;
   }
 
+  const isBuySide = stageOrder === BUY_STAGE_ORDER;
+
   return {
     totalStats: computeStats(totalDurations),
     stageStats,
+    detectionToAnalysisMs: isBuySide ? computeDetectionSpan(traces, 'analysis_started') : undefined,
+    detectionToDecisionMs: isBuySide ? computeDetectionSpan(traces, 'decision') : undefined,
+    detectionToBuySubmissionMs: isBuySide
+      ? computeDetectionSpan(traces, 'buy_submitted')
+      : undefined,
     successRate: traces.length > 0 ? successful.length / traces.length : 0,
     fastestMs: totalDurations.length > 0 ? Math.min(...totalDurations) : undefined,
     slowestMs: totalDurations.length > 0 ? Math.max(...totalDurations) : undefined,

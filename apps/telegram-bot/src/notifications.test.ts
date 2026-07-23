@@ -299,7 +299,10 @@ describe('NotificationService — notifyReferralEarned (single recipient, not fa
 function fakePrisma(activeTelegramIds: string[]) {
   return {
     user: {
-      findMany: vi.fn().mockResolvedValue(activeTelegramIds.map((telegramId) => ({ telegramId }))),
+      findMany: vi
+        .fn()
+        .mockResolvedValue(activeTelegramIds.map((telegramId) => ({ telegramId, language: 'en' }))),
+      findUnique: vi.fn().mockResolvedValue(null),
     },
   } as unknown as PrismaClient;
 }
@@ -385,7 +388,8 @@ describe('NotificationService — sniper alert fan-out (notifyTrade/notifyExit/n
 
   it("the queried SnipeConfig filter matches AutoTrader's own active-sniper query exactly", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
-    const prisma = { user: { findMany } } as unknown as PrismaClient;
+    const findUnique = vi.fn().mockResolvedValue(null);
+    const prisma = { user: { findMany, findUnique } } as unknown as PrismaClient;
     const { bot } = fakeBot();
     const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
 
@@ -396,7 +400,7 @@ describe('NotificationService — sniper alert fan-out (notifyTrade/notifyExit/n
         telegramId: { not: null },
         snipeConfigs: { some: { isActive: true, autoBuyOnLaunch: true } },
       },
-      select: { telegramId: true },
+      select: { telegramId: true, language: true },
     });
   });
 

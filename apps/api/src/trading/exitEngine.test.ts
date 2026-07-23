@@ -254,3 +254,61 @@ describe('evaluateHardLossCeiling', () => {
     expect(result.pnlPercent).toBeLessThan(-98);
   });
 });
+
+/**
+ * 2026-07-21 audit (section G): a genuine, large market crash must never be
+ * permanently misclassified as an "implausible outlier" and ignored forever —
+ * these regression tests exercise the full combination of
+ * isPlausiblePriceUpdate + reconcilePriceOutlier + evaluateHardLossCeiling
+ * exactly as PriceMonitor composes them, for the two crash sizes explicitly
+ * called out in the audit brief.
+ */
+describe('regression: legitimate large crashes are never ignored forever', () => {
+  it('a 90% crash is within the single-tick plausibility band and is accepted immediately — no outlier handling needed at all', () => {
+    // ratio = 0.1, well inside [1/20, 20] — ordinary single-tick move, not an outlier.
+    expect(isPlausiblePriceUpdate(1, 0.1)).toBe(true);
+    const hardLoss = evaluateHardLossCeiling(1, 0.1, 20);
+    expect(hardLoss.breached).toBe(true); // -90% vs a 20% ceiling — stop loss must fire
+  });
+
+  it('a 99% crash is rejected as a single-tick outlier (ratio below the 20x band) but is force-closed immediately via the Hard-Loss-Ceiling fast path once a corroborating source agrees', () => {
+    // ratio = 0.01, outside [1/20, 20] — correctly flagged as needing corroboration first.
+    expect(isPlausiblePriceUpdate(1, 0.01)).toBe(false);
+
+    const hardLoss = evaluateHardLossCeiling(1, 0.01, 20);
+    expect(hardLoss.breached).toBe(true);
+
+    // PriceMonitor's fast path probes an independent source before trusting the
+    // crash — a second, independently-sourced quote agreeing is what turns a
+    // rejected tick into a forced exit, not just the raw price reading alone.
+    const reconciliation = reconcilePriceOutlier({
+      candidatePriceUsd: 0.01,
+      jupiterReverseQuotePriceUsd: 0.0095,
+    });
+    expect(reconciliation).toEqual({ accepted: true, source: 'jupiter_reverse_quote' });
+  });
+
+  it('a 99% crash with no corroborating source available is still never ignored forever — force-accepted once the sustained-rejection ceiling elapses', () => {
+    expect(isPlausiblePriceUpdate(1, 0.01)).toBe(false);
+    const reconciliation = reconcilePriceOutlier({
+      candidatePriceUsd: 0.01,
+      forcedAfterCeiling: true,
+    });
+    expect(reconciliation).toEqual({ accepted: true, source: 'forced_after_ceiling' });
+  });
+
+  it('a single bad quote (one implausible tick) is rejected without being force-accepted — only sustained/corroborated crashes are', () => {
+    expect(isPlausiblePriceUpdate(1, 0.01)).toBe(false);
+    const singleBadQuote = reconcilePriceOutlier({ candidatePriceUsd: 0.01 });
+    expect(singleBadQuote.accepted).toBe(false);
+  });
+
+  it('multiple independent sources agreeing on the crash is stronger evidence than either alone, and both accept it', () => {
+    const bothAgree = reconcilePriceOutlier({
+      candidatePriceUsd: 0.01,
+      jupiterReverseQuotePriceUsd: 0.0098,
+      nativeDexReservesPriceUsd: 0.0102,
+    });
+    expect(bothAgree.accepted).toBe(true);
+  });
+});

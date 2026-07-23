@@ -8,7 +8,10 @@
     "build": "tsc -b",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --dir src"
+    "test": "vitest run --dir src",
+    "broadcast": "dotenv -e ../../.env -- tsx scripts/broadcast.ts",
+    "notify-low-balance": "dotenv -e ../../.env -- tsx scripts/notify-low-balance.ts",
+    "evaluate-shadow-mode": "dotenv -e ../../.env -- tsx scripts/evaluateShadowMode.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

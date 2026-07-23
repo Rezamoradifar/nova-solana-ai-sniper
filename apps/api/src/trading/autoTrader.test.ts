@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AutoTrader } from './autoTrader.js';
+import { SellabilityCheckError } from './sellabilityCheck.js';
+import { SafetyCheckError } from './safety.js';
 
 function fakeLogger() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
@@ -13,6 +15,10 @@ const RISK_FLAGS = {
   isHoneypotSuspected: false,
   liquidityUsd: 50_000,
   liquiditySource: 'dexscreener' as const,
+  // Must clear criticalSecurityGate.ts's HARD_MIN_HOLDER_COUNT floor — every
+  // test in this file exercises logic *downstream* of that gate, so the
+  // shared fixture needs to represent a token the gate would actually pass.
+  holderCount: 50,
 };
 
 function fakeConfig(overrides: Partial<Record<string, unknown>> = {}) {
@@ -459,5 +465,42 @@ describe('AutoTrader — per-config wallet selection (SnipeConfig.walletId)', ()
     );
     await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
     expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ walletId: 'wallet-1' }));
+  });
+});
+
+// The critical-security-gate and pre-buy-sellability-precheck behavior
+// previously tested here moved with the checks themselves to
+// candidatePipeline.ts (2026-07-22) — see candidatePipeline.test.ts. This
+// function no longer runs those checks at all (it assumes upstream already
+// passed them for this token), so those scenarios no longer apply here.
+
+describe('AutoTrader — pre-buy sellability failure categorization (2026-07-21 audit, section D)', () => {
+  function setupWithOpenPositionError(err: Error) {
+    const config = fakeConfig();
+    const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([config]) } } as never;
+    const positionManager = { openPosition: vi.fn().mockRejectedValue(err) } as never;
+    return new AutoTrader({
+      prisma,
+      riskAnalyzer: {} as never,
+      positionManager,
+      logger: fakeLogger(),
+      encryptionKey: 'key',
+    });
+  }
+
+  it('reports a SellabilityCheckError as reason "not_sellable", distinct from a generic execution error', async () => {
+    const trader = setupWithOpenPositionError(new SellabilityCheckError('no_sell_route'));
+
+    const results = await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'not_sellable' }]);
+  });
+
+  it('still categorizes a genuine SafetyCheckError as "safety_blocked", unaffected by the new sellability handling', async () => {
+    const trader = setupWithOpenPositionError(new SafetyCheckError('daily loss limit reached'));
+
+    const results = await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'safety_blocked' }]);
   });
 });

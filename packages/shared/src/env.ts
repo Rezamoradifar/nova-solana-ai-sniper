@@ -1,4 +1,19 @@
 import { z } from 'zod';
+import { PublicKey } from '@solana/web3.js';
+
+/** Real, on-curve base58 Solana address check — used for
+ * PLATFORM_TREASURY_WALLET_ADDRESS below. Deliberately fails closed (boot
+ * error) rather than accepting a malformed/mistyped address silently, since
+ * a wrong treasury address means real, unrecoverable fund loss the moment
+ * the first payout fires — see payoutExecutor.ts. */
+function isValidSolanaPublicKey(value: string): boolean {
+  try {
+    new PublicKey(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * `z.coerce.boolean()` is a footgun for env vars: `Boolean("false")` is `true`,
@@ -41,6 +56,29 @@ export const envSchema = z.object({
   MAX_DAILY_LOSS_USD: z.coerce.number().positive().default(50),
   MAX_OPEN_POSITIONS: z.coerce.number().int().positive().default(5),
   MIN_WALLET_RESERVE_SOL: z.coerce.number().nonnegative().default(0.01),
+
+  // Real on-chain payout of referral commissions + the platform's own share
+  // (2026-07-23 — apps/api/src/business/payoutExecutor.ts), replacing the
+  // previous ledger-only bookkeeping. A real base58 Solana public key the
+  // operator supplies — never generated or invented in code. Required, no
+  // default: a missing/malformed treasury address must fail loud at boot,
+  // not silently at the moment of the first real payout.
+  PLATFORM_TREASURY_WALLET_ADDRESS: z
+    .string()
+    .refine(
+      isValidSolanaPublicKey,
+      'PLATFORM_TREASURY_WALLET_ADDRESS must be a valid base58 Solana public key',
+    ),
+  // How stale a PayoutAttempt row (status PENDING/SUBMITTED, no terminal
+  // state reached) can be before it's treated as "a previous attempt likely
+  // crashed mid-flight, needs manual reconciliation" rather than "another
+  // concurrent close is actively handling it right now" — same TTL-staleness
+  // idiom as positionManager.ts's unverifiedSwapLocks.
+  PAYOUT_ATTEMPT_STALE_MS: z.coerce
+    .number()
+    .positive()
+    .default(10 * 60 * 1000),
+
   // Emergency stop. This env value is a hard, restart-required override; the
   // real "flip it right now without redeploying" switch lives in Redis (see
   // apps/api/src/trading/safety.ts) and is toggled via the /killswitch admin command.
@@ -61,6 +99,22 @@ export const envSchema = z.object({
   // useOpportunityScoreGate must both be true before AutoTrader uses the
   // weighted composite instead of today's Math.min(ruleScore, aiScore) gate.
   OPPORTUNITY_SCORE_GATE_ENABLED: booleanFlag(false),
+  // Smart Money + Early Pump Detection (Sections 3-4, 2026-07-22): master
+  // switches for SmartWalletTracker/EarlyMomentumDetector actually running at
+  // all — both default false so a deploy doesn't silently start new RPC/
+  // DexScreener work. Ships strictly shadow-mode: these feed
+  // OpportunityScoreComponents.walletScore/momentumScore, which stay inert
+  // while BusinessSettings.walletWeightBps/momentumWeightBps remain at their
+  // own default of 0 — see packages/shared/src/opportunityScore.ts. No
+  // SnipeConfig opt-in exists yet because there is no auto-buy behavior for
+  // these signals to gate; that's a deliberate future step, not an oversight.
+  SMART_MONEY_ANALYSIS_ENABLED: booleanFlag(false),
+  EARLY_MOMENTUM_DETECTION_ENABLED: booleanFlag(false),
+  // Shadow-mode logging/evaluation layer (ShadowModeDecisionLog) — on by
+  // default since it's pure logging (null score fields when the two switches
+  // above are off) and is this feature's only supported mode; never gates a
+  // real trade.
+  SHADOW_MODE_ENABLED: booleanFlag(true),
 
   // Auth / secrets
   JWT_SECRET: z.string().min(16),
@@ -93,11 +147,43 @@ export const envSchema = z.object({
   // AI providers
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
+  // Never logged — see packages/ai/src/provider.ts's GeminiProvider and
+  // riskScorer.ts's structured logging, neither of which include the key itself.
+  GEMINI_API_KEY: z.string().optional(),
+  // Multi-LLM consensus (2026-07-22): Gemini + OpenRouter run in parallel and
+  // both must independently recommend BUY before AutoTrader ever runs (see
+  // packages/ai/src/consensus.ts, apps/api/src/worker.ts's processAiCall).
+  // Never logged — same convention as every other key above.
+  OPENROUTER_API_KEY: z.string().optional(),
+  // OpenRouter's free-tier model slugs churn on the order of weeks — this
+  // default was verified live against OpenRouter's own /api/v1/models
+  // endpoint and smoke-tested against this account at implementation time
+  // (2026-07-22), not guessed from training data. Deliberately a single
+  // explicit value with no fallback/auto-substitution: if this model becomes
+  // unavailable, the OpenRouter request fails and riskScorer.ts's existing
+  // fail-closed handling turns that into a SKIP — never a silent switch to a
+  // different, unvetted model. Override via this var, not by editing code.
+  OPENROUTER_MODEL: z.string().default('nvidia/nemotron-3-ultra-550b-a55b:free'),
 
   // Telegram
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
   TELEGRAM_ADMIN_IDS: z.string().optional(),
+  // Public broadcast channel for apps/marketing-engine's scheduled posts —
+  // deliberately separate from TELEGRAM_CHAT_ID (an admin/ops chat, not a
+  // public audience). Accepts either "@channelusername" or a numeric chat id,
+  // exactly as Telegram's sendMessage API does. Falls back to TELEGRAM_CHAT_ID
+  // when unset so a dev/test setup with only one chat configured keeps working.
+  MARKETING_TELEGRAM_CHANNEL_ID: z.string().optional(),
+  // Visual marketing pipeline (2026-07-23, apps/marketing-engine/src/visuals/)
+  // — master switch for the AI-generated-background attempt specifically
+  // (GeminiImageProvider). Defaults false: verified live (2026-07-23) that
+  // Gemini's image-capable models return a 0-quota 429 on this project's
+  // current (non-billed) API key, so leaving this on by default would add a
+  // guaranteed-fail ~15-30s round trip to every eligible post for no benefit.
+  // The branded template renderer (visuals/statCard.ts, headlineCard.ts) is
+  // unaffected by this flag — it always runs, free and local, regardless.
+  MARKETING_AI_IMAGE_ENABLED: booleanFlag(false),
 
   // Twitter / X
   TWITTER_API_KEY: z.string().optional(),
@@ -146,6 +232,59 @@ export const envSchema = z.object({
   // How often recently-seen pump.fun tokens are polled for a bonding-curve migration —
   // rarer than a price tick, so a longer default interval than PRICE_CHECK_INTERVAL_MS.
   MIGRATION_CHECK_INTERVAL_MS: z.coerce.number().min(10000).default(30000),
+
+  // Stale-position monitoring (2026-07-22 audit): once a position's first
+  // stale-price/no-sell-route alert has fired (10 min in, see
+  // priceMonitor.ts's STALE_PRICE_ALERT_AFTER_MS), it is never repeated on
+  // every tick — only again this long after the last alert, for a position
+  // still unresolved. 24h default: frequent enough that a still-broken
+  // position isn't forgotten, far below the noise floor of "every 10 min."
+  STALE_POSITION_REMINDER_INTERVAL_MS: z.coerce
+    .number()
+    .min(60_000)
+    .default(24 * 60 * 60 * 1000),
+  // How long a position may sit in the confirmed NO_SELL_ROUTE state before
+  // being escalated to MANUAL_REVIEW — a stronger diagnostic flag only,
+  // never an automatic close. 24h default, same rationale as the reminder
+  // interval above: long enough that a temporary aggregator/liquidity gap
+  // isn't over-escalated, short enough that a genuinely stuck position gets
+  // flagged for a human within a day.
+  STALE_POSITION_MANUAL_REVIEW_AFTER_MS: z.coerce
+    .number()
+    .min(60_000)
+    .default(24 * 60 * 60 * 1000),
+
+  // 2026-07-19 production investigation: Solana's onLogs pubsub can silently drop
+  // notifications under load (see PumpFunMonitor's doc comment) — this periodically
+  // tears down and re-creates the pump.fun log subscription as a cheap (zero RPC
+  // cost) mitigation attempt. 0/unset disables it (today's exact one-subscription-
+  // for-the-process's-lifetime behavior).
+  PUMPFUN_RESUBSCRIBE_INTERVAL_MS: z.coerce.number().min(0).default(0),
+  // Companion alert, distinct from SourceHealthMonitor's raw-traffic check: fires
+  // when no *qualified new-token* pump.fun launch has been detected in this long,
+  // even though raw program traffic (which SourceHealthMonitor watches) is still
+  // flowing — the specific failure pattern the above investigation found. 25 min
+  // default: live sampling found launches averaging ~1/11min even during the
+  // silent-drop episodes that prompted this, so 25 min is well past normal variance.
+  PUMPFUN_LAUNCH_SILENCE_ALERT_MS: z.coerce
+    .number()
+    .min(60000)
+    .default(25 * 60 * 1000),
+
+  // Two-stage discovery pipeline (2026-07-22): bounds how many candidates the
+  // discovery queue (raw WS event -> parsed tx -> candidatePipeline.ts) and
+  // the AI-provider-call queue run concurrently, so a burst of launches can
+  // no longer fan out unbounded concurrent RPC/AI calls (see
+  // PriorityConcurrencyQueue). AI_QUEUE_CONCURRENCY is smaller — AI-provider
+  // calls are rate-limited/cost-sensitive in a way plain RPC/HTTP reads aren't.
+  DISCOVERY_QUEUE_CONCURRENCY: z.coerce.number().int().positive().default(8),
+  AI_QUEUE_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  // FAST PATH thresholds (see riskAnalyzer.ts's isFastPathCandidate): a
+  // candidate whose recent (m5, falling back to h1) buys AND volume both
+  // clear these gets queued ahead of ordinary candidates for the AI call —
+  // priority only, never a security bypass.
+  FAST_PATH_MIN_RECENT_BUYS: z.coerce.number().int().nonnegative().default(15),
+  FAST_PATH_MIN_RECENT_VOLUME_USD: z.coerce.number().nonnegative().default(2000),
 
   // EmergencyExitMonitor — Institutional Mode's safety net: force-closes an
   // OPEN institutional-mode position on a detected liquidity-removal/rug

@@ -42,10 +42,116 @@ export async function loadOwnedOpenPosition(fastify: FastifyInstance, userId: st
   return { position };
 }
 
+/**
+ * Same shape as loadOwnedOpenPosition, minus the ownership check — for the
+ * admin force-close route below, which exists because no user-facing sell
+ * route can ever reach a position that isn't the caller's own (2026-07-22:
+ * an operator needed to close a honeypot-suspected position that belonged
+ * to a different platform user's wallet and had no way to).
+ */
+export async function loadOpenPositionAny(fastify: FastifyInstance, id: string) {
+  const position = await fastify.prisma.position.findUnique({
+    where: { id },
+    include: { token: true, wallet: true },
+  });
+  if (!position) return { error: 404 as const };
+  if (position.status !== 'OPEN') return { error: 409 as const };
+  return { position };
+}
+
 function sendSellError(reply: FastifyReply, err: unknown) {
   const category = (err as { sellFailureCategory?: string } | null)?.sellFailureCategory;
   const message = err instanceof Error ? err.message : 'Sell failed';
   return reply.code(422).send({ error: message, category: category ?? 'other' });
+}
+
+export interface CloseAllSummary {
+  closed: number;
+  failed: number;
+  skipped: number;
+  failures: Array<{ positionId: string; symbol: string; reason: string }>;
+}
+
+/**
+ * Bulk close — same `closePosition` primitive as /positions/:id/sell, looped
+ * over every OPEN position belonging to `userId`. Sequential (not
+ * Promise.all) so concurrent swaps from the same wallet never race each other
+ * for a blockhash/nonce, and so one failed sell can never take down the rest
+ * of the batch — every iteration is individually caught and bucketed into the
+ * summary rather than letting a thrown error abort the loop. Duplicate-close
+ * protection for each position is inherited for free from closePosition's own
+ * positionCloseLock acquire/release (positionCloseLock.ts) — no separate
+ * locking needed here. Extracted from the route handler so it's directly
+ * unit-testable with a mocked `fastify`, same convention as
+ * loadOwnedOpenPosition above.
+ */
+export async function closeAllOpenPositions(
+  fastify: FastifyInstance,
+  userId: string,
+): Promise<CloseAllSummary> {
+  const wallets = await fastify.prisma.wallet.findMany({
+    where: { userId },
+    select: { id: true },
+  });
+  const openPositions = await fastify.prisma.position.findMany({
+    where: { status: 'OPEN', walletId: { in: wallets.map((w) => w.id) } },
+    include: { token: true, wallet: true },
+  });
+
+  let closed = 0;
+  let failed = 0;
+  let skipped = 0;
+  const failures: CloseAllSummary['failures'] = [];
+
+  for (const position of openPositions) {
+    const symbol = position.token.symbol ?? position.token.mint.slice(0, 6);
+    const pair = await fastify
+      .dexScreener!.getBestSolanaPair(position.token.mint)
+      .catch(() => undefined);
+    const currentPriceUsd = pair?.priceUsd ? Number(pair.priceUsd) : undefined;
+    if (currentPriceUsd === undefined || !Number.isFinite(currentPriceUsd)) {
+      skipped++;
+      failures.push({
+        positionId: position.id,
+        symbol,
+        reason: 'No current price available for this token right now',
+      });
+      continue;
+    }
+
+    try {
+      const result = await fastify.positionManager!.closePosition(
+        position.id,
+        position.walletId,
+        position.wallet.encryptedSecret,
+        fastify.config.ENCRYPTION_KEY,
+        { currentPriceUsd },
+      );
+      // signature === null covers both closePosition's own zero-balance
+      // reconciliation (see positionManager.ts) and the "no longer OPEN by
+      // the time the close lock was acquired" no-op — neither is a real
+      // sell, so neither should be counted (or fabricate a PnL) as "closed".
+      if (result.signature === null) {
+        skipped++;
+        failures.push({
+          positionId: position.id,
+          symbol,
+          reason:
+            result.closed && result.position.status === 'CLOSED'
+              ? 'Zero on-chain balance — reconciled without a sell, no PnL recorded'
+              : 'Already handled by another in-flight operation',
+        });
+      } else {
+        closed++;
+      }
+    } catch (err) {
+      failed++;
+      const message = err instanceof Error ? err.message : 'Sell failed';
+      failures.push({ positionId: position.id, symbol, reason: message });
+    }
+  }
+
+  return { closed, failed, skipped, failures };
 }
 
 export default async function positionRoutes(fastify: FastifyInstance) {
@@ -243,6 +349,81 @@ export default async function positionRoutes(fastify: FastifyInstance) {
       } catch (err) {
         return sendSellError(reply, err);
       }
+    },
+  );
+
+  // Admin-only: force-close any user's position, not just the caller's own.
+  // Every other manual-sell route above 404s on a position it doesn't own —
+  // by design, so one user's session can never touch another's funds — but
+  // that also means there was no way for an operator to close a position
+  // that a normal user's own bot/dashboard session can't reach (stuck on a
+  // different account, or the owning user unreachable). Same
+  // closePosition primitive, same rate limit; the only difference is the
+  // missing ownership check, gated behind fastify.requireAdmin instead.
+  fastify.post(
+    '/admin/positions/:id/close',
+    { preHandler: fastify.requireAdmin, config: { rateLimit: SELL_RATE_LIMIT } },
+    async (req, reply) => {
+      if (!fastify.positionManager || !fastify.dexScreener) {
+        return reply.code(503).send({ error: 'Trading engine is not available' });
+      }
+      const { id } = req.params as { id: string };
+      const loaded = await loadOpenPositionAny(fastify, id);
+      if (loaded.error === 404) return reply.code(404).send({ error: 'Position not found' });
+      if (loaded.error === 409) return reply.code(409).send({ error: 'Position is not open' });
+      const { position } = loaded;
+
+      const pair = await fastify.dexScreener.getBestSolanaPair(position.token.mint);
+      const currentPriceUsd = pair?.priceUsd ? Number(pair.priceUsd) : undefined;
+      if (currentPriceUsd === undefined || !Number.isFinite(currentPriceUsd)) {
+        return reply
+          .code(422)
+          .send({ error: 'No current price available for this token right now' });
+      }
+
+      fastify.log.warn(
+        {
+          positionId: position.id,
+          mint: position.token.mint,
+          symbol: position.token.symbol,
+          ownerUserId: position.wallet.userId,
+          adminUserId: req.user.userId,
+          location: 'apps/api/src/routes/positions.ts:/admin/positions/:id/close',
+        },
+        'ADMIN FORCE-CLOSE — closing a position on behalf of another user',
+      );
+
+      try {
+        // Reuses 'manual_emergency' rather than adding a new ExitReason value —
+        // this is an emergency-style forced close same as /emergency-sell, just
+        // triggered by an admin instead of the position's own owner. The
+        // fastify.log.warn above is what distinguishes an admin override in
+        // the audit trail; adding a distinct ExitReason would also require
+        // updating the telegram-bot's exhaustive EXIT_REASON_LABELS/reason
+        // unions for no reporting benefit this task needs.
+        const result = await fastify.positionManager.closePosition(
+          position.id,
+          position.walletId,
+          position.wallet.encryptedSecret,
+          fastify.config.ENCRYPTION_KEY,
+          { currentPriceUsd, reason: 'manual_emergency' },
+        );
+        return reply.send(result);
+      } catch (err) {
+        return sendSellError(reply, err);
+      }
+    },
+  );
+
+  fastify.post(
+    '/positions/close-all',
+    { preHandler: fastify.authenticate, config: { rateLimit: SELL_RATE_LIMIT } },
+    async (req, reply) => {
+      if (!fastify.positionManager || !fastify.dexScreener) {
+        return reply.code(503).send({ error: 'Trading engine is not available' });
+      }
+      const summary = await closeAllOpenPositions(fastify, req.user.userId);
+      return reply.send(summary);
     },
   );
 }

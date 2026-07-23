@@ -30,6 +30,12 @@ model User {
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
+  // Telegram bot UI language — "en" or "fa" (Persian). Drives every screen's copy
+  // and per-recipient notification text (see apps/telegram-bot/src/i18n). Plain
+  // String rather than an enum: keeps a future third language additive (no migration
+  // to widen an enum), same reasoning as SnipeConfig.trailingStopPreset elsewhere.
+  language String @default("en")
+
   // Snapshot of what the user actually agreed to (see fee.ts's consent-gate
   // check in the Telegram bot) — if an admin later changes the fee %, this
   // snapshot no longer matches BusinessSettings.performanceFeeBps and the
@@ -75,6 +81,14 @@ model Wallet {
   positions     Position[]
   auditLogs     AuditLog[]
   ledgerEntries LedgerEntry[]
+  // Nullable back-relation — see SnipeConfig.walletId's own doc comment. A
+  // wallet is only ever soft-deleted (isActive: false), never hard-deleted, so
+  // onDelete: SetNull below is precautionary rather than something that fires
+  // in practice today.
+  snipeConfigs  SnipeConfig[]
+  // A referrer's own wallet, as the payout destination for real on-chain
+  // referral-commission transfers — see PayoutAttempt's own doc comment.
+  payoutAttempts PayoutAttempt[]
 
   @@index([userId])
   @@map("wallets")
@@ -140,6 +154,8 @@ model Token {
   positions Position[]
   snipes    SnipeConfig[]
   opportunityScoreLogs OpportunityScoreLog[]
+  smartWalletTokenEntries SmartWalletTokenEntry[]
+  shadowModeDecisionLogs  ShadowModeDecisionLog[]
 
   @@index([dex])
   @@index([createdAt])
@@ -213,6 +229,28 @@ model Trade {
 enum PositionStatus {
   OPEN
   CLOSED
+}
+
+/// Position monitoring diagnostic state (2026-07-22 audit, stale-price alert
+/// fix) — deliberately separate from PositionStatus: a position stuck here is
+/// still OPEN and still holds real tokens; this only classifies *why* the
+/// price monitor currently can't get a usable quote for it, so nothing that
+/// filters on status='OPEN' (autoTrader, other monitors) stops seeing it.
+enum PositionMonitoringState {
+  /// Default — price/sell-route resolution is working normally.
+  NORMAL
+  /// No usable price from any source, but a definitive "no route exists"
+  /// hasn't been confirmed yet (could be transient, or DexScreener-only gap
+  /// with liquidity resolvable another way).
+  PRICE_UNAVAILABLE
+  /// A real sell-route probe returned a confirmed, non-transient "no route"
+  /// answer (see sellabilityCheck.ts's isTransientQuoteError) — a stronger,
+  /// more actionable finding than PRICE_UNAVAILABLE.
+  NO_SELL_ROUTE
+  /// Escalated after NO_SELL_ROUTE has persisted past a long threshold
+  /// without recovering — signals a human should look at this position;
+  /// never auto-closes anything on its own.
+  MANUAL_REVIEW
 }
 
 model Position {
@@ -290,6 +328,27 @@ model Position {
   // Both null when resolution failed or the position isn't institutional.
   devWalletAddress          String?
   devWalletAmountRawAtEntry String?
+
+  // --- Price-monitor diagnostic state (2026-07-22 audit) — see
+  // PositionMonitoringState's own doc comment. Persisted specifically because
+  // the prior in-memory-only tracking (priceMonitor.ts's noPriceState Map)
+  // reset to zero on every process restart, which is why a position that had
+  // genuinely been priceless for 70+ minutes kept re-alerting "over 10
+  // minutes" after each of that day's several deploys — the elapsed-time
+  // clock and the alert dedup both live here now instead, so they survive a
+  // restart.
+  monitoringState             PositionMonitoringState @default(NORMAL)
+  /// When the position most recently left NORMAL — the start of the current
+  /// outage episode, not reset by moving between PRICE_UNAVAILABLE and
+  /// NO_SELL_ROUTE (same underlying episode, refined diagnosis).
+  monitoringStateSince        DateTime?
+  /// When a monitoring alert (of any kind) was last actually sent for this
+  /// position.
+  lastMonitoringAlertAt       DateTime?
+  /// The monitoringState value at the time of that last alert — lets a later
+  /// tick tell "nothing changed, still deduped" from "this got worse/better,
+  /// alert again" without needing a fresh elapsed-time calculation.
+  lastAlertedMonitoringState  PositionMonitoringState?
 
   partialExits      PositionPartialExit[]
   emergencyExitLogs EmergencyExitLog[]
@@ -395,6 +454,15 @@ model SnipeConfig {
   id                  String   @id @default(cuid())
   userId              String
   user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Which of the user's wallets this config buys from. Nullable and additive:
+  // every config that existed before this field was added has walletId = null,
+  // which preserves the exact pre-existing behavior (AutoTrader falls back to
+  // the user's first active wallet — see autoTrader.ts) rather than silently
+  // changing which wallet an old config trades out of. A newly created config
+  // is stamped with the user's first active wallet at creation time so it has
+  // a concrete, displayable wallet from day one.
+  walletId            String?
+  wallet              Wallet?  @relation(fields: [walletId], references: [id], onDelete: SetNull)
   tokenId             String?
   token               Token?   @relation(fields: [tokenId], references: [id])
   isActive            Boolean  @default(true)
@@ -446,9 +514,18 @@ model SnipeConfig {
   useOpportunityScoreGate Boolean @default(false)
 
   @@index([userId])
+  @@index([walletId])
   @@map("snipe_configs")
 }
 
+/// Smart Money Analysis (Sections 3-4, 2026-07-22): winRate/totalPnlUsd/label
+/// above are the pre-existing hand-curated/manual-label fields (unused by any
+/// pipeline before this feature) — the fields below are computed by
+/// smartWalletTracker.ts's recomputeWalletConfidence from the raw observation
+/// log in SmartWalletTokenEntry, and are what the pipeline actually reads.
+/// Both coexist on the same row: a manually-labeled wallet and a
+/// tracker-scored one are distinguished by which columns are populated, not
+/// by separate tables.
 model SmartWallet {
   id          String   @id @default(cuid())
   address     String   @unique
@@ -458,7 +535,152 @@ model SmartWallet {
   isTracked   Boolean  @default(true)
   createdAt   DateTime @default(now())
 
+  /// 0-100; null until MIN_SAMPLE_SIZE_FOR_CONFIDENCE resolved entries exist
+  /// (see smartWalletTracker.ts's computeWalletConfidence) — a wallet is never
+  /// scored confident off a single successful trade.
+  confidenceScore    Float?
+  sampleSize         Int      @default(0)
+  medianRoiPercent   Float?
+  avgRoiPercent      Float?
+  earlyEntryRatePct  Float?
+  rugExposureRatePct Float?
+  realizedPnlUsd     Float?
+  unrealizedPnlUsd   Float?
+  lastScoredAt       DateTime?
+  lastActivityAt     DateTime?
+  /// Deterministic hash of a shared resolved funding source — see
+  /// sybilDetector.ts's groupBySharedFundingSource. Null when no funding
+  /// source could be resolved (bounded one-hop lookup — see resolveFundingSource).
+  sybilClusterId     String?
+  /// 0-100 confidence this wallet is part of a manipulated/Sybil cluster —
+  /// discounts (never hard-excludes) this wallet's contribution to
+  /// SmartMoneyScore. See sybilDetector.ts's scoreClusterSuspicion.
+  sybilConfidencePct Float?
+
+  entries SmartWalletTokenEntry[]
+
+  @@index([confidenceScore])
+  @@index([sybilClusterId])
   @@map("smart_wallets")
+}
+
+enum SmartWalletEntryStatus {
+  OPEN
+  EXITED
+  EXPIRED
+  RUG_FLAGGED
+}
+
+/// Smart Money Analysis (Sections 3-4, 2026-07-22): raw per-wallet-per-token
+/// observation log SmartWalletTracker computes SmartWallet's aggregate
+/// columns from — kept separate so recompute logic can change without losing
+/// history, same separation OpportunityScoreLog has from Token. Scoped to
+/// pre-migration pump.fun tokens for v1 (see smartWalletTracker.ts's own doc
+/// comment) — entrySignature is resolved from the mint account's own recent
+/// signature history, bounded per token, never a network-wide subscription.
+model SmartWalletTokenEntry {
+  id            String      @id @default(cuid())
+  walletAddress String
+  wallet        SmartWallet @relation(fields: [walletAddress], references: [address])
+  mint          String
+  tokenId       String?
+  token         Token?      @relation(fields: [tokenId], references: [id])
+
+  entrySignature           String
+  entryAt                  DateTime
+  entryPriceUsd            Float?
+  entryMarketCapUsd        Float?
+  /// Early-entry-frequency signal — null when pool-creation time is unknown.
+  secondsAfterPoolCreation Int?
+
+  exitSignature      String?
+  exitAt              DateTime?
+  exitPriceUsd        Float?
+  realizedRoiPercent  Float?
+
+  /// Refreshed periodically (same poller as shadow-mode price sampling,
+  /// shadowModePriceSampler.ts) until exit or the evaluation window closes.
+  lastMarkPriceUsd     Float?
+  lastMarkAt           DateTime?
+  unrealizedRoiPercent Float?
+
+  status      SmartWalletEntryStatus @default(OPEN)
+  /// Set true once this token is later observed to have rugged/failed the
+  /// critical gate/been blacklisted — feeds rugExposureRatePct.
+  isRugOrScam Boolean                @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@unique([walletAddress, mint, entrySignature])
+  @@index([walletAddress])
+  @@index([mint])
+  @@index([entryAt])
+  @@map("smart_wallet_token_entries")
+}
+
+enum ShadowDecision {
+  BUY
+  WATCH
+  SKIP
+}
+
+/// Shadow-mode evaluation log (Sections 3-4, 2026-07-22) — distinct from
+/// OpportunityScoreLog (no decision/reasons field, written even for tokens
+/// that never reached the momentum/wallet stage). One row per token that
+/// passed the critical security gate (see candidatePipeline.ts), written
+/// unconditionally regardless of whether SMART_MONEY_ANALYSIS_ENABLED/
+/// EARLY_MOMENTUM_DETECTION_ENABLED are on (score fields simply null if off)
+/// or whether a real trade happens. Never read by AutoTrader — see
+/// shadowModeEvaluator.ts's own doc comment. Populated over time by
+/// shadowModePriceSampler.ts for the precision/false-positive/rug-miss/
+/// hypothetical-PnL evaluation in scripts/evaluateShadowMode.ts.
+model ShadowModeDecisionLog {
+  id    String @id @default(cuid())
+  tokenId String
+  token   Token  @relation(fields: [tokenId], references: [id])
+  mint    String
+
+  safetyScore        Float
+  aiScore            Float?
+  smartMoneyScore    Float?
+  earlyMomentumScore Float?
+  opportunityScore   Float
+
+  smartMoneyClusterBuy Boolean @default(false)
+  clusterWalletCount   Int?
+  sybilDiscountApplied Boolean @default(false)
+  /// Momentum sub-metric breakdown (buy/sell ratio, accelerations, wash-trade
+  /// suspicion, etc.) — folded into this row's JSON rather than a separate
+  /// table, since it shares this row's exact lifecycle.
+  momentumBreakdown Json?
+
+  hypotheticalDecision ShadowDecision
+  /// string[] — the hypothetical decision's reasons.
+  reasons Json
+
+  priceAtDetectionUsd Float?
+  detectedAt          DateTime @default(now())
+
+  /// Nullable until each offset is reached — "no data" (not yet sampled) is
+  /// never conflated with "price went to zero" (a real sampled outcome).
+  price5mUsd   Float?
+  price15mUsd  Float?
+  price1hUsd   Float?
+  price4hUsd   Float?
+  price24hUsd  Float?
+  /// Set once the 24h sample (or an earlier rug/delist determination) lands —
+  /// marks this row closed out for evaluation purposes.
+  sampledAt24h DateTime?
+  /// True when a later sample showed liquidity collapse or the pair
+  /// disappearing entirely — the rug/scam-miss-rate proxy.
+  wasRugOrScamBySample Boolean?
+
+  createdAt DateTime @default(now())
+
+  @@index([tokenId])
+  @@index([detectedAt])
+  @@index([hypotheticalDecision])
+  @@map("shadow_mode_decision_logs")
 }
 
 model CopyTradeConfig {
@@ -496,19 +718,61 @@ enum MarketingCategory {
   ANNOUNCEMENTS
 }
 
+/// Bilingual posts (2026-07-23): every post is generated and published as a
+/// single Telegram message containing both an English and a Persian section
+/// (see apps/marketing-engine/src/generator.ts) — titleEn/bodyEn and
+/// titleFa/bodyFa are both always populated together, never independently.
+/// contentHash is computed over the combined bilingual text, so dedup and
+/// near-duplicate detection both see exactly what was actually published.
+/// Visual pipeline (2026-07-23, apps/marketing-engine/src/visuals/): NONE for
+/// a text-only post; TEMPLATE_STAT/TEMPLATE_HEADLINE for the branded local
+/// renderer (visuals/statCard.ts, visuals/headlineCard.ts — no AI, no
+/// external cost, always available); AI_GENERATED when an image provider
+/// (visuals/render.ts) produced the background pixels — see
+/// imageContentHash's own doc comment for why this is still true even though
+/// AI_GENERATED posts share the same text-compositing layout as
+/// TEMPLATE_HEADLINE.
+enum VisualType {
+  NONE
+  TEMPLATE_STAT
+  TEMPLATE_HEADLINE
+  AI_GENERATED
+}
+
 model MarketingPost {
   id           String            @id @default(cuid())
   category     MarketingCategory
   contentHash  String            @unique
-  title        String
-  body         String
-  imageUrl     String?
+  titleEn      String
+  bodyEn       String
+  titleFa      String
+  bodyFa       String
+
+  visualType VisualType @default(NONE)
+  /// Local filesystem path under apps/marketing-engine/generated-images/ —
+  /// never a public URL (nothing serves these files over HTTP); Telegram
+  /// gets the bytes directly via grammy's InputFile. Null iff visualType is
+  /// NONE.
+  imagePath String?
+  /// Hash of the visual's own content spec (e.g. "TEMPLATE_STAT|79|NEW
+  /// TOKENS SCREENED" or "AI_GENERATED|<prompt>") — deliberately independent
+  /// of contentHash (the text's hash): two different-worded posts could
+  /// legitimately render the identical stat card on a quiet day, and this is
+  /// what catches that. Checked against recent posts before a visual is
+  /// attached (see runner.ts); null iff visualType is NONE.
+  imageContentHash String?
+  /// Captured from Telegram's own sendPhoto/sendMessage response — the
+  /// authoritative record of what was actually published, independent of
+  /// this row's own id.
+  telegramMessageId Int?
+
   buttons      Json?
   publishedAt  DateTime?
   scheduledFor DateTime?
   createdAt    DateTime          @default(now())
 
   @@index([category])
+  @@index([imageContentHash])
   @@map("marketing_posts")
 }
 
@@ -644,10 +908,12 @@ enum BlacklistType {
   DEPLOYER
 }
 
-/// Cheap, RPC-free deny-list checked before any expensive risk/AI work runs —
-/// currently only MINT entries are looked up (see worker.ts's handleTelegramSignal);
-/// DEPLOYER exists for future use once a cheap way to resolve a deployer address
-/// from a bare mint exists, but is not populated or checked yet.
+/// Cheap, RPC-free deny-list checked before any expensive risk/AI work runs.
+/// MINT entries are looked up in worker.ts's handleTelegramSignal; DEPLOYER
+/// entries are looked up in candidatePipeline.ts's runCandidatePipeline
+/// (2026-07-22), resolved from an on-chain launch's creation-tx fee payer —
+/// zero rows exist by default, so this can't block anything until an operator
+/// actually adds one.
 model BlacklistEntry {
   id        String        @id @default(cuid())
   type      BlacklistType
@@ -740,6 +1006,15 @@ model PerformanceFeeLedger {
   userShareUsd    Float
   createdAt       DateTime @default(now())
 
+  // Real on-chain payout (2026-07-23) — the one combined transfer transaction
+  // that actually moved the referral/platform share out of the trader's
+  // wallet, once confirmed. Null when no payout was attempted/needed
+  // (feeUsd/referral totals are 0), or when the payout was skipped/failed —
+  // see PayoutAttempt for the full state; this row is only ever created
+  // AFTER a fee computation completes, independent of the payout outcome
+  // (see registerFeeSystem.ts).
+  payoutTxSignature String?
+
   referralRewards ReferralReward[]
 
   @@index([userId])
@@ -764,9 +1039,82 @@ model ReferralReward {
   rewardUsd              Float
   createdAt              DateTime             @default(now())
 
+  // Real on-chain payout (2026-07-23): which of this referrer's wallets was
+  // actually paid, the shared transaction signature (matches
+  // PerformanceFeeLedger.payoutTxSignature — one combined transaction pays
+  // every recipient for a given close), and whether this specific reward
+  // rolled up into the platform's own treasury payment instead of being paid
+  // to the referrer directly (referrer had zero active wallets at payout
+  // time) — see payoutCalculation.ts's resolvePayoutRecipients.
+  payoutWalletId     String?
+  payoutTxSignature  String?
+  rolledUpToTreasury Boolean @default(false)
+
   @@index([referrerUserId])
   @@index([performanceFeeLedgerId])
   @@map("referral_rewards")
+}
+
+enum PayoutStatus {
+  PENDING
+  SUBMITTED
+  CONFIRMED
+  FAILED
+  SKIPPED_INSUFFICIENT_BALANCE
+  SKIPPED_PAPER_TRADE
+  SKIPPED_NO_PAYOUT_NEEDED
+}
+
+/// Real on-chain payout of referral commissions + the platform's own share
+/// (2026-07-23), replacing the previous ledger-only bookkeeping. One row per
+/// profitable position close, created in PENDING status BEFORE any chain
+/// interaction — the unique constraint on positionId is the idempotency
+/// guard that makes a crash-mid-transfer safe (see
+/// payoutExecutor.ts's own doc comment): nothing in PerformanceFeeLedger/
+/// LedgerEntry ever claims a debit happened until this row reaches
+/// CONFIRMED, and txSignature is recorded here BEFORE the transaction is
+/// ever broadcast, so a resumed process (or a human) can always look up
+/// what actually happened on-chain instead of guessing or risking a
+/// duplicate send.
+///
+/// Deliberately mutable (unlike LedgerEntry/AuditLog, which are DB-trigger-
+/// enforced immutable) — this table's whole purpose is advancing through a
+/// state machine (PENDING -> SUBMITTED -> CONFIRMED/FAILED) as one real
+/// attempt proceeds. The immutable record of what actually happened lives in
+/// LedgerEntry once this reaches CONFIRMED, matching this codebase's
+/// existing split between mutable working state and immutable financial
+/// history.
+model PayoutAttempt {
+  id         String       @id @default(cuid())
+  positionId String       @unique
+  walletId   String
+  wallet     Wallet       @relation(fields: [walletId], references: [id])
+  status     PayoutStatus @default(PENDING)
+
+  /// Frozen at PENDING-creation time so a re-inspected attempt never
+  /// recomputes against a different SOL/USD price than the one already
+  /// committed to.
+  solPriceUsdAtCalc    Float
+  treasuryAddress      String
+  treasuryLamports     BigInt
+  /// [{referrerUserId, level, walletId, publicKey, lamports, rolledUpToTreasury}]
+  /// — the full computed breakdown, for a human reconciling a stuck/failed
+  /// attempt without needing to re-derive it from ReferralReward rows.
+  referralBreakdown    Json
+  totalLamports        BigInt
+  estimatedFeeLamports BigInt
+
+  /// Written BEFORE the transaction is broadcast — see this model's own doc
+  /// comment on why that ordering is the actual safety guarantee here.
+  txSignature         String?   @unique
+  failureReason       String?
+  processingStartedAt DateTime  @default(now())
+  confirmedAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([status])
+  @@map("payout_attempts")
 }
 
 // =====================================================================

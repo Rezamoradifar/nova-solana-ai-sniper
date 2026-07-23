@@ -2,6 +2,7 @@ import { PublicKey } from '@solana/web3.js';
 import { describe, expect, it, vi } from 'vitest';
 import {
   estimateLiquidityFromPriceImpact,
+  isFastPathCandidate,
   mapDexScreenerIdToDex,
   resolveLiquidityUsd,
   resolveRecentActivity,
@@ -106,6 +107,30 @@ describe('resolveRecentActivity', () => {
       recentSells: 2,
       recentVolumeUsd: 50,
     });
+  });
+});
+
+describe('isFastPathCandidate', () => {
+  const thresholds = { minRecentBuys: 15, minRecentVolumeUsd: 2000 };
+
+  it('is true only when both buys and volume clear their thresholds', () => {
+    expect(isFastPathCandidate({ recentBuys: 20, recentVolumeUsd: 3000 }, thresholds)).toBe(true);
+  });
+
+  it('is false when buys clear the threshold but volume does not', () => {
+    expect(isFastPathCandidate({ recentBuys: 20, recentVolumeUsd: 500 }, thresholds)).toBe(false);
+  });
+
+  it('is false when volume clears the threshold but buys do not', () => {
+    expect(isFastPathCandidate({ recentBuys: 2, recentVolumeUsd: 3000 }, thresholds)).toBe(false);
+  });
+
+  it('treats missing fields as 0, never as "unknown, assume fast"', () => {
+    expect(isFastPathCandidate({}, thresholds)).toBe(false);
+  });
+
+  it('is true exactly at the threshold boundary (>=, not >)', () => {
+    expect(isFastPathCandidate({ recentBuys: 15, recentVolumeUsd: 2000 }, thresholds)).toBe(true);
   });
 });
 

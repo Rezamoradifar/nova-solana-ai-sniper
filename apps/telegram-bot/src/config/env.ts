@@ -9,6 +9,15 @@ export const botEnvSchema = envSchema.pick({
   TELEGRAM_CHAT_ID: true,
   TELEGRAM_ADMIN_IDS: true,
   ENCRYPTION_KEY: true,
+  // Used only to mint short-lived service JWTs so the bot can call apps/api's
+  // own authenticated position-close routes on behalf of the Telegram user it
+  // already resolved (see api/client.ts) — reusing the exact same
+  // PositionManager/Jupiter swap pipeline apps/api's Mini App and dashboard
+  // already call, instead of a second sell engine living in this process.
+  // No new trust boundary: this process already holds ENCRYPTION_KEY, which
+  // can decrypt any user's wallet private key — a strictly more powerful
+  // secret than a JWT signer.
+  JWT_SECRET: true,
   API_PORT: true,
   TELEGRAM_TREND_SOURCE_ENABLED: true,
   TELEGRAM_TREND_CHANNELS: true,

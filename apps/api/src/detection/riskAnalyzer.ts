@@ -119,6 +119,24 @@ export function resolveRecentActivity(pair: DexScreenerPair | undefined): Recent
 }
 
 /**
+ * Two-stage discovery pipeline (2026-07-22), FAST PATH classification: a
+ * candidate with rapidly accelerating recent buys/volume gets queued ahead of
+ * ordinary candidates for the AI-provider call — priority only, never a
+ * security bypass (see candidatePipeline.ts, which runs unconditionally
+ * before this is ever consulted). Pure and independently tested, same
+ * convention as resolveRecentActivity/resolveLiquidityUsd above.
+ */
+export function isFastPathCandidate(
+  activity: RecentActivity,
+  thresholds: { minRecentBuys: number; minRecentVolumeUsd: number },
+): boolean {
+  return (
+    (activity.recentBuys ?? 0) >= thresholds.minRecentBuys &&
+    (activity.recentVolumeUsd ?? 0) >= thresholds.minRecentVolumeUsd
+  );
+}
+
+/**
  * Rough constant-product liquidity estimate from a swap quote's price impact:
  * for a small probe trade, impact fraction ~= probeAmount / poolReserve, so
  * poolReserve ~= probeAmount / impact. Doubled to represent both sides of the
@@ -240,8 +258,12 @@ export class RiskAnalyzer {
     // call already ran after its getTokenSupply call, sequentially, so this just
     // reorders which sequential pair runs first) but one fewer RPC call overall.
     let mintAuthorityFetchFailed = false;
-    const mintAuthority = await getMintAuthorityInfo(this.connection, input.mint).catch(() => {
+    const mintAuthority = await getMintAuthorityInfo(this.connection, input.mint).catch((err) => {
       mintAuthorityFetchFailed = true;
+      this.logger.warn(
+        { mint: input.mint, err },
+        'mint-authority read failed — treating mint/freeze authority + holder data as UNKNOWN (fails closed, blocks buy, never assumed safe)',
+      );
       return {
         mintAuthorityRevoked: false,
         freezeAuthorityRevoked: false,
@@ -255,6 +277,7 @@ export class RiskAnalyzer {
     // as "0% concentrated" (looks safe) rather than "unknown" (should look
     // risky), inverting the fail-conservative fallback below. Skip the call
     // entirely in that case rather than let it run on bogus input.
+    let holderDataUnknown = mintAuthorityFetchFailed;
     const [holders, pair] = await Promise.all([
       mintAuthorityFetchFailed
         ? Promise.resolve({ top10HolderPercent: 100, holderCount: 0 })
@@ -263,10 +286,17 @@ export class RiskAnalyzer {
             input.mint,
             mintAuthority.supply,
             excludeAddresses,
-          ).catch(() => ({
-            top10HolderPercent: 100,
-            holderCount: 0,
-          })),
+          ).catch((err) => {
+            holderDataUnknown = true;
+            this.logger.warn(
+              { mint: input.mint, err },
+              'holder-concentration read failed — treating holder data as UNKNOWN (fails closed, blocks buy, never assumed safe)',
+            );
+            return {
+              top10HolderPercent: 100,
+              holderCount: 0,
+            };
+          }),
       this.dexScreener.getBestSolanaPair(input.mint).catch((err: unknown) => {
         this.logger.debug({ mint: input.mint, err }, 'dexscreener lookup failed');
         return undefined;
@@ -305,6 +335,16 @@ export class RiskAnalyzer {
     const isHoneypotSuspected =
       !mintAuthority.mintAuthorityRevoked || holders.top10HolderPercent > 70 || liquidityUsd < 500;
 
+    // Only mark honeypot suspicion itself as "unknown" when it's true *solely*
+    // because an upstream input was unknown — a genuinely resolved low-liquidity
+    // reading (liquidityUsd < 500, always a real, known number) remains a
+    // confirmed reason even if mint/holder data also happens to be unknown.
+    const honeypotDueToLowLiquidity = liquidityUsd < 500;
+    const honeypotCheckUnknown =
+      isHoneypotSuspected &&
+      !honeypotDueToLowLiquidity &&
+      (mintAuthorityFetchFailed || holderDataUnknown);
+
     const recentActivity = resolveRecentActivity(pair);
 
     return {
@@ -322,6 +362,9 @@ export class RiskAnalyzer {
       holderCount: holders.holderCount,
       imageUrl: pair?.info?.imageUrl,
       liquiditySource: source,
+      mintAuthorityDataUnknown: mintAuthorityFetchFailed || undefined,
+      holderDataUnknown: holderDataUnknown || undefined,
+      honeypotCheckUnknown: honeypotCheckUnknown || undefined,
       ...recentActivity,
     };
   }

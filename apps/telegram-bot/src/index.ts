@@ -5,6 +5,7 @@ import { loadBotEnv, parseAdminIds } from './config/env.js';
 import { createBot } from './bot.js';
 import { registerAdminCommands } from './admin/commands.js';
 import { registerUiRouter } from './ui/router.js';
+import { pendingSnapshot } from './ui/pending.js';
 import { getBotConnection } from './solana/connection.js';
 
 const logger = createLogger('telegram-bot');
@@ -52,6 +53,8 @@ async function main() {
     SOLANA_RPC_URL: env.SOLANA_RPC_URL,
   });
 
+  const api = { baseUrl: `http://127.0.0.1:${env.API_PORT}`, jwtSecret: env.JWT_SECRET };
+
   registerAdminCommands(bot, prisma, adminIds, logger, redis);
   registerUiRouter(bot, {
     prisma,
@@ -59,7 +62,23 @@ async function main() {
     logger,
     telegramTrend,
     solanaConnection,
+    api,
+    adminIds,
+    redis,
   });
+
+  // One-time diagnostic: pending.ts's flow-state Map is in-memory only, so a
+  // restart is the only way code changes take effect but also the only chance
+  // to see what was still in-flight right before it's wiped. Logs chatId +
+  // flow type only — never the flow's payload (e.g. no wallet backup/restore
+  // passwords), same restraint as every other log line touching this data.
+  const logPendingOnShutdown = (signal: string) => {
+    logger.info({ signal, pending: pendingSnapshot() }, 'shutting down, pending flow snapshot');
+    void bot.stop();
+    process.exit(0);
+  };
+  process.on('SIGINT', () => logPendingOnShutdown('SIGINT'));
+  process.on('SIGTERM', () => logPendingOnShutdown('SIGTERM'));
 
   await bot.start({
     onStart: () => logger.info('telegram bot started (long polling)'),

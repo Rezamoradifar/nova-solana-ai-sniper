@@ -1,15 +1,30 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
 import type { RiskFlags } from '@nova/shared';
+import type { NotificationService } from '@nova/telegram-bot';
 import { RiskAnalyzer } from '../detection/riskAnalyzer.js';
+import { TtlCache } from '../lib/ttlCache.js';
 import type { PositionManager } from './positionManager.js';
 import { SafetyCheckError } from './safety.js';
+import { SellabilityCheckError } from './sellabilityCheck.js';
 import { evaluateEntry } from './entryFilter.js';
 import {
   resolvePresetExitParams,
   TRAILING_STOP_PRESETS,
   type TrailingStopPreset,
 } from './adaptiveTrailingStop.js';
+
+/**
+ * "Once per user" for the low-balance warning, cheaply — a fixed TTL, not a
+ * state-based "cleared the moment they actually deposit" flag (that would
+ * need a DB-backed field so it survives a restart; this in-memory cache
+ * doesn't, same accepted trade-off as ui/pending.ts). 24h means a user who
+ * never tops up gets re-notified once a day rather than on every single
+ * skipped launch — plausibly dozens of times an hour otherwise, per the
+ * 2026-07-18 pipeline health check (223 wallet-balance blocks in ~4h for 20
+ * users, all before this cache existed).
+ */
+const LOW_BALANCE_NOTIFY_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** Narrows the raw DB string (or null/'custom') to a preset the adaptive formula understands. */
 function activePreset(raw: string | null): Exclude<TrailingStopPreset, 'custom'> | undefined {
@@ -62,6 +77,10 @@ export interface AutoTraderDeps {
    * Defaults to false, reproducing today's exact Math.min(ruleScore, aiScore)
    * gate for every existing config. */
   opportunityScoreGateGloballyEnabled?: boolean;
+  /** Optional so every existing/test caller that omits it is unaffected — the
+   * low-balance warning below is a no-op without it, same convention as every
+   * other notifier?.notifyX(...) call site in this codebase. */
+  notifier?: NotificationService;
 }
 
 /**
@@ -71,6 +90,8 @@ export interface AutoTraderDeps {
  * every user's wallet to buy.
  */
 export class AutoTrader {
+  private readonly lowBalanceNotifiedCache = new TtlCache<string>(LOW_BALANCE_NOTIFY_TTL_MS);
+
   constructor(private readonly deps: AutoTraderDeps) {}
 
   async evaluateAndMaybeBuy(
@@ -89,6 +110,20 @@ export class AutoTrader {
       tokenDetectedAt?: number;
       aiScoringStartAt?: number;
       aiScoringEndAt?: number;
+      /**
+       * Two-stage discovery pipeline (2026-07-22): epoch-ms timestamps from
+       * candidatePipeline.ts's runCandidatePipeline (which now runs the
+       * critical-security-gate + sellability checks that used to live here,
+       * once per token, before this function is even called) plus
+       * `decisionAt`, captured just upstream of this call once the
+       * Opportunity Score is computed. All optional, same convention as the
+       * three fields above.
+       */
+      analysisStartedAt?: number;
+      dexValidatedAt?: number;
+      safetyCompletedAt?: number;
+      sellabilityVerifiedAt?: number;
+      decisionAt?: number;
     },
     /**
      * Final Opportunity Score (Section 7, 2026-07-18): the weighted composite
@@ -99,6 +134,13 @@ export class AutoTrader {
      */
     finalOpportunityScore?: number,
   ) {
+    // Two-stage discovery pipeline (2026-07-22): the critical security gate
+    // and pre-buy sellability check that used to run here (once per token,
+    // AFTER the AI score was already computed) now run in
+    // candidatePipeline.ts's runCandidatePipeline, BEFORE the AI provider is
+    // ever called — see that module's doc comment. By the time this function
+    // runs, both have already passed for this token; this loop only applies
+    // each active config's own per-user gates below.
     const configs = await this.deps.prisma.snipeConfig.findMany({
       where: { isActive: true, autoBuyOnLaunch: true },
       include: {
@@ -200,7 +242,13 @@ export class AutoTrader {
         continue;
       }
 
-      const wallet = config.user.wallets[0];
+      // A config pinned to a specific wallet (walletId set) uses that wallet as
+      // long as it's still active; otherwise (including every pre-existing
+      // config, which has walletId = null) this falls back to exactly today's
+      // behavior — the user's first active wallet.
+      const wallet = config.walletId
+        ? (config.user.wallets.find((w) => w.id === config.walletId) ?? config.user.wallets[0])
+        : config.user.wallets[0];
       if (!wallet) {
         logBuyCancelled(this.deps.logger, {
           mint,
@@ -236,6 +284,11 @@ export class AutoTrader {
         { mint, userId: config.userId, walletId: wallet.id, amountSol: config.buyAmountSol },
         'BUY STARTED',
       );
+      // Two-stage discovery pipeline (2026-07-22): captured right at this
+      // checkpoint, same convention as the other pipeline timestamps — one
+      // per token-level attempt (this config's own openPosition call), not
+      // remeasured downstream.
+      const buySubmittedAt = Date.now();
 
       try {
         const { trade } = await this.deps.positionManager.openPosition({
@@ -258,8 +311,14 @@ export class AutoTrader {
           riskScoreAtEntry: Math.min(ruleScore, aiScore),
           ...exitParams,
           tokenDetectedAt: pipelineTimestamps?.tokenDetectedAt,
+          analysisStartedAt: pipelineTimestamps?.analysisStartedAt,
+          dexValidatedAt: pipelineTimestamps?.dexValidatedAt,
+          safetyCompletedAt: pipelineTimestamps?.safetyCompletedAt,
+          sellabilityVerifiedAt: pipelineTimestamps?.sellabilityVerifiedAt,
           aiScoringStartAt: pipelineTimestamps?.aiScoringStartAt,
           aiScoringEndAt: pipelineTimestamps?.aiScoringEndAt,
+          decisionAt: pipelineTimestamps?.decisionAt,
+          buySubmittedAt,
         });
         // positionManager.openPosition itself already logs the canonical
         // "BUY EXECUTED\nSignature:\n<signature>" line; this ties that outcome
@@ -280,7 +339,20 @@ export class AutoTrader {
             { userId: config.userId, mint, reason: err.reason },
             'auto-buy blocked by safety check',
           );
+          if (err.code === 'wallet_balance' && err.details) {
+            this.maybeNotifyLowBalance(config.userId, err.details);
+          }
           results.push({ userId: config.userId, bought: false, reason: 'safety_blocked' });
+          continue;
+        }
+        if (err instanceof SellabilityCheckError) {
+          // positionManager.openPositionLocked already logged the BUY CANCELLED
+          // line and notified for this — ties it back to the specific config/user.
+          this.deps.logger.warn(
+            { userId: config.userId, mint, reasonCode: err.reasonCode },
+            'auto-buy blocked by pre-buy sellability check',
+          );
+          results.push({ userId: config.userId, bought: false, reason: 'not_sellable' });
           continue;
         }
         logBuyCancelled(this.deps.logger, {
@@ -296,5 +368,21 @@ export class AutoTrader {
 
     this.deps.logger.info({ mint, results }, 'AutoTrader.evaluateAndMaybeBuy complete');
     return results;
+  }
+
+  /**
+   * Fire-and-forget, deduped per user via lowBalanceNotifiedCache — see its
+   * TTL comment above. Not awaited by the caller: a Telegram send stalling
+   * shouldn't hold up evaluating this token against the remaining configs.
+   */
+  private maybeNotifyLowBalance(
+    userId: string,
+    details: { balanceSol: number; requiredSol: number },
+  ): void {
+    if (!this.deps.notifier || this.lowBalanceNotifiedCache.has(userId)) return;
+    this.lowBalanceNotifiedCache.add(userId);
+    this.deps.notifier.notifyLowWalletBalance(userId, details).catch((err) => {
+      this.deps.logger.error({ err, userId }, 'failed to send low-balance notification');
+    });
   }
 }

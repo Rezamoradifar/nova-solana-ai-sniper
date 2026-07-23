@@ -1,5 +1,10 @@
 import { Connection, PublicKey } from '@solana/web3.js';
-import { getMint } from '@solana/spl-token';
+import {
+  getMint,
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+  TokenInvalidAccountOwnerError,
+} from '@solana/spl-token';
 
 export interface MintAuthorityInfo {
   mintAuthorityRevoked: boolean;
@@ -8,17 +13,51 @@ export interface MintAuthorityInfo {
   supply: bigint;
 }
 
-export async function getMintAuthorityInfo(
+async function readMint(
   connection: Connection,
-  mint: string,
+  pubkey: PublicKey,
+  programId: PublicKey,
 ): Promise<MintAuthorityInfo> {
-  const mintInfo = await getMint(connection, new PublicKey(mint));
+  const mintInfo = await getMint(connection, pubkey, undefined, programId);
   return {
     mintAuthorityRevoked: mintInfo.mintAuthority === null,
     freezeAuthorityRevoked: mintInfo.freezeAuthority === null,
     decimals: mintInfo.decimals,
     supply: mintInfo.supply,
   };
+}
+
+/**
+ * Production incident (2026-07-22 audit, false-positive gate rejections):
+ * `getMint` hardcoded to the legacy Token program threw
+ * `TokenInvalidAccountOwnerError` — a specific, deterministic error, not a
+ * transient RPC failure — on every single Token-2022 mint, which was 100% of
+ * a live sample of currently-trading pump.fun tokens (real names, real
+ * DexScreener liquidity, hundreds of real buys/sells). The caller's
+ * fail-closed catch (riskAnalyzer.ts) turned that parse failure into "mint/
+ * freeze authority not revoked" for every one of them — a false, universal
+ * rejection, not a real finding. Verified live: the same mints resolve
+ * mintAuthority/freezeAuthority to null (correctly revoked, matching
+ * pump.fun's standard no-further-mint guarantee) once read with the correct
+ * program ID. Tries the legacy program first (still the common case for
+ * other detection sources/older tokens), and only pays for a second RPC call
+ * on the specific owner-mismatch error — any other failure (account not
+ * found, network error, etc.) is a genuine unknown and propagates unchanged
+ * for the caller to fail closed on.
+ */
+export async function getMintAuthorityInfo(
+  connection: Connection,
+  mint: string,
+): Promise<MintAuthorityInfo> {
+  const pubkey = new PublicKey(mint);
+  try {
+    return await readMint(connection, pubkey, TOKEN_PROGRAM_ID);
+  } catch (err) {
+    if (err instanceof TokenInvalidAccountOwnerError) {
+      return await readMint(connection, pubkey, TOKEN_2022_PROGRAM_ID);
+    }
+    throw err;
+  }
 }
 
 export interface HolderConcentration {

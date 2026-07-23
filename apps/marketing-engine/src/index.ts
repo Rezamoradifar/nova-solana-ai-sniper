@@ -1,6 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import { createLogger } from '@nova/shared';
-import { hasAnyAiProvider, resolveAiProvider } from '@nova/ai';
+import {
+  resolveGeminiImageProvider,
+  resolveGeminiProvider,
+  resolveOpenRouterProvider,
+  resolvePrimaryFallbackProvider,
+} from '@nova/ai';
 import { createBot } from '@nova/telegram-bot';
 import { loadMarketingEnv } from './config/env.js';
 import { startDailyScheduler } from './runner.js';
@@ -10,42 +15,50 @@ const logger = createLogger('marketing-engine');
 async function main() {
   const env = loadMarketingEnv();
 
-  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
+  const broadcastChatId = env.MARKETING_TELEGRAM_CHANNEL_ID ?? env.TELEGRAM_CHAT_ID;
+  if (!env.TELEGRAM_BOT_TOKEN || !broadcastChatId) {
     logger.warn(
-      'TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — marketing-engine is disabled. Set both in .env to enable scheduled posts.',
+      'TELEGRAM_BOT_TOKEN/MARKETING_TELEGRAM_CHANNEL_ID (or TELEGRAM_CHAT_ID) not set — marketing-engine is disabled.',
     );
     return;
   }
 
-  const aiEnabled = hasAnyAiProvider({
-    anthropicApiKey: env.ANTHROPIC_API_KEY,
-    openaiApiKey: env.OPENAI_API_KEY,
-  });
-  if (!aiEnabled) {
+  // Gemini primary, OpenRouter fallback — deliberately not the general
+  // resolveAiProvider priority chain (Anthropic/OpenAI first): this engine
+  // is scoped to exactly these two providers, matching the ones actually
+  // configured/verified for it. See resolvePrimaryFallbackProvider's own
+  // doc comment for the failover behavior.
+  const provider = resolvePrimaryFallbackProvider(
+    resolveGeminiProvider({ geminiApiKey: env.GEMINI_API_KEY }),
+    resolveOpenRouterProvider({
+      openrouterApiKey: env.OPENROUTER_API_KEY,
+      openrouterModel: env.OPENROUTER_MODEL,
+    }),
+  );
+  if (!provider) {
     logger.warn(
-      'ANTHROPIC_API_KEY/OPENAI_API_KEY not set — marketing-engine is disabled (no content generator available).',
+      'GEMINI_API_KEY/OPENROUTER_API_KEY not set — marketing-engine is disabled (no content generator available).',
     );
     return;
   }
 
-  const provider = resolveAiProvider({
-    anthropicApiKey: env.ANTHROPIC_API_KEY,
-    openaiApiKey: env.OPENAI_API_KEY,
-  });
   const prisma = new PrismaClient();
   const bot = createBot(env.TELEGRAM_BOT_TOKEN, logger);
+  const imageProvider = resolveGeminiImageProvider({ geminiApiKey: env.GEMINI_API_KEY });
 
   const stop = startDailyScheduler({
     prisma,
     provider,
     bot,
-    chatId: env.TELEGRAM_CHAT_ID,
+    chatId: broadcastChatId,
     buttonContext: {
       dashboardUrl: env.DASHBOARD_URL,
       communityUrl: env.COMMUNITY_URL,
       referralUrl: env.REFERRAL_BASE_URL,
     },
     logger,
+    aiImageEnabled: env.MARKETING_AI_IMAGE_ENABLED,
+    imageProvider,
   });
 
   logger.info('marketing-engine scheduler started');

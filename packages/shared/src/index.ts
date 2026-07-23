@@ -9,5 +9,6 @@ export * from './referral.js';
 export * from './fee.js';
 export * from './opportunityScore.js';
 export * from './killSwitch.js';
+export * from './telegramTrendToggle.js';
 export * from './wallet/ledgerWrite.js';
 export * from './wallet/balanceLedger.js';

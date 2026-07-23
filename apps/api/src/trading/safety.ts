@@ -17,10 +17,19 @@ export interface SafetyConfig {
 export interface SafetyCheckResult {
   allowed: boolean;
   reason?: string;
+  /** Set only by evaluateWalletBalance's failing branch — lets a caller (e.g.
+   * AutoTrader's low-balance notification) act on the specific gate that
+   * fired without parsing the human-readable `reason` string back apart. */
+  code?: 'wallet_balance';
+  details?: { balanceSol: number; requiredSol: number };
 }
 
 export class SafetyCheckError extends Error {
-  constructor(public readonly reason: string) {
+  constructor(
+    public readonly reason: string,
+    public readonly code?: SafetyCheckResult['code'],
+    public readonly details?: SafetyCheckResult['details'],
+  ) {
     super(`Trade blocked by safety check: ${reason}`);
     this.name = 'SafetyCheckError';
   }
@@ -101,6 +110,8 @@ export function evaluateWalletBalance(
     return {
       allowed: false,
       reason: `Wallet balance ${balanceSol.toFixed(4)} SOL is below the ${required.toFixed(4)} SOL required (trade + fee reserve)`,
+      code: 'wallet_balance',
+      details: { balanceSol, requiredSol: required },
     };
   }
   return { allowed: true };

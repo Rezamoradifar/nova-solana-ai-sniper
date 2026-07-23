@@ -57,6 +57,30 @@ export interface RiskFlags {
   // duplicated here (not imported) to keep this package app-agnostic.
   liquiditySource?:
     'dexscreener' | 'native_dex' | 'pumpfun_bonding_curve' | 'jupiter_estimate' | 'unavailable';
+  // Tri-state tracking (2026-07-22 audit, false-positive gate rejections):
+  // mintAuthorityRevoked/freezeAuthorityRevoked/top10HolderPercent/holderCount/
+  // isHoneypotSuspected above still fail-closed to their existing worst-case
+  // values (false/100/0/true) when the underlying on-chain read couldn't be
+  // completed — UNKNOWN must still block a buy, same as before. These three
+  // flags exist ONLY so a genuine "we couldn't check" is distinguishable from
+  // a genuine "we checked and it's bad" in logs, alerts, and the critical
+  // security gate's reason codes — never used to relax the fail-closed
+  // booleans themselves. All optional/undefined-by-default so every existing
+  // caller/test that doesn't set them is unaffected.
+  /** True when the on-chain mint-authority/freeze-authority/supply read itself
+   * failed (RPC error, unresolvable account, or an unsupported token program)
+   * — mintAuthorityRevoked/freezeAuthorityRevoked are unverified, not
+   * confirmed-false, in this case. */
+  mintAuthorityDataUnknown?: boolean;
+  /** True when holder concentration/count could not be computed — either the
+   * mint-authority read it depends on failed (see above) or the
+   * largest-accounts read itself failed. top10HolderPercent/holderCount are
+   * unverified (100/0 placeholders), not a confirmed critical reading. */
+  holderDataUnknown?: boolean;
+  /** True when isHoneypotSuspected is true *solely* because an upstream input
+   * was unknown (mint authority and/or holder data), not because of a
+   * genuinely resolved low-liquidity or high-concentration signal. */
+  honeypotCheckUnknown?: boolean;
 }
 
 /**
@@ -87,11 +111,27 @@ export const TRAILING_STOP_PRESET_LABELS: Record<Exclude<TrailingStopPreset, 'cu
   meme_coin: '🐸 Meme Coin Mode',
 };
 
+export type AiRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+/** 'BUY'/'SKIP' as suggested by the AI provider — advisory only. AutoTrader's own
+ * deterministic gates (entryFilter.ts's mint/freeze/LP/honeypot checks, notifyGate.ts's
+ * hard risk gate, and the `Math.min(ruleScore, aiScore)` threshold in autoTrader.ts) are
+ * always the final authority and can never be bypassed by this field — see
+ * riskScorer.ts's scoreToken, which force-sets this to 'SKIP' whenever a critical risk
+ * flag is present, regardless of what the model itself returned. */
+export type AiDecision = 'BUY' | 'SKIP';
+
 export interface AiScore {
   score: number; // 0-100, higher = safer/more promising
+  riskLevel: AiRiskLevel;
+  decision: AiDecision;
+  reasons: string[];
+  warnings: string[];
+  /** Back-compat convenience string derived from reasons+warnings; persisted as Token.aiSummary. */
   summary: string;
+  /** Back-compat alias — reasons+warnings combined, same list previous callers read as "flags". */
   flags: string[];
-  provider: 'anthropic' | 'openai';
+  provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter';
 }
 
 export type OrderSide = 'buy' | 'sell';

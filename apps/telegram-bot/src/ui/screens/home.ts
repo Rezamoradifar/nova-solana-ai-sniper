@@ -1,7 +1,10 @@
 import { homeGrid } from '../keyboards.js';
+import { getLocale, t } from '../../i18n/index.js';
 import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
 
 export async function renderHome(deps: ScreenDeps, user: ScreenUser): Promise<ScreenResult> {
+  const lang = getLocale(user);
+  const d = t(lang).home;
   const [walletCount, activeSnipes, openPositions] = await Promise.all([
     deps.prisma.wallet.count({ where: { userId: user.id, isActive: true } }),
     deps.prisma.snipeConfig.count({ where: { userId: user.id, isActive: true } }),
@@ -11,12 +14,12 @@ export async function renderHome(deps: ScreenDeps, user: ScreenUser): Promise<Sc
   ]);
 
   const text =
-    `👋 *Nova Solana AI Sniper*\n\n` +
-    `Every feature below is free — no tiers, no limits.\n\n` +
-    `👛 Wallets: *${walletCount}*\n` +
-    `🎯 Active snipe configs: *${activeSnipes}*\n` +
-    `📈 Open positions: *${openPositions}*\n\n` +
-    `Pick a section below or use the menu at the bottom of the chat.`;
+    `${d.title}\n\n` +
+    `${d.freeNote}\n\n` +
+    `${d.wallets(walletCount)}\n` +
+    `${d.activeSnipes(activeSnipes)}\n` +
+    `${d.openPositions(openPositions)}\n\n` +
+    `${d.pickSection}`;
 
-  return { text, keyboard: homeGrid() };
+  return { text, keyboard: homeGrid(lang) };
 }

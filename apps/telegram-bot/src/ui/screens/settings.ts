@@ -6,65 +6,77 @@ import {
 } from '@nova/shared';
 import { withNav } from '../keyboards.js';
 import { sol } from '../format.js';
+import { normalizeDigits, t, type Locale } from '../../i18n/index.js';
+import { getLocale } from '../../i18n/locale.js';
 import type { PendingAction } from '../pending.js';
 import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
 
 type SettingsField = Extract<PendingAction, { type: 'settings_edit' }>['field'];
 
-const FIELD_META: Record<
-  SettingsField,
-  { label: string; prompt: string; parse: (raw: string) => number | undefined }
-> = {
-  buyAmountSol: {
-    label: 'Buy amount',
-    prompt: 'Send the new buy amount in SOL (e.g. `0.25`).',
-    parse: (raw) => {
-      const n = Number(raw);
-      return Number.isFinite(n) && n > 0 ? n : undefined;
-    },
-  },
-  maxSlippageBps: {
-    label: 'Max slippage',
-    prompt: 'Send the new max slippage in basis points, 1-10000 (e.g. `300` for 3%).',
-    parse: (raw) => {
-      const n = Number(raw);
-      return Number.isInteger(n) && n >= 1 && n <= 10000 ? n : undefined;
-    },
-  },
-  minLiquidityUsd: {
-    label: 'Min liquidity',
-    prompt: 'Send the new minimum liquidity in USD (e.g. `1000`).',
-    parse: (raw) => {
-      const n = Number(raw);
-      return Number.isFinite(n) && n >= 0 ? n : undefined;
-    },
-  },
-  minAiScore: {
-    label: 'Min AI score',
-    prompt: 'Send the new minimum AI score, 0-100 (e.g. `60`).',
-    parse: (raw) => {
-      const n = Number(raw);
-      return Number.isFinite(n) && n >= 0 && n <= 100 ? n : undefined;
-    },
-  },
-  // Hard Loss Ceiling (2026-07-18): a user may set a tighter stop loss than
-  // DEFAULT_MAX_LOSS_PERCENT, but never a looser one — PositionManager
-  // enforces this again at buy time regardless (see exitEngine.ts's
-  // resolveEffectiveStopLossPercent), so a value entered here that exceeds
-  // the ceiling would silently diverge from what actually protects the
-  // position; capping it here too keeps what the user sees consistent with
-  // what's actually enforced.
-  stopLossPercent: {
-    label: 'Stop loss',
-    prompt: `Send the new stop-loss percentage as a number (e.g. \`15\` for -15%). Never honored looser than ${DEFAULT_MAX_LOSS_PERCENT}% — a larger value is capped to ${DEFAULT_MAX_LOSS_PERCENT}.`,
-    parse: (raw) => {
-      const n = Number(raw);
-      return Number.isFinite(n) && n > 0 ? Math.min(n, DEFAULT_MAX_LOSS_PERCENT) : undefined;
-    },
-  },
-};
+function fieldMeta(
+  lang: Locale,
+  field: SettingsField,
+): { label: string; prompt: string; parse: (raw: string) => number | undefined } {
+  const m = t(lang).settings.fieldMeta[field];
+  switch (field) {
+    case 'buyAmountSol':
+      return {
+        label: m.label,
+        prompt: m.prompt as string,
+        parse: (raw) => {
+          const n = Number(normalizeDigits(raw));
+          return Number.isFinite(n) && n > 0 ? n : undefined;
+        },
+      };
+    case 'maxSlippageBps':
+      return {
+        label: m.label,
+        prompt: m.prompt as string,
+        parse: (raw) => {
+          const n = Number(normalizeDigits(raw));
+          return Number.isInteger(n) && n >= 1 && n <= 10000 ? n : undefined;
+        },
+      };
+    case 'minLiquidityUsd':
+      return {
+        label: m.label,
+        prompt: m.prompt as string,
+        parse: (raw) => {
+          const n = Number(normalizeDigits(raw));
+          return Number.isFinite(n) && n >= 0 ? n : undefined;
+        },
+      };
+    case 'minAiScore':
+      return {
+        label: m.label,
+        prompt: m.prompt as string,
+        parse: (raw) => {
+          const n = Number(normalizeDigits(raw));
+          return Number.isFinite(n) && n >= 0 && n <= 100 ? n : undefined;
+        },
+      };
+    // Hard Loss Ceiling (2026-07-18): a user may set a tighter stop loss than
+    // DEFAULT_MAX_LOSS_PERCENT, but never a looser one — PositionManager
+    // enforces this again at buy time regardless (see exitEngine.ts's
+    // resolveEffectiveStopLossPercent), so a value entered here that exceeds
+    // the ceiling would silently diverge from what actually protects the
+    // position; capping it here too keeps what the user sees consistent with
+    // what's actually enforced.
+    case 'stopLossPercent':
+      return {
+        label: m.label,
+        prompt: (m.prompt as (ceiling: number) => string)(DEFAULT_MAX_LOSS_PERCENT),
+        parse: (raw) => {
+          const n = Number(normalizeDigits(raw));
+          return Number.isFinite(n) && n > 0 ? Math.min(n, DEFAULT_MAX_LOSS_PERCENT) : undefined;
+        },
+      };
+  }
+}
 
 export async function renderSettings(deps: ScreenDeps, user: ScreenUser): Promise<ScreenResult> {
+  const lang = getLocale(user);
+  const d = t(lang).settings;
   const config = await deps.prisma.snipeConfig.findFirst({
     where: { userId: user.id },
     orderBy: { createdAt: 'desc' },
@@ -72,14 +84,14 @@ export async function renderSettings(deps: ScreenDeps, user: ScreenUser): Promis
 
   if (!config) {
     return {
-      text: '⚙️ *Settings*\n\nYou have no snipe config yet — create one from ▶️ Start Sniper first, then come back here to fine-tune it.',
-      keyboard: withNav(new InlineKeyboard(), 'home'),
+      text: d.noConfig,
+      keyboard: withNav(new InlineKeyboard(), 'home', lang),
     };
   }
 
   const presetLabel = isKnownPreset(config.trailingStopPreset)
     ? TRAILING_STOP_PRESET_LABELS[config.trailingStopPreset]
-    : 'Custom (manual TP/SL/trailing on each position)';
+    : d.customPresetLabel;
 
   // A SnipeConfig with no stopLossPercent set (or one looser than the
   // ceiling) still gets DEFAULT_MAX_LOSS_PERCENT enforced at buy time — see
@@ -91,30 +103,28 @@ export async function renderSettings(deps: ScreenDeps, user: ScreenUser): Promis
   );
   const stopLossLine =
     config.stopLossPercent != null && config.stopLossPercent <= DEFAULT_MAX_LOSS_PERCENT
-      ? `🛑 Stop loss: *${effectiveStopLossPercent}%*`
-      : `🛑 Stop loss: *${effectiveStopLossPercent}%* _(system default — never looser than ${DEFAULT_MAX_LOSS_PERCENT}%)_`;
+      ? d.stopLoss(effectiveStopLossPercent)
+      : d.stopLossDefault(effectiveStopLossPercent, DEFAULT_MAX_LOSS_PERCENT);
 
   const text =
-    `⚙️ *Settings*\n\n` +
-    `Editing your most recent snipe config:\n\n` +
-    `💰 Buy amount: *${sol(config.buyAmountSol)}*\n` +
-    `📉 Max slippage: *${config.maxSlippageBps} bps*\n` +
-    `💧 Min liquidity: *$${config.minLiquidityUsd.toFixed(0)}*\n` +
-    `🤖 Min AI score: *${config.minAiScore}*\n` +
+    `${d.title}` +
+    `${d.editingNote}` +
+    `${d.buyAmount(sol(config.buyAmountSol))}\n` +
+    `${d.maxSlippage(config.maxSlippageBps)}\n` +
+    `${d.minLiquidity(config.minLiquidityUsd.toFixed(0))}\n` +
+    `${d.minAiScore(config.minAiScore)}\n` +
     `${stopLossLine}\n` +
-    `📐 Exit strategy: *${presetLabel}*` +
-    (isKnownPreset(config.trailingStopPreset)
-      ? '\n_No fixed take-profit — trailing stop only, distance adapts to liquidity/holder concentration._'
-      : '');
+    `${d.exitStrategy(presetLabel)}` +
+    (isKnownPreset(config.trailingStopPreset) ? d.trailingOnlyNote : '');
 
   const keyboard = new InlineKeyboard()
-    .text('✏️ Buy amount', `a:settings:edit:buyAmountSol:${config.id}`)
-    .text('✏️ Slippage', `a:settings:edit:maxSlippageBps:${config.id}`)
+    .text(d.buyAmountBtn, `a:settings:edit:buyAmountSol:${config.id}`)
+    .text(d.slippageBtn, `a:settings:edit:maxSlippageBps:${config.id}`)
     .row()
-    .text('✏️ Stop loss', `a:settings:edit:stopLossPercent:${config.id}`)
+    .text(d.stopLossBtn, `a:settings:edit:stopLossPercent:${config.id}`)
     .row()
-    .text('✏️ Min liquidity', `a:settings:edit:minLiquidityUsd:${config.id}`)
-    .text('✏️ Min AI score', `a:settings:edit:minAiScore:${config.id}`)
+    .text(d.minLiquidityBtn, `a:settings:edit:minLiquidityUsd:${config.id}`)
+    .text(d.minAiScoreBtn, `a:settings:edit:minAiScore:${config.id}`)
     .row();
 
   for (const preset of TRAILING_STOP_PRESETS) {
@@ -122,9 +132,10 @@ export async function renderSettings(deps: ScreenDeps, user: ScreenUser): Promis
       .text(TRAILING_STOP_PRESET_LABELS[preset], `a:settings:preset:${preset}:${config.id}`)
       .row();
   }
-  keyboard.text('↩️ Custom (manual TP/SL/trailing)', `a:settings:preset:custom:${config.id}`);
+  keyboard.text(d.customPresetBtn, `a:settings:preset:custom:${config.id}`);
+  keyboard.row().text(d.languageBtn, 's:language');
 
-  return { text, keyboard: withNav(keyboard, 'home') };
+  return { text, keyboard: withNav(keyboard, 'home', lang) };
 }
 
 function isKnownPreset(
@@ -153,13 +164,21 @@ export async function applyTrailingStopPreset(
 }
 
 export function isSettingsField(value: string): value is SettingsField {
-  return value in FIELD_META;
+  return [
+    'buyAmountSol',
+    'maxSlippageBps',
+    'minLiquidityUsd',
+    'minAiScore',
+    'stopLossPercent',
+  ].includes(value);
 }
 
-export function promptFor(field: SettingsField): ScreenResult {
+export function promptFor(field: SettingsField, lang: Locale): ScreenResult {
+  const d = t(lang).settings;
+  const meta = fieldMeta(lang, field);
   return {
-    text: `⚙️ *${FIELD_META[field].label}*\n\n${FIELD_META[field].prompt}`,
-    keyboard: withNav(new InlineKeyboard(), 'settings'),
+    text: d.promptTitle(meta.label) + meta.prompt,
+    keyboard: withNav(new InlineKeyboard(), 'settings', lang),
   };
 }
 
@@ -170,14 +189,17 @@ export async function applySettingsEdit(
   field: SettingsField,
   rawValue: string,
 ): Promise<{ ok: true; result: ScreenResult } | { ok: false; message: string }> {
-  const parsed = FIELD_META[field].parse(rawValue.trim());
+  const lang = getLocale(user);
+  const d = t(lang).settings;
+  const meta = fieldMeta(lang, field);
+  const parsed = meta.parse(rawValue.trim());
   if (parsed === undefined) {
-    return { ok: false, message: `That doesn't look right. ${FIELD_META[field].prompt}` };
+    return { ok: false, message: d.invalidValue(meta.prompt) };
   }
 
   const config = await deps.prisma.snipeConfig.findUnique({ where: { id: snipeConfigId } });
   if (!config || config.userId !== user.id) {
-    return { ok: false, message: 'That snipe config no longer exists.' };
+    return { ok: false, message: d.configGone };
   }
 
   await deps.prisma.snipeConfig.update({

@@ -1,6 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { usd, pnlEmoji, shortKey } from '../format.js';
 import { withNav } from '../keyboards.js';
+import { getLocale, t } from '../../i18n/index.js';
 import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
 
 function startOfTodayUtc(): Date {
@@ -18,6 +19,8 @@ export async function renderFeeDashboard(
   deps: ScreenDeps,
   user: ScreenUser,
 ): Promise<ScreenResult> {
+  const lang = getLocale(user);
+  const d = t(lang).feeDashboard;
   const todayStart = startOfTodayUtc();
   const wallets = await deps.prisma.wallet.findMany({
     where: { userId: user.id },
@@ -68,27 +71,26 @@ export async function renderFeeDashboard(
     });
     const labelById = new Map(referredUsers.map((u) => [u.id, u.telegramId ?? shortKey(u.id)]));
     topReferralsLine =
-      '\n\n🏅 *Top Referrals*\n' +
+      d.topReferralsHeader +
       topReferrals
-        .map(
-          (r, i) =>
-            `${i + 1}. ${labelById.get(r.referredUserId) ?? '—'} — ${usd(r._sum.rewardUsd)}`,
+        .map((r, i) =>
+          d.topReferralsRow(i + 1, labelById.get(r.referredUserId) ?? '—', usd(r._sum.rewardUsd)),
         )
         .join('\n');
   }
 
   const text =
-    `💸 *Fees & Earnings*\n\n` +
-    `${pnlEmoji(todayProfit)} Today's Profit: *${usd(todayProfit)}*\n` +
-    `${pnlEmoji(lifetimeProfit)} Lifetime Profit: *${usd(lifetimeProfit)}*\n` +
-    `📉 Performance Fees Paid: *${usd(feesPaid)}*\n` +
-    `🔗 Referral Earnings: *${usd(referralEarnings)}*\n\n` +
-    `👥 Direct Referrals: *${directReferredCount}*${topReferralsLine}`;
+    `${d.header}` +
+    `${d.todaysProfit(pnlEmoji(todayProfit), usd(todayProfit))}\n` +
+    `${d.lifetimeProfit(pnlEmoji(lifetimeProfit), usd(lifetimeProfit))}\n` +
+    `${d.feesPaid(usd(feesPaid))}\n` +
+    `${d.referralEarnings(usd(referralEarnings))}\n\n` +
+    `${d.directReferrals(directReferredCount)}${topReferralsLine}`;
 
   const keyboard = new InlineKeyboard()
-    .text('📜 Referral Earnings History', 's:referral_earnings')
+    .text(d.referralEarningsHistoryBtn, 's:referral_earnings')
     .row()
-    .text('🏆 Referral Leaderboard', 's:referral_leaderboard');
+    .text(d.referralLeaderboardBtn, 's:referral_leaderboard');
 
-  return { text, keyboard: withNav(keyboard, 'home') };
+  return { text, keyboard: withNav(keyboard, 'home', lang) };
 }

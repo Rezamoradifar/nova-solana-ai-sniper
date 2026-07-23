@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 
 const capturedHandlers: ((event: { type: string; payload: Record<string, unknown> }) => void)[] =
@@ -29,6 +29,25 @@ vi.mock('../solana/dexscreener.js', () => ({
   DexScreenerClient: vi.fn().mockImplementation(() => ({})),
 }));
 
+vi.mock('../solana/connection.js', () => ({
+  getConnection: vi.fn().mockReturnValue({}),
+}));
+
+vi.mock('../solana/jito.js', () => ({
+  JitoClient: vi.fn().mockImplementation(() => ({})),
+}));
+
+// Real on-chain payout (2026-07-23): these existing tests exercise the fee
+// MATH (which hasn't changed), not the payout mechanics themselves (see
+// payoutExecutor.test.ts for that) — mocked to a default confirmed outcome
+// so OWNER_FEE/REFERRAL_CREDIT continue to be written exactly as before for
+// every test that doesn't explicitly override this. mockPayoutExecutor is
+// reset per-test via beforeEach below.
+const mockPayoutExecutor = vi.fn();
+vi.mock('./payoutExecutor.js', () => ({
+  executeReferralAndPlatformPayout: (...args: unknown[]) => mockPayoutExecutor(...args),
+}));
+
 import { registerFeeSystem } from './registerFeeSystem.js';
 
 function fakeLogger() {
@@ -43,6 +62,21 @@ function fakeLogger() {
 const FEE_SYSTEM_ACTIVATED_AT = new Date('2026-07-11T22:56:38Z');
 const AFTER_ACTIVATION = new Date('2026-07-12T00:00:00Z');
 const BEFORE_ACTIVATION = new Date('2026-07-10T12:00:00Z');
+
+beforeEach(() => {
+  mockPayoutExecutor.mockReset();
+  // Default: the real on-chain payout confirms successfully — every
+  // pre-existing test in this file exercises the fee MATH, not the payout
+  // mechanics (see payoutExecutor.test.ts), so OWNER_FEE/REFERRAL_CREDIT
+  // should be written exactly as before unless a test explicitly overrides
+  // this to exercise the skipped/failed/deferred/paper-trade paths.
+  mockPayoutExecutor.mockResolvedValue({
+    kind: 'confirmed',
+    txSignature: 'mock-payout-signature',
+    recipients: [],
+    referralOutcomes: [],
+  });
+});
 
 function fakePrisma(overrides: {
   ledgerExists?: boolean;
@@ -90,11 +124,24 @@ function fakePrisma(overrides: {
           tokenId: 'token-1',
           createdAt: BEFORE_ACTIVATION,
           closedAt: AFTER_ACTIVATION,
-          wallet: { userId: 'user-1', createdAt: overrides.userCreatedAt ?? BEFORE_ACTIVATION },
+          wallet: {
+            userId: 'user-1',
+            createdAt: overrides.userCreatedAt ?? BEFORE_ACTIVATION,
+            publicKey: 'TraderWalletPublicKey11111111111111111111',
+            encryptedSecret: 'encrypted-trader-secret',
+          },
           token: { symbol: 'FOO', mint: 'MintFoo1111111111111111111111111111111111' },
         }
       : overrides.position,
   );
+  // Referrer payout-wallet resolution (2026-07-23) — not exercised by the
+  // fee-math tests in this file (the payout executor itself is mocked), but
+  // must resolve to *something* so resolveReferrerPayoutWallet's own query
+  // doesn't throw against an unmocked prisma.wallet.
+  const walletFindFirst = vi.fn().mockResolvedValue({
+    id: 'referrer-wallet-1',
+    publicKey: 'ReferrerWalletPublicKey1111111111111111111',
+  });
   const tradeFindFirst = vi.fn().mockImplementation((_args: { where: { side: string } }) => {
     // BUY only — the SELL side is now a sum-of-all-trades findMany (see below).
     return Promise.resolve(
@@ -148,6 +195,7 @@ function fakePrisma(overrides: {
     trade: { findFirst: tradeFindFirst, findMany: tradeFindMany },
     businessSettings: { findFirst: businessSettingsFindFirst, create: vi.fn() },
     user: { findUnique: userFindUnique },
+    wallet: { findFirst: walletFindFirst },
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
       fn({
         performanceFeeLedger: { create: ledgerCreate },
@@ -164,6 +212,7 @@ function fakePrisma(overrides: {
     ledgerEntryCreate,
     auditLogCreate,
     performanceFeeLedgerFindUnique,
+    walletFindFirst,
   };
 }
 
@@ -175,6 +224,10 @@ function fakeDeps(prisma: PrismaClient) {
       TELEGRAM_BOT_TOKEN: undefined,
       TELEGRAM_CHAT_ID: undefined,
       DEXSCREENER_API_BASE: 'https://x',
+      ENCRYPTION_KEY: 'test-encryption-key',
+      PLATFORM_TREASURY_WALLET_ADDRESS: 'TreasuryWalletPublicKey111111111111111111',
+      MIN_WALLET_RESERVE_SOL: 0.01,
+      PAYOUT_ATTEMPT_STALE_MS: 10 * 60 * 1000,
     },
   };
 }
@@ -190,13 +243,19 @@ async function fireEvent(
   prismaOverrides: Parameters<typeof fakePrisma>[0] = {},
 ) {
   capturedHandlers.length = 0;
-  const { prisma, ledgerCreate, referralRewardCreate, ledgerEntryCreate, auditLogCreate } =
-    fakePrisma(prismaOverrides);
+  const {
+    prisma,
+    ledgerCreate,
+    referralRewardCreate,
+    ledgerEntryCreate,
+    auditLogCreate,
+    walletFindFirst,
+  } = fakePrisma(prismaOverrides);
   registerFeeSystem(fakeDeps(prisma));
   const handler = capturedHandlers[capturedHandlers.length - 1]!;
   handler({ type: 'position.updated', payload });
   await flush();
-  return { ledgerCreate, referralRewardCreate, ledgerEntryCreate, auditLogCreate };
+  return { ledgerCreate, referralRewardCreate, ledgerEntryCreate, auditLogCreate, walletFindFirst };
 }
 
 describe('registerFeeSystem', () => {
@@ -464,5 +523,106 @@ describe('registerFeeSystem — backward compatibility (requirement 8 matrix)', 
     expect(ledgerCreate).toHaveBeenCalledTimes(2);
     const positionIds = ledgerCreate.mock.calls.map((call) => call[0].data.positionId);
     expect(positionIds).toEqual(['position-A', 'position-B']);
+  });
+});
+
+describe('registerFeeSystem — real on-chain payout integration (2026-07-23)', () => {
+  it('a confirmed payout writes the real txSignature onto PerformanceFeeLedger, OWNER_FEE, and REFERRAL_CREDIT', async () => {
+    mockPayoutExecutor.mockResolvedValue({
+      kind: 'confirmed',
+      txSignature: 'REAL-SIG-ABC',
+      recipients: [],
+      referralOutcomes: [
+        {
+          referrerUserId: 'user-2',
+          level: 1,
+          toAddress: 'ReferrerWalletPublicKey1111111111111111111',
+          rolledUpToTreasury: false,
+        },
+      ],
+    });
+    const { ledgerCreate, referralRewardCreate, ledgerEntryCreate } = await fireEvent({
+      positionId: 'position-1',
+      status: 'CLOSED',
+      realizedPnlUsd: 100,
+    });
+
+    expect(ledgerCreate.mock.calls[0]![0].data.payoutTxSignature).toBe('REAL-SIG-ABC');
+    expect(referralRewardCreate.mock.calls[0]![0].data).toMatchObject({
+      payoutTxSignature: 'REAL-SIG-ABC',
+      rolledUpToTreasury: false,
+      payoutWalletId: 'referrer-wallet-1',
+    });
+    const ownerFeeEntry = ledgerEntryCreate.mock.calls.find(
+      (c) => c[0].data.type === 'OWNER_FEE',
+    )![0].data;
+    expect(ownerFeeEntry.txSignature).toBe('REAL-SIG-ABC');
+  });
+
+  it('a paper-trade position never calls the payout executor, and still writes OWNER_FEE/REFERRAL_CREDIT as pure bookkeeping (unchanged pre-existing behavior)', async () => {
+    const { ledgerEntryCreate } = await fireEvent(
+      { positionId: 'position-1', status: 'CLOSED', realizedPnlUsd: 100 },
+      { sellTrades: [{ id: 'sell-trade-1', amountSol: 1.1, isPaperTrade: true }] },
+    );
+    expect(mockPayoutExecutor).not.toHaveBeenCalled();
+    const ledgerTypes = ledgerEntryCreate.mock.calls.map((c) => c[0].data.type).sort();
+    expect(ledgerTypes).toEqual(['OWNER_FEE', 'PROFIT_CREDIT', 'REFERRAL_CREDIT'].sort());
+  });
+
+  it('a skipped payout (insufficient balance) still records PerformanceFeeLedger/PROFIT_CREDIT, but omits OWNER_FEE/REFERRAL_CREDIT entirely — no debit ever happened', async () => {
+    mockPayoutExecutor.mockResolvedValue({ kind: 'skipped', reason: 'insufficient_balance' });
+    const { ledgerCreate, ledgerEntryCreate, referralRewardCreate } = await fireEvent({
+      positionId: 'position-1',
+      status: 'CLOSED',
+      realizedPnlUsd: 100,
+    });
+
+    expect(ledgerCreate).toHaveBeenCalledTimes(1); // PerformanceFeeLedger row still created
+    expect(ledgerCreate.mock.calls[0]![0].data.payoutTxSignature).toBeUndefined();
+    const ledgerTypes = ledgerEntryCreate.mock.calls.map((c) => c[0].data.type);
+    expect(ledgerTypes).toEqual(['PROFIT_CREDIT']); // no OWNER_FEE, no REFERRAL_CREDIT
+    expect(referralRewardCreate).not.toHaveBeenCalled();
+  });
+
+  it('a failed payout behaves the same as skipped — PROFIT_CREDIT only, no fabricated debit', async () => {
+    mockPayoutExecutor.mockResolvedValue({ kind: 'failed', reason: 'broadcast_failed' });
+    const { ledgerEntryCreate } = await fireEvent({
+      positionId: 'position-1',
+      status: 'CLOSED',
+      realizedPnlUsd: 100,
+    });
+    const ledgerTypes = ledgerEntryCreate.mock.calls.map((c) => c[0].data.type);
+    expect(ledgerTypes).toEqual(['PROFIT_CREDIT']);
+  });
+
+  it('a deferred payout (concurrent duplicate fire or stuck-attempt alert) writes nothing at all for this invocation', async () => {
+    mockPayoutExecutor.mockResolvedValue({ kind: 'deferred' });
+    const { ledgerCreate, ledgerEntryCreate } = await fireEvent({
+      positionId: 'position-1',
+      status: 'CLOSED',
+      realizedPnlUsd: 100,
+    });
+    expect(ledgerCreate).not.toHaveBeenCalled();
+    expect(ledgerEntryCreate).not.toHaveBeenCalled();
+  });
+
+  it("resolves each referrer's payout wallet before calling the payout executor", async () => {
+    const { walletFindFirst } = await fireEvent({
+      positionId: 'position-1',
+      status: 'CLOSED',
+      realizedPnlUsd: 100,
+    });
+    expect(walletFindFirst).toHaveBeenCalledWith({
+      where: { userId: 'user-2', isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(mockPayoutExecutor).toHaveBeenCalledTimes(1);
+    const payoutParams = mockPayoutExecutor.mock.calls[0]![1] as {
+      referralRewards: { referrerUserId: string; payoutPublicKey?: string }[];
+    };
+    expect(payoutParams.referralRewards[0]).toMatchObject({
+      referrerUserId: 'user-2',
+      payoutPublicKey: 'ReferrerWalletPublicKey1111111111111111111',
+    });
   });
 });

@@ -177,4 +177,34 @@ describe('computeLatencyReport', () => {
     expect(report.buy.stageStats['broadcast->rpc_confirmation']!.count).toBe(1);
     expect(report.buy.stageStats['broadcast->rpc_confirmation']!.avgMs).toBe(500);
   });
+
+  it('computes the three named detection-relative spans on the BUY report, never on SELL', () => {
+    const buyTraces = [
+      makeTrace({
+        traceId: 'a',
+        marks: { token_detected: 0, analysis_started: 50, decision: 300, buy_submitted: 350 },
+      }),
+      makeTrace({
+        traceId: 'b',
+        marks: { token_detected: 0, analysis_started: 100, decision: 400, buy_submitted: 450 },
+      }),
+    ];
+    const sellTraces = [makeTrace({ traceId: 'c', side: 'SELL', marks: { exit_decision: 0 } })];
+
+    const report = computeLatencyReport([...buyTraces, ...sellTraces]);
+
+    expect(report.buy.detectionToAnalysisMs).toMatchObject({ count: 2, avgMs: 75 });
+    expect(report.buy.detectionToDecisionMs).toMatchObject({ count: 2, avgMs: 350 });
+    expect(report.buy.detectionToBuySubmissionMs).toMatchObject({ count: 2, avgMs: 400 });
+    expect(report.sell.detectionToAnalysisMs).toBeUndefined();
+    expect(report.sell.detectionToDecisionMs).toBeUndefined();
+    expect(report.sell.detectionToBuySubmissionMs).toBeUndefined();
+  });
+
+  it('the new detection-relative spans are undefined (not a crash) with no matching marks', () => {
+    const report = computeLatencyReport([makeTrace({ traceId: 'a', marks: {} })]);
+    expect(report.buy.detectionToAnalysisMs).toBeUndefined();
+    expect(report.buy.detectionToDecisionMs).toBeUndefined();
+    expect(report.buy.detectionToBuySubmissionMs).toBeUndefined();
+  });
 });

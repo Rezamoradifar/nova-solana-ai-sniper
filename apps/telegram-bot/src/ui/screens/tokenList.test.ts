@@ -34,7 +34,7 @@ function fakeToken(overrides: Partial<Token> = {}): Token {
 
 describe('whyAccepted', () => {
   it('summarizes the risk flags that qualified the token', () => {
-    const reason = whyAccepted(fakeToken());
+    const reason = whyAccepted(fakeToken(), 'en');
     expect(reason).toContain('mint revoked');
     expect(reason).toContain('freeze revoked');
     expect(reason).toContain('LP locked');
@@ -51,6 +51,7 @@ describe('whyAccepted', () => {
         liquidityUsd: null,
         aiScore: null,
       }),
+      'en',
     );
     expect(reason).toBe('passed configured thresholds');
   });
@@ -60,30 +61,31 @@ describe('formatTokenRow', () => {
   it('includes the Telegram source channel when discoverySource is TELEGRAM', () => {
     const text = formatTokenRow(
       fakeToken({ discoverySource: 'TELEGRAM', telegramChannel: 'trendingssol' }),
+      'en',
     );
     expect(text).toContain('t.me/trendingssol');
   });
 
   it('omits the source line for an on-chain-detected token', () => {
-    const text = formatTokenRow(fakeToken({ discoverySource: 'ON_CHAIN' }));
+    const text = formatTokenRow(fakeToken({ discoverySource: 'ON_CHAIN' }), 'en');
     expect(text).not.toContain('Source:');
   });
 
   it('escapes a symbol/name containing Markdown special characters', () => {
-    const text = formatTokenRow(fakeToken({ symbol: 'a_b', name: 'Weird [Name]' }));
+    const text = formatTokenRow(fakeToken({ symbol: 'a_b', name: 'Weird [Name]' }), 'en');
     expect(text).toContain('a\\_b');
     expect(text).toContain('Weird \\[Name\\]');
   });
 
   it('flags a suspected honeypot', () => {
-    const text = formatTokenRow(fakeToken({ isHoneypotSuspected: true }));
+    const text = formatTokenRow(fakeToken({ isHoneypotSuspected: true }), 'en');
     expect(text).toContain('Honeypot/rug risk flagged');
   });
 });
 
 describe('addTokenButtons', () => {
   it('adds a Chart and Buy button row for the token', () => {
-    const keyboard = addTokenButtons(new InlineKeyboard(), fakeToken());
+    const keyboard = addTokenButtons(new InlineKeyboard(), fakeToken(), 'en');
     const row = keyboard.inline_keyboard[0]!;
     expect(row.map((b) => b.text)).toEqual(['📊 Chart', '💰 Buy']);
   });

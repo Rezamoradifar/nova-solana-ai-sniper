@@ -1,5 +1,4 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import bs58 from 'bs58';
 import { Connection, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import { getMint } from '@solana/spl-token';
 import type { Dex, PrismaClient } from '@prisma/client';
@@ -15,12 +14,14 @@ import {
 import { getTopHolder } from '../detection/onchain.js';
 import type { DexRegistry } from '../solana/dex/registry.js';
 import { JitoClient } from '../solana/jito.js';
+import { broadcastTransaction as broadcastTransactionShared } from '../solana/broadcast.js';
 import { evaluateExit, resolveEffectiveStopLossPercent, type ExitReason } from './exitEngine.js';
 import { positionCloseLock } from './positionCloseLock.js';
 import { classifySellFailure, type SellFailureCategory } from './sellFailureClassifier.js';
 import { computeTrailingStopDisplay, defaultExitParams } from './adaptiveTrailingStop.js';
 import { eventBus } from '../lib/eventBus.js';
 import { latencyTracker } from '../lib/latencyTracker.js';
+import { TtlCache } from '../lib/ttlCache.js';
 import { TradingSafety, SafetyCheckError } from './safety.js';
 import {
   evaluateNextPartialExit,
@@ -34,12 +35,6 @@ import {
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const DEFAULT_MAX_PRIORITY_FEE_LAMPORTS = 1_000_000;
-// Modest fixed tip — Jito bundles need a nonzero tip to be considered by
-// validators, but this is a fallback-with-graceful-degradation path (a rejected
-// or unlanded bundle just falls through to a plain send), not the only way a
-// trade can land, so a small fixed amount is a reasonable default over adding
-// another tunable for this pass.
-const JITO_TIP_LAMPORTS = 100_000;
 
 /**
  * Never trust a pre-trade Jupiter quote for bookkeeping — actual execution almost
@@ -149,7 +144,7 @@ async function getActualSolDelta(
  * of truth for "how much can we actually sell." Never sell a stored/estimated
  * amount without checking this first.
  */
-async function getRealTokenBalance(
+export async function getRealTokenBalance(
   connection: Connection,
   ownerPubkey: string,
   mint: string,
@@ -206,6 +201,20 @@ export interface OpenPositionParams {
   tokenDetectedAt?: number;
   aiScoringStartAt?: number;
   aiScoringEndAt?: number;
+  /**
+   * Two-stage discovery pipeline (2026-07-22): epoch-ms timestamps for the
+   * candidatePipeline.ts checkpoints (queue pickup, DexScreener validation,
+   * critical-security-gate completion, sellability verification) and the
+   * decision/buy-submission checkpoints captured in worker.ts/autoTrader.ts —
+   * all upstream of any per-user buy attempt, same optional/pass-through
+   * convention as the three fields above.
+   */
+  analysisStartedAt?: number;
+  dexValidatedAt?: number;
+  safetyCompletedAt?: number;
+  sellabilityVerifiedAt?: number;
+  decisionAt?: number;
+  buySubmittedAt?: number;
 }
 
 /**
@@ -276,6 +285,17 @@ export class PositionManager {
    * bug, not a deliberate safety gate.
    */
   private readonly unverifiedSwapLocks = new Map<string, number>();
+
+  /**
+   * 2026-07-21 audit (section F): the swap-broadcast-failure catch below used
+   * to log but never alert — unlike the verification-failure catch a few
+   * lines further down, which already does. A position stuck on a transient
+   * failure (blockhash expiry, simulation rejection) can retry every price
+   * tick — live-verified 2026-07-21, one real position had 6 failures ~1
+   * minute apart before succeeding — so this is deduped per position for an
+   * hour rather than firing on every single retry.
+   */
+  private readonly sellFailureAlerted = new TtlCache<string>(60 * 60 * 1000);
 
   /**
    * BUY Engine V2 (2026-07-14): guards against two concurrent openPosition
@@ -356,65 +376,27 @@ export class PositionManager {
    * behavior. This changes only how fast/precisely a *failure* is detected —
    * never what counts as a successful send.
    */
+  /**
+   * 2026-07-23 audit (real on-chain referral/owner payout): the actual logic
+   * (Jito-bundle-first, direct-send fallback, explicit on-chain revert check
+   * on both paths) now lives in the standalone `../solana/broadcast.ts`, so
+   * the new payout-transfer code can reuse it verbatim instead of a second,
+   * potentially-drifting copy. This method is now a pure delegate — same
+   * signature, same behavior, zero semantic change.
+   */
   private async broadcastTransaction(
     transaction: VersionedTransaction,
     signer: Keypair,
     lastValidBlockHeight?: number,
     traceId?: string,
   ): Promise<string> {
-    const signature = bs58.encode(transaction.signatures[0]!);
-    const confirmStrategy =
-      lastValidBlockHeight !== undefined
-        ? { signature, blockhash: transaction.message.recentBlockhash, lastValidBlockHeight }
-        : signature;
-
-    // Latency Optimization Stage 1 (2026-07-14): marked once here, before
-    // either branch below, rather than inside each — "broadcast" means "when
-    // this function committed to sending," which is the same instant
-    // regardless of which path (Jito vs. direct) ends up landing it. Pure
-    // measurement; a no-op when traceId is undefined.
-    latencyTracker.mark(traceId, 'broadcast');
-
-    if (this.jito) {
-      try {
-        const { blockhash } = await this.connection.getLatestBlockhash();
-        const tipTx = JitoClient.buildTipTransaction(signer, JITO_TIP_LAMPORTS, blockhash);
-        await this.jito.sendBundle([tipTx, transaction]);
-        const confirmation = await this.connection.confirmTransaction(
-          confirmStrategy as never,
-          'confirmed',
-        );
-        if (confirmation.value.err) {
-          throw new Error(
-            `Transaction ${signature} landed but reverted on-chain: ${JSON.stringify(confirmation.value.err)}`,
-          );
-        }
-        latencyTracker.mark(traceId, 'rpc_confirmation');
-        return signature;
-      } catch (err) {
-        this.logger.warn({ err }, 'Jito bundle submission failed — falling back to a direct send');
-      }
-    }
-
-    await this.connection.sendTransaction(transaction);
-    // A confirmed transaction can still have landed with an on-chain error (e.g.
-    // slippage exceeded, a program-level revert) — confirmTransaction only rejects
-    // on timeout/expiry, never on this. Live-verified gap: without this check, a
-    // reverted swap was recorded as a successful buy/sell (a Position "opened"
-    // with 0 tokens actually received, or "closed" with a fabricated PnL) since
-    // getActualTokenDelta/getActualSolDelta both computed a real delta of 0/refund
-    // rather than surfacing the revert itself.
-    const confirmation = await this.connection.confirmTransaction(
-      confirmStrategy as never,
-      'confirmed',
+    return broadcastTransactionShared(
+      { connection: this.connection, logger: this.logger, jito: this.jito },
+      transaction,
+      signer,
+      lastValidBlockHeight,
+      traceId,
     );
-    if (confirmation.value.err) {
-      throw new Error(
-        `Transaction ${signature} landed but reverted on-chain: ${JSON.stringify(confirmation.value.err)}`,
-      );
-    }
-    latencyTracker.mark(traceId, 'rpc_confirmation');
-    return signature;
   }
 
   /**
@@ -759,6 +741,24 @@ export class PositionManager {
     if (params.aiScoringEndAt !== undefined) {
       latencyTracker.mark(traceId, 'ai_scoring_end', params.aiScoringEndAt);
     }
+    if (params.analysisStartedAt !== undefined) {
+      latencyTracker.mark(traceId, 'analysis_started', params.analysisStartedAt);
+    }
+    if (params.dexValidatedAt !== undefined) {
+      latencyTracker.mark(traceId, 'dex_validated', params.dexValidatedAt);
+    }
+    if (params.safetyCompletedAt !== undefined) {
+      latencyTracker.mark(traceId, 'safety_completed', params.safetyCompletedAt);
+    }
+    if (params.sellabilityVerifiedAt !== undefined) {
+      latencyTracker.mark(traceId, 'sellability_verified', params.sellabilityVerifiedAt);
+    }
+    if (params.decisionAt !== undefined) {
+      latencyTracker.mark(traceId, 'decision', params.decisionAt);
+    }
+    if (params.buySubmittedAt !== undefined) {
+      latencyTracker.mark(traceId, 'buy_submitted', params.buySubmittedAt);
+    }
 
     const check = await this.safety.checkBeforeOpen(
       {
@@ -782,7 +782,7 @@ export class PositionManager {
         `BUY CANCELLED\nReason:\n${reason}`,
       );
       latencyTracker.finish(traceId, 'failure');
-      throw new SafetyCheckError(reason);
+      throw new SafetyCheckError(reason, check.code, check.details);
     }
     latencyTracker.mark(traceId, 'filters_complete');
     this.logger.debug(
@@ -1836,6 +1836,13 @@ export class PositionManager {
           amountToken: Number(sellAmountRaw),
           err,
         });
+        if (!this.sellFailureAlerted.has(positionId)) {
+          this.sellFailureAlerted.add(positionId);
+          await this.notifier?.notifyError(
+            'SELL execution failed',
+            `Position ${positionId} (${position.token.symbol ?? position.token.mint}): stop-loss/take-profit/trailing-stop should sell but the swap failed [${classification.category}]: ${classification.detail}. Will keep retrying on the next price tick.`,
+          );
+        }
         latencyTracker.finish(traceId, 'failure');
         throw tagSellFailure(err, classification.category);
       }

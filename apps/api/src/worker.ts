@@ -1,4 +1,4 @@
-import type { Connection } from '@solana/web3.js';
+import type { Connection, ParsedTransactionWithMeta } from '@solana/web3.js';
 import type { FastifyInstance } from 'fastify';
 import { getConnection } from './solana/connection.js';
 
@@ -18,15 +18,16 @@ declare module 'fastify' {
     sourceHealthMonitor?: SourceHealthMonitor;
   }
 }
-import { PumpFunMonitor } from './solana/pumpfun.js';
+import { PumpFunMonitor, type PumpFunLaunchEvent } from './solana/pumpfun.js';
 import { JupiterClient } from './solana/jupiter.js';
 import { DexScreenerClient } from './solana/dexscreener.js';
 import { TokenEventClassifier } from './detection/detectors.js';
-import { RiskAnalyzer, type LaunchableDex } from './detection/riskAnalyzer.js';
+import { RiskAnalyzer, isFastPathCandidate, type LaunchableDex } from './detection/riskAnalyzer.js';
 import { extractMintFromParsedTx } from './detection/extractMint.js';
 import { MigrationMonitor } from './detection/migrationMonitor.js';
 import { DexRegistry } from './solana/dex/registry.js';
 import { PumpSwapExecutor } from './solana/dex/pumpswapExecutor.js';
+import type { DexLaunchEvent } from './solana/dex/types.js';
 import { SourceHealthMonitor } from './detection/sourceHealthMonitor.js';
 import { JitoClient } from './solana/jito.js';
 import { PositionManager } from './trading/positionManager.js';
@@ -35,14 +36,35 @@ import { TradingSafety, verifySafetySystemReady, type SafetyConfig } from './tra
 import { PriceMonitor } from './trading/priceMonitor.js';
 import { EmergencyExitMonitor } from './trading/emergencyExitMonitor.js';
 import { DepositMonitor } from './wallet/depositMonitor.js';
-import { hasAnyAiProvider, resolveAiProvider, scoreToken } from '@nova/ai';
-import type { Dex, RiskFlags } from '@nova/shared';
-import { calculateOpportunityScore, getOrCreateBusinessSettings } from '@nova/shared';
+import { runCandidatePipeline, type CandidatePipelineDeps } from './detection/candidatePipeline.js';
+import { PriorityConcurrencyQueue } from './lib/priorityQueue.js';
+import { SmartWalletTrackerService } from './trading/smartWalletTracker.js';
+import { EarlyMomentumDetectorService } from './trading/earlyMomentumDetector.js';
+import {
+  evaluateSmartMoneyAndMomentum,
+  type SmartMoneyMomentumResult,
+} from './trading/smartMoneyMomentumEvaluator.js';
+import { recordShadowDecision } from './trading/shadowModeEvaluator.js';
+import { ShadowModePriceSampler } from './trading/shadowModePriceSampler.js';
+import {
+  hasAnyAiProvider,
+  resolveAiProvider,
+  resolveGeminiProvider,
+  resolveOpenRouterProvider,
+  scoreToken,
+  evaluateMultiLlmConsensus,
+} from '@nova/ai';
+import type { AiScore, Dex, RiskFlags } from '@nova/shared';
+import {
+  calculateOpportunityScore,
+  getOrCreateBusinessSettings,
+  getTelegramTrendEnabled,
+} from '@nova/shared';
 import { createBot, NotificationService, AI_HIGH_SCORE_THRESHOLD } from '@nova/telegram-bot';
 import { eventBus } from './lib/eventBus.js';
 import { metrics } from './lib/metrics.js';
 import { TtlCache } from './lib/ttlCache.js';
-import { evaluateHardRiskGate, evaluateNotifyGate } from './notify/notifyGate.js';
+import { evaluateNotifyGate } from './notify/notifyGate.js';
 import { TwitterClient } from './social/twitter.js';
 import { TwitterMonitor } from './social/twitterMonitor.js';
 import { TelegramTrendClient } from './social/telegramTrend.js';
@@ -186,7 +208,69 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     encryptionKey: app.config.ENCRYPTION_KEY,
     entryFilterGloballyEnabled: app.config.ENTRY_FILTER_ENABLED,
     opportunityScoreGateGloballyEnabled: app.config.OPPORTUNITY_SCORE_GATE_ENABLED,
+    notifier,
   });
+
+  // Smart Money + Early Pump Detection (Sections 3-4, 2026-07-22): shadow-mode
+  // only — see smartMoneyMomentumEvaluator.ts's doc comment. Both master
+  // switches default false; SHADOW_MODE_ENABLED (default true) is the pure
+  // logging layer's own switch, independent of whether either scoring engine
+  // is actually on (score fields are simply null in the log if not).
+  const smartWalletTracker = new SmartWalletTrackerService({
+    prisma: app.prisma,
+    connection,
+    logger: app.log as never,
+  });
+  const earlyMomentumDetector = new EarlyMomentumDetectorService({
+    dexScreener,
+    logger: app.log as never,
+  });
+  const smartMoneyMomentumDeps = {
+    smartWalletTracker,
+    earlyMomentumDetector,
+    logger: app.log as never,
+    smartMoneyEnabled: app.config.SMART_MONEY_ANALYSIS_ENABLED,
+    momentumEnabled: app.config.EARLY_MOMENTUM_DETECTION_ENABLED,
+  };
+  app.log.info(
+    {
+      smartMoneyAnalysisEnabled: app.config.SMART_MONEY_ANALYSIS_ENABLED,
+      earlyMomentumDetectionEnabled: app.config.EARLY_MOMENTUM_DETECTION_ENABLED,
+      shadowModeEnabled: app.config.SHADOW_MODE_ENABLED,
+    },
+    'Smart Money + Early Pump Detection: shadow-mode status',
+  );
+  // Fire-and-forget evaluations are stashed here by mint, keyed to the exact
+  // Promise (not a resolved value) so processAiCall can await it with a
+  // bounded wait without ever having awaited it itself on the fast path — see
+  // maybeStartSmartMoneyMomentumEvaluation/processAiCall below. Read-once:
+  // deleted on the same tick it's consumed.
+  const smartMoneyMomentumPromises = new Map<string, Promise<SmartMoneyMomentumResult>>();
+  const SMART_MONEY_MOMENTUM_WAIT_MS = 1_500;
+
+  function maybeStartSmartMoneyMomentumEvaluation(mint: string, tokenId: string): void {
+    if (!app.config.SMART_MONEY_ANALYSIS_ENABLED && !app.config.EARLY_MOMENTUM_DETECTION_ENABLED)
+      return;
+    // Never awaited here — this is exactly what keeps this stage off the fast
+    // path (token_detected -> aiQueue.enqueue). processAiCall reads the
+    // result later with its own bounded wait.
+    smartMoneyMomentumPromises.set(
+      mint,
+      evaluateSmartMoneyAndMomentum(smartMoneyMomentumDeps, { mint, tokenId }),
+    );
+  }
+
+  // Shadow-mode price sampling — independent of priceMonitor.ts (scoped to
+  // OPEN positions only). See shadowModePriceSampler.ts's doc comment.
+  let shadowModePriceSampler: ShadowModePriceSampler | undefined;
+  if (app.config.SHADOW_MODE_ENABLED) {
+    shadowModePriceSampler = new ShadowModePriceSampler({
+      prisma: app.prisma,
+      dexScreener,
+      logger: app.log as never,
+    });
+    shadowModePriceSampler.start();
+  }
 
   // Drives TP/SL/trailing-stop: without this loop those fields are just stored
   // numbers with nothing evaluating them against the live price.
@@ -198,6 +282,10 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     encryptionKey: app.config.ENCRYPTION_KEY,
     jupiter,
     dexRegistry,
+    connection,
+    notifier,
+    staleReminderIntervalMs: app.config.STALE_POSITION_REMINDER_INTERVAL_MS,
+    manualReviewAfterMs: app.config.STALE_POSITION_MANUAL_REVIEW_AFTER_MS,
   });
   priceMonitor.start(app.config.PRICE_CHECK_INTERVAL_MS);
 
@@ -270,19 +358,53 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   const classifier = new TokenEventClassifier(app.log as never);
   const monitor = new PumpFunMonitor(connection, app.log as never);
 
+  // Multi-LLM consensus (2026-07-22): bypasses resolveAiProvider's single-pick
+  // priority chain entirely — consensus mode needs Gemini AND OpenRouter
+  // specifically, not "whichever one that function would prefer." See
+  // packages/ai/src/consensus.ts and this file's processAiCall below.
+  const geminiProvider = resolveGeminiProvider({ geminiApiKey: app.config.GEMINI_API_KEY });
+  const openRouterProvider = resolveOpenRouterProvider({
+    openrouterApiKey: app.config.OPENROUTER_API_KEY,
+    openrouterModel: app.config.OPENROUTER_MODEL,
+  });
+  const consensusModeActive = Boolean(geminiProvider && openRouterProvider);
+
+  // Single-provider fallback (today's pre-existing behavior) — used only when
+  // consensus mode isn't available (e.g. an Anthropic/OpenAI key is set, or
+  // only one of Gemini/OpenRouter is configured).
   const aiEnabled = hasAnyAiProvider({
     anthropicApiKey: app.config.ANTHROPIC_API_KEY,
     openaiApiKey: app.config.OPENAI_API_KEY,
+    geminiApiKey: app.config.GEMINI_API_KEY,
   });
-  const aiProvider = aiEnabled
-    ? resolveAiProvider({
-        anthropicApiKey: app.config.ANTHROPIC_API_KEY,
-        openaiApiKey: app.config.OPENAI_API_KEY,
-      })
-    : undefined;
+  const aiProvider =
+    aiEnabled && !consensusModeActive
+      ? resolveAiProvider({
+          anthropicApiKey: app.config.ANTHROPIC_API_KEY,
+          openaiApiKey: app.config.OPENAI_API_KEY,
+          geminiApiKey: app.config.GEMINI_API_KEY,
+        })
+      : undefined;
 
-  if (!aiEnabled) {
-    app.log.warn('No ANTHROPIC_API_KEY/OPENAI_API_KEY set — AI scoring disabled, rule-based only');
+  // Status lines only — never the key itself, only presence/model name.
+  app.log.info(geminiProvider ? 'Gemini: ACTIVE' : 'Gemini: NOT CONFIGURED');
+  if (openRouterProvider) {
+    app.log.info({ model: app.config.OPENROUTER_MODEL }, 'OpenRouter: ACTIVE');
+  } else {
+    app.log.info('OpenRouter: NOT CONFIGURED');
+  }
+  if (consensusModeActive) {
+    app.log.info('Multi-LLM Consensus: ACTIVE');
+  } else {
+    app.log.warn('Multi-LLM Consensus: INACTIVE (requires both Gemini and OpenRouter configured)');
+  }
+  if (!aiEnabled && !consensusModeActive) {
+    app.log.warn(
+      'No ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_API_KEY set — AI scoring disabled, rule-based only',
+    );
+  } else if (aiProvider) {
+    // Provider name only — never the key itself.
+    app.log.info({ aiProvider: aiProvider.name }, 'AI scoring enabled (single-provider)');
   }
 
   let twitterMonitor: TwitterMonitor | undefined;
@@ -302,28 +424,20 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     app.log.warn('TWITTER_BEARER_TOKEN not set — Twitter/X monitor disabled');
   }
 
-  // Shared by every detection source (pump.fun create, or a brand-new pool on
-  // PumpSwap/Raydium/Orca/Meteora for a mint we've never seen) so risk analysis,
-  // AI scoring, notification, and auto-trading behave identically regardless of
-  // which DEX a token actually launched on.
-  async function handleNewTokenLaunch(
+  // Shared by every detection source (pump.fun create, a brand-new pool on
+  // PumpSwap/Raydium/Orca/Meteora, or the Telegram-trend source) so the
+  // Token row's core metadata is recorded identically regardless of where a
+  // candidate came from or whether it ultimately passes the mandatory gate.
+  // `extra` carries fields only ever set at creation time (Telegram source
+  // tagging) — never touched on the `update` branch, matching this
+  // function's pre-refactor behavior exactly.
+  async function upsertTokenRow(
     mint: string,
     dex: LaunchableDex,
-    detectedAt: string,
-    poolAddress?: string,
+    poolAddress: string | undefined,
+    riskFlags: RiskFlags,
+    extra?: { discoverySource: 'TELEGRAM'; telegramChannel: string; telegramMessageUrl?: string },
   ) {
-    // Pipeline checkpoint: Scanner reached. Every detection source (pump.fun's own
-    // monitor and dexRegistry.startAll's per-DEX pool-creation watchers) funnels
-    // through this one function, so this line firing confirms a scanner actually
-    // produced a launch event for this mint, before any filtering happens.
-    app.log.debug({ mint, dex, poolAddress }, 'Scanner: handleNewTokenLaunch reached');
-    // Latency Optimization Stage 1 (2026-07-14): first pipeline-stage
-    // timestamp — see latencyTracker.ts. Captured here rather than at the
-    // scanner callback that invoked this function, since this is the one
-    // place every detection source (on-chain and Telegram-trend) converges.
-    const tokenDetectedAt = Date.now();
-    const riskFlags = await riskAnalyzer.analyze({ mint, dex, poolAddress });
-
     const token = await app.prisma.token.upsert({
       where: { mint },
       create: {
@@ -341,6 +455,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
         holderCount: riskFlags.holderCount,
         isHoneypotSuspected: riskFlags.isHoneypotSuspected,
         imageUrl: riskFlags.imageUrl,
+        ...extra,
       },
       update: {
         name: riskFlags.name,
@@ -353,95 +468,51 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
         imageUrl: riskFlags.imageUrl,
       },
     });
-
     eventBus.publish('token.created', { tokenId: token.id, mint, dex });
-
-    const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
-    let aiScoreValue = ruleScore;
-
-    // Skip the paid AI provider call when the token already fails the hard
-    // risk gate (liquidity/honeypot/freeze/mint/LP) — no AI score can change
-    // that outcome (see notifyGate.ts's evaluateNotifyGate: it's additive on
-    // top of these, never a rescue), so there's no reason to spend on a
-    // verdict that can't affect whether this token gets notified about.
-    const hardGatePassed = evaluateHardRiskGate(riskFlags, {
-      minLiquidityUsd: app.config.NOTIFY_MIN_LIQUIDITY_USD,
-    }).allowed;
-
-    let aiScoringStartAt: number | undefined;
-    let aiScoringEndAt: number | undefined;
-    // 2026-07-15 Telegram alert audit: distinct from aiScoreValue itself —
-    // aiScoreValue always holds a number (falls back to ruleScore when no AI
-    // provider is configured), so a caller can't tell from that alone whether
-    // it's a real AI verdict or a rule-based approximation. Threaded through
-    // to notifyAndAutoTrade so alert text never mislabels a rule score as an
-    // "AI Score" (found live: ANTHROPIC_API_KEY/OPENAI_API_KEY both blank in
-    // the running process, so every alert since was silently doing this).
-    let usedRealAi = false;
-    if (aiProvider && hardGatePassed) {
-      aiScoringStartAt = Date.now();
-      const aiScore = await scoreToken(
-        aiProvider,
-        { mint, decimals: 9, createdAt: detectedAt, dex: dex.toLowerCase() as Dex },
-        riskFlags,
-      );
-      aiScoringEndAt = Date.now();
-      aiScoreValue = aiScore.score;
-      usedRealAi = true;
-      await app.prisma.token.update({
-        where: { id: token.id },
-        data: { aiScore: aiScore.score, aiSummary: aiScore.summary },
-      });
-    }
-
-    await notifyAndAutoTrade(mint, dex, token.id, riskFlags, aiScoreValue, usedRealAi, {
-      tokenDetectedAt,
-      aiScoringStartAt,
-      aiScoringEndAt,
-    });
+    return token;
   }
 
   /**
-   * Shared by every detection source (on-chain + the Telegram trend source):
-   * gates the New Launch / AI High Score alerts behind the notify gate
+   * Shared by every detection source: computes + persists the Final
+   * Opportunity Score (Section 7, 2026-07-18) and evaluates the notify gate
    * (notifyGate.ts — liquidity, honeypot, freeze authority, mint risk, LP
-   * lock, and AI/rule score, ALL must pass) and evaluates every active
-   * SnipeConfig for an auto-buy. The notify gate never affects auto-buying —
-   * AutoTrader.evaluateAndMaybeBuy always runs, exactly as before; it has its
-   * own independent, per-user, already-correct gates for that decision. This
-   * is the one place a "New Launch" alert can be produced, so gating here
-   * closes the bug for both detection sources at once, regardless of what
-   * upstream shortcuts either path already takes.
+   * lock, and AI/rule score, ALL must pass) for the "New Launch"/"AI High
+   * Score" Telegram alerts. Runs for EVERY token that reaches this point —
+   * including one candidatePipeline.ts already rejected — so a token that
+   * never becomes a Position still leaves a durable record of why it scored
+   * what it did. Never touches AutoTrader — that only ever runs for a
+   * candidate that has already passed candidatePipeline (see
+   * runCandidateThroughPipeline/processAiCall below), never from here.
    */
-  async function notifyAndAutoTrade(
+  async function recordOpportunityScoreAndNotify(
+    tokenId: string,
     mint: string,
     dex: LaunchableDex,
-    tokenId: string,
     riskFlags: RiskFlags,
     aiScoreValue: number,
-    // 2026-07-15 Telegram alert audit: true only when aiScoreValue came from a
-    // real AI provider call, false when it's the ruleScore fallback (no AI
-    // provider configured, or the token failed the hard gate before AI would've
-    // been called) — see formatNewTokenMessage/formatAiHighScoreMessage, which
-    // label the score accordingly instead of always claiming "AI Score".
+    // True only when aiScoreValue came from a real AI provider call, false
+    // when it's the ruleScore fallback (no AI provider configured, or the
+    // candidate never reached the AI stage at all) — see
+    // formatNewTokenMessage/formatAiHighScoreMessage, which label the score
+    // accordingly instead of always claiming "AI Score".
     usedRealAi: boolean,
-    pipelineTimestamps?: {
-      tokenDetectedAt?: number;
-      aiScoringStartAt?: number;
-      aiScoringEndAt?: number;
-    },
-  ): Promise<{ boughtCount: number }> {
-    // Final Opportunity Score (Section 7, 2026-07-18): computed and persisted
-    // for EVERY token that reaches this point, before the notify gate or any
-    // per-user SnipeConfig is evaluated — so a token that's rejected by every
-    // config (never becomes a Position) still leaves a durable record of why
-    // it scored what it did. aiScore is only included when it's a real AI
-    // verdict (usedRealAi), not the ruleScore fallback used when no provider
-    // is configured — matching aiScoreValue's own fallback semantics.
+    // Smart Money + Early Pump Detection (Sections 3-4, 2026-07-22): purely
+    // additive plug points calculateOpportunityScore was already built to
+    // accept — undefined for a failed candidate (momentum/wallet analysis
+    // never runs there) or when the relevant engine is disabled. Stays inert
+    // on finalScore while BusinessSettings.momentumWeightBps/walletWeightBps
+    // remain at their default of 0.
+    momentumWalletScores?: { momentumScore?: number; walletScore?: number },
+  ) {
     const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
     const businessSettings = await getOrCreateBusinessSettings(app.prisma);
     const opportunityScore = calculateOpportunityScore(
-      { safetyScore: ruleScore, aiScore: usedRealAi ? aiScoreValue : undefined },
+      {
+        safetyScore: ruleScore,
+        aiScore: usedRealAi ? aiScoreValue : undefined,
+        momentumScore: momentumWalletScores?.momentumScore,
+        walletScore: momentumWalletScores?.walletScore,
+      },
       businessSettings,
     );
     await app.prisma.opportunityScoreLog.create({
@@ -480,7 +551,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       metrics.increment('launchNotificationsSent');
       // NotificationService.notifyNewToken fans this out to the owner chat plus every
       // user with a live snipe config (isActive + autoBuyOnLaunch — the exact set
-      // AutoTrader.evaluateAndMaybeBuy is about to query below) — see notifications.ts.
+      // AutoTrader.evaluateAndMaybeBuy queries, when it runs at all) — see notifications.ts.
       await notifier?.notifyNewToken({
         mint,
         dex,
@@ -519,15 +590,311 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       );
     }
 
+    return opportunityScore;
+  }
+
+  interface AiQueueItem {
+    mint: string;
+    dex: LaunchableDex;
+    tokenId: string;
+    riskFlags: RiskFlags;
+    pipelineTimestamps: {
+      tokenDetectedAt: number;
+      analysisStartedAt: number;
+      dexValidatedAt: number;
+      safetyCompletedAt: number;
+      sellabilityVerifiedAt: number;
+    };
+    /** Telegram-source-specific post-AI quality gate (pre-existing
+     * cost-avoidance design — see handleTelegramSignal below). undefined for
+     * on-chain candidates, which have no equivalent extra filter. */
+    telegramPostAiGate?: { minScore: number; channel: string };
+  }
+
+  /**
+   * Two-stage discovery pipeline (2026-07-22): the one place the AI provider
+   * is ever called from, for BOTH on-chain and Telegram-sourced candidates —
+   * routed through `aiQueue` (see below) so concurrent AI-provider calls stay
+   * bounded and a momentum-flagged (FAST_PATH) candidate can jump ahead of
+   * ordinary ones waiting for theirs. By the time an item reaches here,
+   * candidatePipeline.ts has already unconditionally passed it — this
+   * function only ever calls AutoTrader for a candidate that already cleared
+   * every mandatory deterministic check.
+   */
+  async function processAiCall(item: AiQueueItem): Promise<void> {
+    const { mint, dex, tokenId, riskFlags, pipelineTimestamps } = item;
+    const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
+    let aiScoreValue = ruleScore;
+    let usedRealAi = false;
+    let aiScoringStartAt: number | undefined;
+    let aiScoringEndAt: number | undefined;
+    // Only set in consensus mode — used for the consensus gate below, after
+    // the Opportunity Score is known.
+    let geminiResult: AiScore | undefined;
+    let openRouterResult: AiScore | undefined;
+
+    // Smart Money + Early Pump Detection (Sections 3-4, 2026-07-22): consumed
+    // (read + deleted) here, at the top, so the map entry is always cleaned
+    // up regardless of which branch below returns early — but not actually
+    // awaited until just before recordOpportunityScoreAndNotify, so it
+    // resolves concurrently with the AI-scoring call below rather than
+    // adding its own latency on top.
+    const pendingSmartMoneyMomentum = smartMoneyMomentumPromises.get(mint);
+    smartMoneyMomentumPromises.delete(mint);
+    const smartMoneyMomentumSettled: Promise<SmartMoneyMomentumResult | undefined> =
+      pendingSmartMoneyMomentum
+        ? Promise.race([
+            pendingSmartMoneyMomentum,
+            new Promise<undefined>((resolve) =>
+              setTimeout(() => resolve(undefined), SMART_MONEY_MOMENTUM_WAIT_MS),
+            ),
+          ])
+        : Promise.resolve(undefined);
+
+    const tokenInfo = {
+      mint,
+      decimals: 9,
+      createdAt: new Date(pipelineTimestamps.tokenDetectedAt).toISOString(),
+      dex: dex.toLowerCase() as Dex,
+    };
+
+    if (consensusModeActive) {
+      // Multi-LLM consensus (2026-07-22): genuinely parallel — neither call
+      // waits on the other. A hard failure on either side is handled purely
+      // by scoreToken's own existing fail-closed contract (score 0, decision
+      // SKIP, flagged) — see evaluateMultiLlmConsensus, which is what
+      // actually enforces "either fails -> SKIP" once the Opportunity Score
+      // is known below.
+      aiScoringStartAt = Date.now();
+      [geminiResult, openRouterResult] = await Promise.all([
+        scoreToken(geminiProvider!, tokenInfo, riskFlags),
+        scoreToken(openRouterProvider!, tokenInfo, riskFlags),
+      ]);
+      aiScoringEndAt = Date.now();
+      // Conservative combination — same Math.min convention already used for
+      // ruleScore vs. a single AI score elsewhere in this codebase.
+      aiScoreValue = Math.min(geminiResult.score, openRouterResult.score);
+      usedRealAi = true;
+      app.log.info(
+        {
+          mint,
+          gemini: { score: geminiResult.score, decision: geminiResult.decision },
+          openrouter: { score: openRouterResult.score, decision: openRouterResult.decision },
+        },
+        'Multi-LLM consensus scoring complete',
+      );
+      await app.prisma.token.update({
+        where: { id: tokenId },
+        data: {
+          aiScore: aiScoreValue,
+          aiSummary: `gemini: ${geminiResult.summary} | openrouter: ${openRouterResult.summary}`,
+        },
+      });
+    } else if (aiProvider) {
+      aiScoringStartAt = Date.now();
+      const aiScore = await scoreToken(aiProvider, tokenInfo, riskFlags);
+      aiScoringEndAt = Date.now();
+      aiScoreValue = aiScore.score;
+      usedRealAi = true;
+      app.log.info(
+        {
+          mint,
+          aiProvider: aiScore.provider,
+          aiScore: aiScore.score,
+          riskLevel: aiScore.riskLevel,
+          decision: aiScore.decision,
+        },
+        'AI analysis complete',
+      );
+      await app.prisma.token.update({
+        where: { id: tokenId },
+        data: { aiScore: aiScore.score, aiSummary: aiScore.summary },
+      });
+    }
+
+    // Telegram-source-only: a combined score below this source's own bar
+    // still skips entirely (no opportunity-score record, no notify, no
+    // AutoTrader) — same cost-avoidance rationale as the pre-AI ruleScore
+    // filter in handleTelegramSignal, just evaluated once the real AI score
+    // (if any) is known.
+    if (
+      item.telegramPostAiGate &&
+      Math.min(ruleScore, aiScoreValue) < item.telegramPostAiGate.minScore
+    ) {
+      metrics.increment('aiRejected');
+      telegramAiCooldownCache.add(mint);
+      app.log.debug(
+        { mint, channel: item.telegramPostAiGate.channel, ruleScore, aiScoreValue },
+        'AI Filter: combined score below Telegram-source minimum — skipping, 5 min cooldown',
+      );
+      return;
+    }
+    if (item.telegramPostAiGate) {
+      metrics.increment('qualifiedOpportunities');
+    }
+
+    const decisionAt = Date.now();
+    const smartMoneyMomentum = await smartMoneyMomentumSettled;
+    const opportunityScore = await recordOpportunityScoreAndNotify(
+      tokenId,
+      mint,
+      dex,
+      riskFlags,
+      aiScoreValue,
+      usedRealAi,
+      {
+        momentumScore: smartMoneyMomentum?.earlyMomentumScore,
+        walletScore: smartMoneyMomentum?.smartMoneyScore,
+      },
+    );
+
+    // Shadow-mode logging (Sections 3-4, 2026-07-22): exactly one row per
+    // token that reaches this point (i.e. already passed the critical
+    // security gate — see candidatePipeline.ts) — never for a rejected
+    // candidate, since this function only runs from processAiCall. Purely
+    // observational: decideShadowVerdict's output is only ever logged here,
+    // never fed to autoTrader.evaluateAndMaybeBuy below.
+    if (app.config.SHADOW_MODE_ENABLED) {
+      await recordShadowDecision(
+        { prisma: app.prisma, logger: app.log as never },
+        {
+          tokenId,
+          mint,
+          safetyScore: ruleScore,
+          aiScore: usedRealAi ? aiScoreValue : undefined,
+          smartMoneyScore: smartMoneyMomentum?.smartMoneyScore,
+          earlyMomentumScore: smartMoneyMomentum?.earlyMomentumScore,
+          opportunityScore: opportunityScore.finalScore,
+          smartMoneyClusterBuy: smartMoneyMomentum?.smartMoneyClusterBuy ?? false,
+          clusterWalletCount: smartMoneyMomentum?.clusterWalletCount,
+          sybilDiscountApplied: smartMoneyMomentum?.sybilDiscountApplied ?? false,
+          momentumBreakdown: smartMoneyMomentum?.momentumBreakdown,
+          priceAtDetectionUsd: smartMoneyMomentum?.priceUsd,
+        },
+      );
+    }
+
+    // Multi-LLM consensus gate (2026-07-22): the mandatory, unconditional
+    // check that both models must agree BUY and both score >=80 — evaluated
+    // once per token, strictly before AutoTrader, exactly like
+    // candidatePipeline.ts's own gates upstream of this function. Never
+    // loosens anything: critical security checks (candidatePipeline.ts)
+    // already ran, unconditionally, before this candidate ever reached the
+    // AI stage at all. Does NOT gate on Opportunity Score (2026-07-22 audit
+    // — see evaluateMultiLlmConsensus's own doc comment): that's
+    // autoTrader.ts's opt-in job, per config, downstream.
+    if (consensusModeActive && geminiResult && openRouterResult) {
+      const consensus = evaluateMultiLlmConsensus(geminiResult, openRouterResult);
+      if (consensus.decision !== 'BUY') {
+        app.log.warn(
+          {
+            mint,
+            decision: consensus.decision,
+            reasons: consensus.reasons,
+            geminiScore: geminiResult.score,
+            openrouterScore: openRouterResult.score,
+            opportunityScore: opportunityScore.finalScore,
+            location: 'apps/api/src/worker.ts:processAiCall (multi-LLM consensus)',
+          },
+          `BUY CANCELLED — MULTI-LLM CONSENSUS\nDecision:\n${consensus.decision}\nReasons:\n${consensus.reasons.join(', ')}`,
+        );
+        await notifier?.notifyError(
+          'multi-LLM consensus',
+          `Auto-buy blocked for ${mint}: ${consensus.decision} (${consensus.reasons.join(', ')})`,
+        );
+        return;
+      }
+    }
+
     const results = await autoTrader.evaluateAndMaybeBuy(
       mint,
       tokenId,
       riskFlags,
       aiScoreValue,
-      pipelineTimestamps,
+      { ...pipelineTimestamps, aiScoringStartAt, aiScoringEndAt, decisionAt },
       opportunityScore.finalScore,
     );
-    return { boughtCount: results.filter((r) => r.bought).length };
+    metrics.increment('executedTrades', results.filter((r) => r.bought).length);
+  }
+
+  const aiQueue = new PriorityConcurrencyQueue<AiQueueItem>(
+    app.config.AI_QUEUE_CONCURRENCY,
+    processAiCall,
+    (err, item) => app.log.error({ err, mint: item.mint }, 'processAiCall failed'),
+  );
+
+  const candidatePipelineDeps: CandidatePipelineDeps = {
+    riskAnalyzer,
+    jupiter,
+    prisma: app.prisma,
+    logger: app.log as never,
+    notifier,
+  };
+
+  /**
+   * Shared by every on-chain detection source (pump.fun create, or a
+   * brand-new pool on PumpSwap/Raydium/Orca/Meteora for a mint we've never
+   * seen): runs candidatePipeline.ts's mandatory checks, upserts the Token
+   * row regardless of outcome (preserves the existing mint-dedupe guarantee
+   * against a re-delivered WS event), and — only on a pass — queues the
+   * candidate for AI scoring with FAST_PATH priority when its momentum
+   * clears the configured thresholds.
+   */
+  async function runCandidateThroughPipeline(
+    mint: string,
+    dex: LaunchableDex,
+    tokenDetectedAt: number,
+    poolAddress: string | undefined,
+    deployerAddress: string | undefined,
+  ): Promise<void> {
+    const result = await runCandidatePipeline(candidatePipelineDeps, {
+      mint,
+      dex,
+      poolAddress,
+      deployerAddress,
+    });
+
+    if (!result.riskFlags) {
+      // riskAnalyzer.analyze() itself threw — candidatePipeline already
+      // logged it; nothing here to upsert or score.
+      return;
+    }
+
+    const token = await upsertTokenRow(mint, dex, poolAddress, result.riskFlags);
+
+    if (!result.passed) {
+      // Still leaves a durable, rule-score-only record of why this token
+      // scored what it did (Section 7's original intent) — but never queues
+      // for AI or reaches AutoTrader; the mandatory gate has already spoken.
+      await recordOpportunityScoreAndNotify(
+        token.id,
+        mint,
+        dex,
+        result.riskFlags,
+        RiskAnalyzer.ruleBasedScore(result.riskFlags),
+        false,
+      );
+      return;
+    }
+
+    const fastPath = isFastPathCandidate(result.riskFlags, {
+      minRecentBuys: app.config.FAST_PATH_MIN_RECENT_BUYS,
+      minRecentVolumeUsd: app.config.FAST_PATH_MIN_RECENT_VOLUME_USD,
+    });
+    // Structurally unreachable for a failed candidate — the `!result.passed`
+    // branch above already returned. Fire-and-forget, never awaited: see
+    // maybeStartSmartMoneyMomentumEvaluation's own doc comment.
+    maybeStartSmartMoneyMomentumEvaluation(mint, token.id);
+    aiQueue.enqueue(
+      {
+        mint,
+        dex,
+        tokenId: token.id,
+        riskFlags: result.riskFlags,
+        pipelineTimestamps: { tokenDetectedAt, ...result.timestamps },
+      },
+      fastPath ? 'FAST_PATH' : 'NORMAL',
+    );
   }
 
   // Telegram trend channels (t.me/trendingssol, t.me/trending) are a signal
@@ -543,9 +910,9 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
 
   async function handleTelegramSignal(candidate: TelegramSignalCandidate): Promise<void> {
     const { mint, channel, messageUrl } = candidate;
-    // Latency Optimization Stage 1 (2026-07-14) — see handleNewTokenLaunch's
-    // identical tokenDetectedAt capture above; this is the Telegram-trend
-    // source's own convergence point.
+    // Latency Optimization Stage 1 (2026-07-14) — see
+    // runCandidateThroughPipeline's identical tokenDetectedAt capture above;
+    // this is the Telegram-trend source's own convergence point.
     const tokenDetectedAt = Date.now();
 
     if (telegramDedupeCache.has(mint) || telegramAiCooldownCache.has(mint)) {
@@ -592,11 +959,25 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       return;
     }
 
-    const riskFlags = await riskAnalyzer.analyze({
+    // Two-stage discovery pipeline (2026-07-22): the same mandatory,
+    // fail-closed checks every on-chain candidate goes through — Telegram is
+    // a signal source only, never a direct path to a buy, so it must clear
+    // exactly the same bar. No creation tx exists for a bare Telegram mint
+    // mention, so deployerAddress is omitted (pass-through, not a skip — see
+    // candidatePipeline.ts's CandidateInput doc comment).
+    const result = await runCandidatePipeline(candidatePipelineDeps, {
       mint,
       dex: cheapLiquidity.dex,
       poolAddress: cheapLiquidity.poolAddress,
     });
+    if (!result.passed) {
+      // No Token row is created here — matches this source's pre-existing
+      // "junk never gets a DB footprint" convention; telegramAiCooldownCache
+      // is this source's own short-term dedupe for a rejected mint.
+      telegramAiCooldownCache.add(mint);
+      return;
+    }
+    const { riskFlags } = result;
     const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
 
     // AI Filter, part 1: min(ruleScore, aiScore) can never exceed ruleScore, so if
@@ -615,93 +996,39 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       return;
     }
 
-    let aiScoreValue = ruleScore;
-    let aiSummary: string | undefined;
-    let aiScoringStartAt: number | undefined;
-    let aiScoringEndAt: number | undefined;
-    let usedRealAi = false;
-    if (aiProvider) {
-      aiScoringStartAt = Date.now();
-      const aiScore = await scoreToken(
-        aiProvider,
-        {
-          mint,
-          decimals: 9,
-          createdAt: new Date().toISOString(),
-          dex: cheapLiquidity.dex.toLowerCase() as Dex,
-        },
-        riskFlags,
-      );
-      aiScoringEndAt = Date.now();
-      aiScoreValue = aiScore.score;
-      aiSummary = aiScore.summary;
-      usedRealAi = true;
-    }
-
-    // AI Filter, part 2: the AI score itself (when a provider is configured) can
-    // still drag the combined score below threshold even though ruleScore alone
-    // passed above.
-    if (Math.min(ruleScore, aiScoreValue) < app.config.TELEGRAM_TREND_MIN_AI_SCORE) {
-      metrics.increment('aiRejected');
-      telegramAiCooldownCache.add(mint);
-      app.log.debug(
-        { mint, channel, ruleScore, aiScoreValue },
-        'AI Filter: combined score below Telegram-source minimum — skipping, 5 min cooldown',
-      );
-      return;
-    }
-
-    metrics.increment('qualifiedOpportunities');
-
-    const token = await app.prisma.token.upsert({
-      where: { mint },
-      create: {
-        mint,
-        dex: cheapLiquidity.dex,
-        poolAddress: cheapLiquidity.poolAddress,
-        name: riskFlags.name,
-        symbol: riskFlags.symbol,
-        liquidityUsd: riskFlags.liquidityUsd,
-        marketCapUsd: riskFlags.marketCapUsd,
-        mintAuthorityRevoked: riskFlags.mintAuthorityRevoked,
-        freezeAuthorityRevoked: riskFlags.freezeAuthorityRevoked,
-        lpBurnedOrLocked: riskFlags.lpBurnedOrLocked,
-        top10HolderPercent: riskFlags.top10HolderPercent,
-        holderCount: riskFlags.holderCount,
-        isHoneypotSuspected: riskFlags.isHoneypotSuspected,
-        imageUrl: riskFlags.imageUrl,
-        aiScore: aiScoreValue,
-        aiSummary,
+    const token = await upsertTokenRow(
+      mint,
+      cheapLiquidity.dex,
+      cheapLiquidity.poolAddress,
+      riskFlags,
+      {
         discoverySource: 'TELEGRAM',
         telegramChannel: channel,
         telegramMessageUrl: messageUrl,
       },
-      update: {
-        name: riskFlags.name,
-        symbol: riskFlags.symbol,
-        liquidityUsd: riskFlags.liquidityUsd,
-        marketCapUsd: riskFlags.marketCapUsd,
-        top10HolderPercent: riskFlags.top10HolderPercent,
-        holderCount: riskFlags.holderCount,
-        isHoneypotSuspected: riskFlags.isHoneypotSuspected,
-        imageUrl: riskFlags.imageUrl,
-        aiScore: aiScoreValue,
-        aiSummary,
-      },
-    });
-
-    eventBus.publish('token.created', { tokenId: token.id, mint, dex: cheapLiquidity.dex });
-
-    const { boughtCount } = await notifyAndAutoTrade(
-      mint,
-      cheapLiquidity.dex,
-      token.id,
-      riskFlags,
-      aiScoreValue,
-      usedRealAi,
-      { tokenDetectedAt, aiScoringStartAt, aiScoringEndAt },
     );
-    metrics.increment('executedTrades', boughtCount);
+
+    // AI Filter, part 2 (deferred): the AI score itself can still drag the
+    // combined score below threshold even though ruleScore alone passed
+    // above — evaluated inside processAiCall (item.telegramPostAiGate) once
+    // the real AI score (if any) is known, since AI now runs from the
+    // shared, concurrency-bounded aiQueue rather than inline here.
+    const fastPath = isFastPathCandidate(riskFlags, {
+      minRecentBuys: app.config.FAST_PATH_MIN_RECENT_BUYS,
+      minRecentVolumeUsd: app.config.FAST_PATH_MIN_RECENT_VOLUME_USD,
+    });
+    maybeStartSmartMoneyMomentumEvaluation(mint, token.id);
+    aiQueue.enqueue(
+      {
+        mint,
+        dex: cheapLiquidity.dex,
+        tokenId: token.id,
+        riskFlags,
+        pipelineTimestamps: { tokenDetectedAt, ...result.timestamps },
+        telegramPostAiGate: { minScore: app.config.TELEGRAM_TREND_MIN_AI_SCORE, channel },
+      },
+      fastPath ? 'FAST_PATH' : 'NORMAL',
+    );
   }
 
   let telegramTrendMonitor: TelegramTrendMonitor | undefined;
@@ -715,6 +1042,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       telegramTrendChannels,
       app.config.TELEGRAM_TREND_POLL_INTERVAL_MS,
       app.log as never,
+      () => getTelegramTrendEnabled(app.redis),
     );
     telegramTrendMonitor.start(async (candidate) => {
       try {
@@ -762,90 +1090,201 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   sourceHealthMonitor.start();
   app.decorate('sourceHealthMonitor', sourceHealthMonitor);
 
-  monitor.start(async (event) => {
-    sourceHealthMonitor.recordActivity('PUMPFUN');
-    const detection = classifier.classify(event);
-    if (!detection) return;
+  // 2026-07-19 production investigation: sourceHealthMonitor above (fed by raw
+  // log delivery) never fired despite 20-190 minute gaps in genuine pump.fun
+  // launch detection — proof the subscription kept receiving *some* traffic
+  // throughout, so raw liveness alone can't catch this failure mode. This
+  // second monitor is fed only by qualified new-token detections (recorded
+  // inside processDiscoveryItem below, not on every raw log), so it
+  // specifically catches "subscription alive but silently dropping Creates."
+  // Not applied to PUMPSWAP/RAYDIUM/ORCA/METEORA — see sourceHealthMonitor.ts's
+  // own doc comment on why a qualifying-count gate would false-alarm
+  // constantly on those (direct pool creation is genuinely rare there).
+  const launchHealthMonitor = new SourceHealthMonitor(
+    ['PUMPFUN'],
+    app.config.PUMPFUN_LAUNCH_SILENCE_ALERT_MS,
+    app.log as never,
+    async ({ silentForMs }) => {
+      const minutes = Math.round(silentForMs / 60_000);
+      // Production incident (2026-07-22): this alert used to be purely
+      // observational — a Telegram message and nothing else — leaving a
+      // confirmed silently-dropping subscription dead until the next blind
+      // periodic resubscribe (if configured at all) or a manual restart.
+      // This is the one health check specifically designed to distinguish
+      // "quiet market" from "subscription silently dropping Creates" (see
+      // SourceHealthMonitor's and PumpFunMonitor's own doc comments) — a
+      // confirmed hit here, not raw-traffic noise, is exactly the signal
+      // that should force an immediate resubscribe rather than wait.
+      app.log.warn(
+        { silentForMs },
+        'pump.fun launch silence confirmed — forcing an immediate resubscribe (not waiting for the next periodic one)',
+      );
+      await monitor.forceResubscribe().catch((err) => {
+        app.log.error({ err }, 'pump.fun watchdog-triggered resubscribe failed');
+      });
+      await notifier?.notifyError(
+        'Pump.fun launch detection',
+        `No new pump.fun token launches detected in ${minutes} minutes, despite normal raw program traffic — the websocket subscription was likely silently dropping Create notifications (see PumpFunMonitor's doc comment). Forced an immediate resubscribe.`,
+      );
+    },
+  );
+  launchHealthMonitor.start();
 
-    if (detection.kind === 'migration') {
-      // Best-effort fast path only (see migrationMonitor.ts on why this log hint
-      // isn't authoritative) — extract the mint and, if it's a token we're
-      // already tracking as PUMPFUN, check it immediately instead of waiting for
-      // the next poll tick. The periodic poll is the reliable backstop.
-      try {
-        const tx = await connection.getParsedTransaction(event.signature, {
-          maxSupportedTransactionVersion: 0,
-        });
-        const mint = tx ? extractMintFromParsedTx(tx) : undefined;
-        if (!mint) return;
-        const token = await app.prisma.token.findUnique({ where: { mint } });
-        if (token && token.dex === 'PUMPFUN') {
-          await migrationMonitor.checkOne(token.id, mint);
-        }
-      } catch (err) {
-        app.log.debug({ err, signature: event.signature }, 'migration hint check failed');
-      }
-      return;
-    }
+  // Fee payer of a parsed transaction — always the first account key by
+  // Solana convention. Best-effort creator/deployer identity (same
+  // "documented limitation, not a guarantee" caveat as positionManager.ts's
+  // dev-wallet proxy): a Jito-bundled or aggregator-routed create could in
+  // principle have a different fee payer than the "true" creator, but this
+  // is the cheapest available signal and costs zero extra RPC calls, since
+  // the parsed tx is already fetched to resolve the mint itself.
+  function resolveDeployerAddress(tx: ParsedTransactionWithMeta): string | undefined {
+    return tx.transaction.message.accountKeys[0]?.pubkey.toBase58();
+  }
 
-    if (detection.kind !== 'new_token') return;
-
+  /** Best-effort fast path only (see migrationMonitor.ts on why this log hint
+   * isn't authoritative) — kept as direct fire-and-forget, not routed through
+   * discoveryQueue: this is neither AI nor holder analysis, just a single
+   * bonding-curve completeness check, so it doesn't need the bounded-queue/
+   * FAST_PATH treatment the new candidate pipeline does. The periodic poll
+   * (migrationMonitor.start) is the reliable backstop either way. */
+  async function processMigrationHint(event: PumpFunLaunchEvent): Promise<void> {
     try {
       const tx = await connection.getParsedTransaction(event.signature, {
         maxSupportedTransactionVersion: 0,
       });
-      if (!tx) return;
-      const mint = extractMintFromParsedTx(tx);
-      if (!mint) {
-        app.log.warn(
-          { signature: event.signature },
-          'could not confidently resolve the mint for a detected pump.fun create — skipping rather than guessing',
-        );
-        return;
+      const mint = tx ? extractMintFromParsedTx(tx) : undefined;
+      if (!mint) return;
+      const token = await app.prisma.token.findUnique({ where: { mint } });
+      if (token && token.dex === 'PUMPFUN') {
+        await migrationMonitor.checkOne(token.id, mint);
       }
-      // Same guard the DEX-registry path below already has: connection.onLogs can
-      // redeliver the same signature on reconnect/resubscribe, which would
-      // otherwise re-run the full pipeline (RPC calls, AI scoring cost, a second
-      // Telegram alert, and — before TradingSafety's own duplicate-position check
-      // — a real risk of a second live buy for a mint already tracked).
-      const existing = await app.prisma.token.findUnique({ where: { mint } });
-      if (existing) {
-        app.log.debug({ mint }, 'token already tracked — skipping duplicate pump.fun launch event');
-        return;
-      }
-      await handleNewTokenLaunch(mint, 'PUMPFUN', event.detectedAt);
     } catch (err) {
-      app.log.error({ err, signature: event.signature }, 'failed to process launch event');
+      app.log.debug({ err, signature: event.signature }, 'migration hint check failed');
     }
-  });
+  }
 
-  // PumpSwap/Raydium/Orca/Meteora: a new pool for a mint we've never tracked is a
-  // direct launch on that DEX; a new pool for a mint already tracked as PUMPFUN is
-  // the migration signal, same handling as the pump.fun-side hint above.
-  dexRegistry.startAll(
-    async (event) => {
+  type DiscoveryItem =
+    | { source: 'pumpfun'; event: PumpFunLaunchEvent }
+    | { source: 'dexRegistry'; event: DexLaunchEvent };
+
+  /**
+   * Two-stage discovery pipeline (2026-07-22): everything that used to run
+   * directly inside the WS scanner callbacks (getParsedTransaction, mint
+   * extraction, the mint-dedupe check, and the full candidate pipeline) now
+   * runs here instead, under discoveryQueue's bounded concurrency — the
+   * scanner callbacks below do nothing but a cheap in-memory classification
+   * and an `enqueue` call, so a burst of launches can no longer fan out
+   * unbounded concurrent RPC/AI calls.
+   */
+  async function processDiscoveryItem(item: DiscoveryItem): Promise<void> {
+    // Latency Optimization Stage 1 (2026-07-14): first pipeline-stage
+    // timestamp — captured here (queue dequeue), not in the scanner callback
+    // that enqueued this item, so token_detected -> analysis_started
+    // (marked next, inside candidatePipeline.ts) reflects real processing
+    // time, not queue-wait — queue-wait is instead the gap between this and
+    // the raw WS event, both of which are visible via /metrics/latency.
+    const tokenDetectedAt = Date.now();
+
+    if (item.source === 'pumpfun') {
+      const { event } = item;
       try {
         const tx = await connection.getParsedTransaction(event.signature, {
           maxSupportedTransactionVersion: 0,
         });
         if (!tx) return;
-        const pool = await dexRegistry.resolveNewPool(event.dex, tx);
-        if (!pool) return;
-
-        const existing = await app.prisma.token.findUnique({ where: { mint: pool.baseMint } });
-        if (existing?.dex === 'PUMPFUN') {
-          await migrationMonitor.checkOne(existing.id, pool.baseMint);
+        const mint = extractMintFromParsedTx(tx);
+        if (!mint) {
+          app.log.warn(
+            { signature: event.signature },
+            'could not confidently resolve the mint for a detected pump.fun create — skipping rather than guessing',
+          );
           return;
         }
-        if (existing) return;
-
-        await handleNewTokenLaunch(pool.baseMint, event.dex, event.detectedAt, pool.poolAddress);
-      } catch (err) {
-        app.log.error(
-          { err, signature: event.signature, dex: event.dex },
-          'failed to process DEX launch event',
+        // Same guard the DEX-registry branch below already has: connection.onLogs
+        // can redeliver the same signature on reconnect/resubscribe, which would
+        // otherwise re-run the full pipeline (RPC calls, AI scoring cost, a second
+        // Telegram alert, and — before TradingSafety's own duplicate-position check
+        // — a real risk of a second live buy for a mint already tracked).
+        const existing = await app.prisma.token.findUnique({ where: { mint } });
+        if (existing) {
+          app.log.debug(
+            { mint },
+            'token already tracked — skipping duplicate pump.fun launch event',
+          );
+          return;
+        }
+        launchHealthMonitor.recordActivity('PUMPFUN');
+        await runCandidateThroughPipeline(
+          mint,
+          'PUMPFUN',
+          tokenDetectedAt,
+          undefined,
+          resolveDeployerAddress(tx),
         );
+      } catch (err) {
+        app.log.error({ err, signature: event.signature }, 'failed to process launch event');
       }
+      return;
+    }
+
+    const { event } = item;
+    try {
+      const tx = await connection.getParsedTransaction(event.signature, {
+        maxSupportedTransactionVersion: 0,
+      });
+      if (!tx) return;
+      const pool = await dexRegistry.resolveNewPool(event.dex, tx);
+      if (!pool) return;
+
+      const existing = await app.prisma.token.findUnique({ where: { mint: pool.baseMint } });
+      if (existing?.dex === 'PUMPFUN') {
+        await migrationMonitor.checkOne(existing.id, pool.baseMint);
+        return;
+      }
+      if (existing) return;
+
+      await runCandidateThroughPipeline(
+        pool.baseMint,
+        event.dex,
+        tokenDetectedAt,
+        pool.poolAddress,
+        resolveDeployerAddress(tx),
+      );
+    } catch (err) {
+      app.log.error(
+        { err, signature: event.signature, dex: event.dex },
+        'failed to process DEX launch event',
+      );
+    }
+  }
+
+  const discoveryQueue = new PriorityConcurrencyQueue<DiscoveryItem>(
+    app.config.DISCOVERY_QUEUE_CONCURRENCY,
+    processDiscoveryItem,
+    (err, item) => app.log.error({ err, source: item.source }, 'processDiscoveryItem failed'),
+  );
+
+  monitor.start((event) => {
+    sourceHealthMonitor.recordActivity('PUMPFUN');
+    const detection = classifier.classify(event);
+    if (!detection) return;
+
+    if (detection.kind === 'migration') {
+      void processMigrationHint(event);
+      return;
+    }
+    if (detection.kind !== 'new_token') return;
+
+    discoveryQueue.enqueue({ source: 'pumpfun', event }, 'NORMAL');
+  }, app.config.PUMPFUN_RESUBSCRIBE_INTERVAL_MS || undefined);
+
+  // PumpSwap/Raydium/Orca/Meteora: a new pool for a mint we've never tracked is a
+  // direct launch on that DEX; a new pool for a mint already tracked as PUMPFUN is
+  // the migration signal, same handling as the pump.fun-side hint above — both
+  // decided inside processDiscoveryItem now, not in this callback.
+  dexRegistry.startAll(
+    (event) => {
+      discoveryQueue.enqueue({ source: 'dexRegistry', event }, 'NORMAL');
     },
     (dex) => sourceHealthMonitor.recordActivity(dex),
   );
@@ -859,6 +1298,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     migrationMonitor.stop();
     depositMonitor?.stop();
     sourceHealthMonitor.stop();
+    launchHealthMonitor.stop();
+    shadowModePriceSampler?.stop();
     await dexRegistry.stopAll();
   };
 }

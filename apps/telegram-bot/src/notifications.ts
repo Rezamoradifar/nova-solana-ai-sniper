@@ -10,6 +10,7 @@ import {
 import { buildBuyCaption, buildShareCaption } from './cards/captions.js';
 import { buildBuyCardKeyboard, buildSellCardKeyboard } from './cards/keyboards.js';
 import { escapeMd } from './ui/format.js';
+import { resolveLocale, t, type Locale } from './i18n/index.js';
 
 export interface TradeNotification {
   side: 'BUY' | 'SELL';
@@ -151,7 +152,8 @@ function linksLine(mint: string, dex?: string): string {
  * Pure so both NotificationService.notifyNewToken and its regression tests can
  * assert on exactly what a "New Launch" alert looks like — one source of truth.
  */
-export function formatNewTokenMessage(token: NewTokenNotification): string {
+export function formatNewTokenMessage(token: NewTokenNotification, lang: Locale = 'en'): string {
+  const d = t(lang).notifications;
   const riskEmoji = token.isHoneypotSuspected ? '🚨' : '🆕';
   // token.name/token.symbol are on-chain SPL token metadata — anyone can mint a
   // token with a "_"/"*"/"`" in its name/symbol, which would otherwise break
@@ -164,34 +166,38 @@ export function formatNewTokenMessage(token: NewTokenNotification): string {
       ? `\n${name ?? ''}${name && symbol ? ' — ' : ''}${symbol ? `$${symbol}` : ''}`
       : '';
   const liquidityLine =
-    token.liquidityUsd !== undefined ? `\nLiquidity: $${token.liquidityUsd.toFixed(0)}` : '';
+    token.liquidityUsd !== undefined
+      ? `\n${d.liquidityLabel}: $${token.liquidityUsd.toFixed(0)}`
+      : '';
   const marketCapLine =
-    token.marketCapUsd !== undefined ? `\nMarket Cap: $${token.marketCapUsd.toFixed(0)}` : '';
+    token.marketCapUsd !== undefined
+      ? `\n${d.marketCapLabel}: $${token.marketCapUsd.toFixed(0)}`
+      : '';
   const scoreLine =
     token.aiScore !== undefined
-      ? `\n${token.isAiScore ? 'AI Score' : 'Rule Score (no AI provider)'}: ${token.aiScore.toFixed(0)}/100`
+      ? `\n${token.isAiScore ? d.aiScoreLabel : d.ruleScoreLabel}: ${token.aiScore.toFixed(0)}/100`
       : '';
   const riskParts: string[] = [];
   if (token.mintAuthorityRevoked !== undefined) {
-    riskParts.push(`Mint ${token.mintAuthorityRevoked ? '✅' : '⚠️'}`);
+    riskParts.push(`${d.mintLabel} ${token.mintAuthorityRevoked ? '✅' : '⚠️'}`);
   }
   if (token.freezeAuthorityRevoked !== undefined) {
-    riskParts.push(`Freeze ${token.freezeAuthorityRevoked ? '✅' : '⚠️'}`);
+    riskParts.push(`${d.freezeLabel} ${token.freezeAuthorityRevoked ? '✅' : '⚠️'}`);
   }
   if (token.lpBurnedOrLocked !== undefined) {
-    riskParts.push(`LP ${token.lpBurnedOrLocked ? '🔒' : '⚠️'}`);
+    riskParts.push(`${d.lpLabel} ${token.lpBurnedOrLocked ? '🔒' : '⚠️'}`);
   }
   if (token.top10HolderPercent !== undefined) {
-    riskParts.push(`Top10 ${token.top10HolderPercent.toFixed(0)}%`);
+    riskParts.push(`${d.top10Label} ${token.top10HolderPercent.toFixed(0)}%`);
   }
-  const riskLine = riskParts.length > 0 ? `\nRisk: ${riskParts.join(' | ')}` : '';
+  const riskLine = riskParts.length > 0 ? `\n${d.riskLabel}: ${riskParts.join(' | ')}` : '';
   const momentumLine =
     token.priceChangeH1 !== undefined
-      ? `\nMomentum (1h): ${token.priceChangeH1 >= 0 ? '📈' : '📉'} ${token.priceChangeH1.toFixed(1)}%`
+      ? `\n${d.momentumLabel}: ${token.priceChangeH1 >= 0 ? '📈' : '📉'} ${token.priceChangeH1.toFixed(1)}%`
       : '';
-  const honeypotLine = token.isHoneypotSuspected ? '\n⚠️ Honeypot/rug risk flagged' : '';
+  const honeypotLine = token.isHoneypotSuspected ? `\n${d.honeypotFlag}` : '';
   return (
-    `${riskEmoji} *New ${escapeMd(token.dex)} launch*${nameLine}\n` +
+    `${riskEmoji} ${d.newLaunch(escapeMd(token.dex))}${nameLine}\n` +
     `\`${token.mint}\`${liquidityLine}${marketCapLine}${scoreLine}${riskLine}${momentumLine}${honeypotLine}\n` +
     linksLine(token.mint, token.dex)
   );
@@ -206,7 +212,11 @@ export function formatNewTokenMessage(token: NewTokenNotification): string {
  */
 export const AI_HIGH_SCORE_THRESHOLD = 85;
 
-export function formatAiHighScoreMessage(token: AiHighScoreNotification): string {
+export function formatAiHighScoreMessage(
+  token: AiHighScoreNotification,
+  lang: Locale = 'en',
+): string {
+  const d = t(lang).notifications;
   const name = token.name ? escapeMd(token.name) : undefined;
   const symbol = token.symbol ? escapeMd(token.symbol) : undefined;
   const nameLine =
@@ -214,8 +224,10 @@ export function formatAiHighScoreMessage(token: AiHighScoreNotification): string
       ? ` ${name ?? ''}${name && symbol ? ' — ' : ''}${symbol ? `$${symbol}` : ''}`
       : '';
   const liquidityLine =
-    token.liquidityUsd !== undefined ? `\nLiquidity: $${token.liquidityUsd.toFixed(0)}` : '';
-  const label = token.isAiScore ? 'AI High Score' : 'High Rule Score (no AI provider)';
+    token.liquidityUsd !== undefined
+      ? `\n${d.liquidityLabel}: $${token.liquidityUsd.toFixed(0)}`
+      : '';
+  const label = token.isAiScore ? d.aiHighScoreLabel : d.highRuleScoreLabel;
   return (
     `⭐ *${label}* (${token.aiScore.toFixed(0)}/100)${nameLine}\n` +
     `${escapeMd(token.dex)}\n` +
@@ -224,88 +236,89 @@ export function formatAiHighScoreMessage(token: AiHighScoreNotification): string
   );
 }
 
-function formatTradeMessage(trade: TradeNotification): string {
+function formatTradeMessage(trade: TradeNotification, lang: Locale = 'en'): string {
+  const d = t(lang).notifications;
   const emoji = trade.side === 'BUY' ? '🟢' : '🔴';
   const paperTag = trade.isPaperTrade ? ' 📝 PAPER' : '';
-  const priceLine = trade.priceUsd ? `\nPrice: $${trade.priceUsd.toFixed(6)}` : '';
+  const priceLine = trade.priceUsd ? `\n${d.priceLabel}: $${trade.priceUsd.toFixed(6)}` : '';
   const txLine = trade.isPaperTrade
-    ? '\n_(simulated fill, no on-chain tx)_'
+    ? `\n${d.simulatedFill}`
     : `\n[Tx](https://solscan.io/tx/${trade.signature})`;
   const linkLine = `\n${linksLine(trade.mint, trade.dex)}`;
   return (
     `${emoji} *${trade.side}*${paperTag} \`${escapeMd(trade.symbol)}\`\n` +
-    `Amount: ${trade.amountSol} SOL${priceLine}${txLine}${linkLine}`
+    `${d.amountLabel}: ${trade.amountSol} SOL${priceLine}${txLine}${linkLine}`
   );
 }
 
-function formatExitMessage(exit: PositionExitNotification): string {
+function formatExitMessage(exit: PositionExitNotification, lang: Locale = 'en'): string {
+  const d = t(lang).notifications;
   const emoji = exit.pnlPercent >= 0 ? '✅' : '⚠️';
   const paperTag = exit.isPaperTrade ? ' 📝 PAPER' : '';
-  const reasonLabel = exit.reason.replace(/_/g, ' ');
+  const reasonLabel = d.exitReasonLabels[exit.reason] ?? exit.reason.replace(/_/g, ' ');
   const entryLine =
-    exit.entryPriceUsd !== undefined ? `\nEntry: $${exit.entryPriceUsd.toFixed(8)}` : '';
-  const athLine = exit.athUsd !== undefined ? `\nATH: $${exit.athUsd.toFixed(8)}` : '';
+    exit.entryPriceUsd !== undefined ? `\n${d.entryLabel}: $${exit.entryPriceUsd.toFixed(8)}` : '';
+  const athLine = exit.athUsd !== undefined ? `\n${d.athLabel}: $${exit.athUsd.toFixed(8)}` : '';
   const lockedLine =
     exit.lockedProfitPercent !== undefined
-      ? `\nLocked profit: ${exit.lockedProfitPercent.toFixed(2)}%`
+      ? `\n${d.lockedProfitLabel}: ${exit.lockedProfitPercent.toFixed(2)}%`
       : '';
   const linkLine = exit.mint ? `\n${linksLine(exit.mint, exit.dex)}` : '';
   return (
-    `${emoji}${paperTag} Position closed: \`${escapeMd(exit.symbol)}\`\n` +
-    `Reason: ${reasonLabel}\n` +
-    `PnL: ${exit.pnlPercent.toFixed(2)}%${entryLine}${athLine}${lockedLine}${linkLine}`
+    `${emoji}${paperTag} ${d.positionClosedLabel}: \`${escapeMd(exit.symbol)}\`\n` +
+    `${d.reasonLabel}: ${reasonLabel}\n` +
+    `${d.pnlLabel}: ${exit.pnlPercent.toFixed(2)}%${entryLine}${athLine}${lockedLine}${linkLine}`
   );
 }
-
-const EMERGENCY_EXIT_REASON_LABELS: Record<EmergencyExitNotification['reason'], string> = {
-  liquidity_removed: 'Liquidity Removed',
-  trading_disabled: 'Trading Disabled (no sell route)',
-  mint_reenabled: 'Mint Authority Re-enabled',
-  freeze_reenabled: 'Freeze Authority Re-enabled',
-  critical_rug_score: 'Critical Rug Score',
-  dev_wallet_dump: 'Major Wallet Dumping Detected',
-};
 
 /** Pure so it's independently unit-tested, same convention as formatExitMessage.
  * Deliberately more alarming than the standard exit alert (double-emoji, ALL
  * CAPS header) — this fires only when the position was force-closed against
  * a real detected rug signal, not a routine TP/SL/trailing-stop. */
-export function formatEmergencyExitMessage(exit: EmergencyExitNotification): string {
+export function formatEmergencyExitMessage(
+  exit: EmergencyExitNotification,
+  lang: Locale = 'en',
+): string {
+  const d = t(lang).notifications;
   const paperTag = exit.isPaperTrade ? ' 📝 PAPER' : '';
   const pnlUsdLine = exit.pnlUsd !== undefined ? ` ($${exit.pnlUsd.toFixed(2)})` : '';
   const linkLine = `\n${linksLine(exit.mint, exit.dex)}`;
   return (
-    `🚨🚨 *EMERGENCY EXIT*${paperTag} — \`${escapeMd(exit.symbol)}\`\n\n` +
-    `Reason: *${escapeMd(EMERGENCY_EXIT_REASON_LABELS[exit.reason])}*\n` +
+    `🚨🚨 *${d.emergencyExitLabel}*${paperTag} — \`${escapeMd(exit.symbol)}\`\n\n` +
+    `${d.reasonLabel}: *${escapeMd(d.emergencyReasonLabels[exit.reason] ?? exit.reason)}*\n` +
     `${escapeMd(exit.detail)}\n\n` +
-    `PnL: ${exit.pnlPercent.toFixed(2)}%${pnlUsdLine}${linkLine}`
+    `${d.pnlLabel}: ${exit.pnlPercent.toFixed(2)}%${pnlUsdLine}${linkLine}`
   );
 }
 
 /** Pure so it's independently unit-tested, same convention as formatNewTokenMessage. */
-export function formatTradeReportMessage(report: TradeReportData): string {
+export function formatTradeReportMessage(report: TradeReportData, lang: Locale = 'en'): string {
+  const d = t(lang).notifications;
   const referralLine =
     report.referralRewardsTotalUsd > 0
-      ? `\n🔗 Referral Rewards: $${report.referralRewardsTotalUsd.toFixed(2)}`
+      ? `\n🔗 ${d.referralRewardsLabel}: $${report.referralRewardsTotalUsd.toFixed(2)}`
       : '';
   return (
-    `📊 *Trade Report* — \`${escapeMd(report.symbol)}\`\n\n` +
-    `Gross Profit: $${report.grossProfitUsd.toFixed(2)}\n` +
-    `Trading Costs: $${report.tradingCostsUsd.toFixed(2)}\n` +
-    `Net Profit: $${report.netProfitUsd.toFixed(2)}\n` +
-    `Platform Performance Fee (${(report.feeBps / 100).toFixed(1)}%): $${report.feeUsd.toFixed(2)}${referralLine}\n` +
-    `*Final Amount Credited: $${report.userShareUsd.toFixed(2)}*\n\n` +
-    `_Ref: ${report.referenceId}_`
+    `📊 *${d.tradeReportTitle}* — \`${escapeMd(report.symbol)}\`\n\n` +
+    `${d.grossProfitLabel}: $${report.grossProfitUsd.toFixed(2)}\n` +
+    `${d.tradingCostsLabel}: $${report.tradingCostsUsd.toFixed(2)}\n` +
+    `${d.netProfitLabel}: $${report.netProfitUsd.toFixed(2)}\n` +
+    `${d.performanceFeeLabel((report.feeBps / 100).toFixed(1))}: $${report.feeUsd.toFixed(2)}${referralLine}\n` +
+    `*${d.finalAmountCreditedLabel}: $${report.userShareUsd.toFixed(2)}*\n\n` +
+    `_${d.refLabel}: ${report.referenceId}_`
   );
 }
 
 /** Pure so it's independently unit-tested, same convention as formatTradeReportMessage. */
-export function formatReferralEarnedMessage(data: ReferralEarnedNotification): string {
+export function formatReferralEarnedMessage(
+  data: ReferralEarnedNotification,
+  lang: Locale = 'en',
+): string {
+  const d = t(lang).notifications;
   return (
-    `🔗 *Referral reward earned!*\n\n` +
-    `One of your Level ${data.level} referrals just closed a profitable trade on ` +
-    `\`${escapeMd(data.sourceSymbol)}\`.\n\n` +
-    `You earned: *$${data.rewardUsd.toFixed(2)}*`
+    `🔗 *${d.referralEarnedTitle}*\n\n` +
+    `${d.referralEarnedBody(data.level, escapeMd(data.sourceSymbol))}\n\n` +
+    `${d.youEarnedLabel}: *$${data.rewardUsd.toFixed(2)}*`
   );
 }
 
@@ -335,18 +348,31 @@ export class NotificationService {
    * The owner chat plus every user with telegramId set and a live SnipeConfig
    * (isActive + autoBuyOnLaunch — the exact same set AutoTrader.evaluateAndMaybeBuy
    * queries, so "receives alerts" and "sniper is active" never drift apart).
-   * De-duplicated via Set, so an owner who is also an active user (or two active
-   * SnipeConfig rows for the same person) never gets the same alert twice.
+   * De-duplicated by chatId, so an owner who is also an active user (or two active
+   * SnipeConfig rows for the same person) never gets the same alert twice. Carries
+   * each recipient's own `language` so sendToActiveUsers can format the alert text
+   * per-recipient rather than broadcasting one language to everyone.
    */
-  private async activeRecipientChatIds(): Promise<string[]> {
-    const activeUsers = await this.prisma.user.findMany({
-      where: {
-        telegramId: { not: null },
-        snipeConfigs: { some: { isActive: true, autoBuyOnLaunch: true } },
-      },
-      select: { telegramId: true },
-    });
-    return [...new Set([this.ownerChatId, ...activeUsers.map((u) => u.telegramId!)])];
+  private async activeRecipients(): Promise<{ chatId: string; lang: Locale }[]> {
+    const [ownerRow, activeUsers] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { telegramId: this.ownerChatId },
+        select: { language: true },
+      }),
+      this.prisma.user.findMany({
+        where: {
+          telegramId: { not: null },
+          snipeConfigs: { some: { isActive: true, autoBuyOnLaunch: true } },
+        },
+        select: { telegramId: true, language: true },
+      }),
+    ]);
+    const byChatId = new Map<string, Locale>();
+    byChatId.set(this.ownerChatId, resolveLocale(ownerRow?.language));
+    for (const u of activeUsers) {
+      byChatId.set(u.telegramId!, resolveLocale(u.language));
+    }
+    return [...byChatId.entries()].map(([chatId, lang]) => ({ chatId, lang }));
   }
 
   private async sendToChat(chatId: string, text: string): Promise<void> {
@@ -362,10 +388,11 @@ export class NotificationService {
     await this.sendToChat(this.ownerChatId, text);
   }
 
-  /** Fans out to the owner + every currently-active user, identical text to each. */
-  private async sendToActiveUsers(text: string): Promise<void> {
-    const chatIds = await this.activeRecipientChatIds();
-    await Promise.all(chatIds.map((chatId) => this.sendToChat(chatId, text)));
+  /** Fans out to the owner + every currently-active user, formatting the message in
+   * each recipient's own language via `build`. */
+  private async sendToActiveUsers(build: (lang: Locale) => string): Promise<void> {
+    const recipients = await this.activeRecipients();
+    await Promise.all(recipients.map(({ chatId, lang }) => this.sendToChat(chatId, build(lang))));
   }
 
   private async sendPhotoToChat(
@@ -385,15 +412,17 @@ export class NotificationService {
     }
   }
 
-  /** Fans a pre-rendered card photo out to the owner + every currently-active user, identical to each. */
+  /** Fans a pre-rendered card photo out to the owner + every currently-active user, identical to each.
+   * Trade cards (cards/*) are unlocalized — the caption is the same for every recipient
+   * regardless of their language setting. */
   private async sendPhotoToActiveUsers(
     png: Buffer,
     caption: string,
     keyboard: InlineKeyboard,
   ): Promise<void> {
-    const chatIds = await this.activeRecipientChatIds();
+    const recipients = await this.activeRecipients();
     await Promise.all(
-      chatIds.map((chatId) => this.sendPhotoToChat(chatId, png, caption, keyboard)),
+      recipients.map(({ chatId }) => this.sendPhotoToChat(chatId, png, caption, keyboard)),
     );
   }
 
@@ -452,24 +481,24 @@ export class NotificationService {
   }
 
   async notifyTrade(trade: TradeNotification): Promise<void> {
-    await this.sendToActiveUsers(formatTradeMessage(trade));
+    await this.sendToActiveUsers((lang) => formatTradeMessage(trade, lang));
   }
 
   async notifyExit(exit: PositionExitNotification): Promise<void> {
-    await this.sendToActiveUsers(formatExitMessage(exit));
+    await this.sendToActiveUsers((lang) => formatExitMessage(exit, lang));
   }
 
   async notifyEmergencyExit(exit: EmergencyExitNotification): Promise<void> {
-    await this.sendToActiveUsers(formatEmergencyExitMessage(exit));
+    await this.sendToActiveUsers((lang) => formatEmergencyExitMessage(exit, lang));
   }
 
   async notifyNewToken(token: NewTokenNotification): Promise<void> {
-    await this.sendToActiveUsers(formatNewTokenMessage(token));
+    await this.sendToActiveUsers((lang) => formatNewTokenMessage(token, lang));
   }
 
   /** Distinct alert type, fired in addition to the regular New Launch alert when aiScore crosses AI_HIGH_SCORE_THRESHOLD. */
   async notifyAiHighScore(token: AiHighScoreNotification): Promise<void> {
-    await this.sendToActiveUsers(formatAiHighScoreMessage(token));
+    await this.sendToActiveUsers((lang) => formatAiHighScoreMessage(token, lang));
   }
 
   async notifyError(context: string, message: string): Promise<void> {
@@ -498,7 +527,8 @@ export class NotificationService {
   async notifyMigration(migration: MigrationNotification): Promise<void> {
     const label = migration.symbol ?? migration.mint.slice(0, 8);
     await this.sendToActiveUsers(
-      `🚀 *Migration detected*: \`${escapeMd(label)}\`\n` +
+      (lang) =>
+        `🚀 *${t(lang).notifications.migrationDetectedLabel}*: \`${escapeMd(label)}\`\n` +
         `${escapeMd(migration.fromDex)} → ${escapeMd(migration.toDex)}\n` +
         `${linksLine(migration.mint, migration.toDex)}`,
     );
@@ -514,10 +544,52 @@ export class NotificationService {
   async notifyTradeReport(userId: string, report: TradeReportData): Promise<void> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { telegramId: true },
+      select: { telegramId: true, language: true },
     });
     if (!user?.telegramId) return;
-    await this.sendToChat(user.telegramId, formatTradeReportMessage(report));
+    await this.sendToChat(
+      user.telegramId,
+      formatTradeReportMessage(report, resolveLocale(user.language)),
+    );
+  }
+
+  /** Same single-recipient convention as notifyTradeReport — a wallet-balance
+   * warning is specific to the one user whose auto-buy is being skipped, not
+   * a DEX/trading alert, so never fanned out. Silent no-op if the user has no
+   * telegramId on file. See AutoTrader.evaluateAndMaybeBuy's SafetyCheckError
+   * handling — the caller is expected to dedup (e.g. via TtlCache) so this
+   * isn't fired on every single skipped launch for the same user. Returns
+   * whether the send actually succeeded (unlike sendToChat's void
+   * fire-and-forget) so a one-off caller (e.g. an admin script) can report
+   * real per-recipient delivery status instead of just "attempted" — `false`
+   * covers both a Telegram-side send failure and "no telegramId on file". */
+  async notifyLowWalletBalance(
+    userId: string,
+    data: { balanceSol: number; requiredSol: number },
+  ): Promise<boolean> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { telegramId: true, language: true },
+    });
+    if (!user?.telegramId) return false;
+    const lang = resolveLocale(user.language);
+    const d = t(lang).notifications;
+    const shortfall = data.requiredSol - data.balanceSol;
+    const text =
+      `⚠️ *${d.lowBalanceTitle}*\n\n` +
+      `${d.lowBalanceBody(data.balanceSol.toFixed(4), data.requiredSol.toFixed(4))}\n\n` +
+      `${d.lowBalanceSkipNote(shortfall.toFixed(4))}\n\n` +
+      `${d.lowBalanceOneTimeNote}`;
+    try {
+      await this.bot.api.sendMessage(user.telegramId, text, { parse_mode: 'Markdown' });
+      return true;
+    } catch (err) {
+      this.logger.error(
+        { err, chatId: user.telegramId },
+        'failed to send low-balance notification',
+      );
+      return false;
+    }
   }
 
   /** Same single-recipient convention as notifyTradeReport — a referral
@@ -530,10 +602,41 @@ export class NotificationService {
   ): Promise<void> {
     const user = await this.prisma.user.findUnique({
       where: { id: referrerUserId },
-      select: { telegramId: true },
+      select: { telegramId: true, language: true },
     });
     if (!user?.telegramId) return;
-    await this.sendToChat(user.telegramId, formatReferralEarnedMessage(data));
+    await this.sendToChat(
+      user.telegramId,
+      formatReferralEarnedMessage(data, resolveLocale(user.language)),
+    );
+  }
+
+  /**
+   * Admin-triggered one-off broadcast (e.g. ops/beta-status announcements) to the
+   * same recipient set as the sniper alerts — owner + every active-SnipeConfig
+   * user, via activeRecipients(). Sent with no parse_mode, deliberately
+   * unlike sendToChat: admin-authored text isn't guaranteed Markdown-safe the way
+   * the format*Message functions are (they escapeMd every dynamic field going
+   * in), so plain text avoids a stray "_"/"*"/"`" silently breaking the send —
+   * same failure class documented on formatNewTokenMessage/buildShareCaption.
+   * Returns per-recipient counts (not throwing) so a CLI caller can report
+   * exactly how many of the audience were actually reached.
+   */
+  async broadcastCustomMessage(text: string): Promise<{ sent: number; failed: number }> {
+    const recipients = await this.activeRecipients();
+    const results = await Promise.all(
+      recipients.map(async ({ chatId }) => {
+        try {
+          await this.bot.api.sendMessage(chatId, text);
+          return true;
+        } catch (err) {
+          this.logger.error({ err, chatId }, 'failed to send broadcast message');
+          return false;
+        }
+      }),
+    );
+    const sent = results.filter(Boolean).length;
+    return { sent, failed: results.length - sent };
   }
 }
 
@@ -549,13 +652,15 @@ export async function sendReferralRewardNotification(
   chatId: string,
   referredCount: number,
   logger: Logger,
+  lang: Locale = 'en',
 ): Promise<void> {
+  const d = t(lang).notifications;
   try {
     await api.sendMessage(
       chatId,
-      `🎉 *Referral reward unlocked!*\n\n` +
-        `You've referred ${referredCount} people — a default auto-buy sniper config is now active for you.\n` +
-        `Check ▶️ Start Sniper to review or adjust it.`,
+      `🎉 *${d.referralRewardUnlockedTitle}*\n\n` +
+        `${d.referralRewardUnlockedBody(referredCount)}\n` +
+        `${d.referralRewardCheckNote(t(lang).common.menu.sniperStart)}`,
       { parse_mode: 'Markdown' },
     );
   } catch (err) {

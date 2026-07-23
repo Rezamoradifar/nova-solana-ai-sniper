@@ -36,6 +36,11 @@ data/certbot/
 *.tsbuildinfo
 .pnp.*
 
+# generated marketing visuals (local-only, never served/committed — see
+# apps/marketing-engine/src/visuals/imageStore.ts)
+apps/marketing-engine/generated-images/*
+!apps/marketing-engine/generated-images/.gitkeep
+
 
 # Claude Code local settings (not part of the project)
 .claude/

@@ -2020,6 +2020,41 @@ describe('PositionManager SELL pre-broadcast retry (production bug fix 2026-07-1
     expect(sendTransaction).not.toHaveBeenCalled();
   });
 
+  it('regression (2026-07-21 audit, section F): alerts once on a SELL swap-broadcast failure, then stays deduped across repeated failed retries for the same position', async () => {
+    const prepareSwap = vi
+      .fn()
+      .mockRejectedValue(new Error('Jupiter quote failed: 400 could not find any route'));
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const { connection, dexScreener, prisma } = baseClosePositionMocks();
+    const notifyError = vi.fn().mockResolvedValue(undefined);
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      { notifyError } as never,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      0,
+    );
+
+    await expect(
+      manager.closePosition('position-retry', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 }),
+    ).rejects.toThrow(/could not find any route/);
+    await expect(
+      manager.closePosition('position-retry', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 }),
+    ).rejects.toThrow(/could not find any route/);
+
+    expect(notifyError).toHaveBeenCalledTimes(1);
+    expect(notifyError.mock.calls[0]![0]).toBe('SELL execution failed');
+    expect(notifyError.mock.calls[0]![1]).toContain('position-retry');
+  });
+
   it('never retries a deterministic, non-retryable failure on a BUY either (route_unavailable) — fails fast on the first attempt', async () => {
     const prepareSwap = vi
       .fn()
@@ -2401,6 +2436,77 @@ describe('Latency Optimization Stage 1 (2026-07-14) — end-to-end trace wiring'
     );
     await paperManager.openPosition(BASE_PARAMS);
     expect(latencyTracker.getCompleted()).toHaveLength(0);
+  });
+
+  it('marks the two-stage-pipeline timestamps (analysis/dex/safety/sellability/decision/buy-submitted) when passed', async () => {
+    latencyTracker.reset();
+    const prepareSwap = vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const connection = {
+      sendTransaction: vi.fn().mockResolvedValue('sig123'),
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi.fn().mockResolvedValue({
+        meta: {
+          postTokenBalances: [
+            {
+              owner: 'WalletPubkey1111111111111111111111111111',
+              mint: BASE_PARAMS.mint,
+              uiTokenAmount: { amount: '1000' },
+            },
+          ],
+          preTokenBalances: [],
+        },
+      }),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never;
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-3' }) },
+      position: { create: vi.fn().mockResolvedValue({ id: 'position-3' }) },
+      token: { findUnique: vi.fn() },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
+    } as never;
+
+    const liveManager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false, // live trading
+    );
+    const detectedAt = Date.now() - 1000;
+    await liveManager.openPosition({
+      ...BASE_PARAMS,
+      tokenDetectedAt: detectedAt,
+      analysisStartedAt: detectedAt + 10,
+      dexValidatedAt: detectedAt + 40,
+      safetyCompletedAt: detectedAt + 60,
+      sellabilityVerifiedAt: detectedAt + 80,
+      aiScoringStartAt: detectedAt + 90,
+      aiScoringEndAt: detectedAt + 150,
+      decisionAt: detectedAt + 160,
+      buySubmittedAt: detectedAt + 170,
+    });
+
+    const [trace] = latencyTracker.getCompleted();
+    expect(trace!.marks).toMatchObject({
+      token_detected: detectedAt,
+      analysis_started: detectedAt + 10,
+      dex_validated: detectedAt + 40,
+      safety_completed: detectedAt + 60,
+      sellability_verified: detectedAt + 80,
+      ai_scoring_start: detectedAt + 90,
+      ai_scoring_end: detectedAt + 150,
+      decision: detectedAt + 160,
+      buy_submitted: detectedAt + 170,
+    });
   });
 
   it('a successful live SELL records a complete trace ending in position_closed', async () => {
