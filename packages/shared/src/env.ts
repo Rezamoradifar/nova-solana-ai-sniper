@@ -142,6 +142,22 @@ export const envSchema = z.object({
   // rarer than a price tick, so a longer default interval than PRICE_CHECK_INTERVAL_MS.
   MIGRATION_CHECK_INTERVAL_MS: z.coerce.number().min(10000).default(30000),
 
+  // MonitorWatchdog idle thresholds — see solana/monitorWatchdog.ts. connection.onLogs
+  // websocket subscriptions have no built-in liveness signal, so a silently-dropped
+  // socket (idle timeout, provider restart, a rate limit closing it with code 1001 —
+  // confirmed live 2026-07-11, see resolveAllRpcEndpoints's doc comment) flatlines
+  // detection with zero visible error. pump.fun creates a new token roughly every
+  // minute in production, so a much shorter idle window than the DEX monitors below
+  // (whose native pool-creation events are rare) confidently flags a dead subscription
+  // without false-triggering on ordinary lulls.
+  PUMPFUN_MONITOR_IDLE_MS: z.coerce.number().min(60000).default(300000),
+  // Raydium/Orca/Meteora/PumpSwap native pool-creation events are rare relative to
+  // pump.fun launches (see raydium.ts/pumpswap.ts doc comments), so this is deliberately
+  // much longer than PUMPFUN_MONITOR_IDLE_MS — a forced restart is cheap even when
+  // unnecessary, but a threshold this generous still only fires on a genuinely dead
+  // subscription, not a quiet native-DEX hour.
+  DEX_MONITOR_IDLE_MS: z.coerce.number().min(300000).default(1800000),
+
   // DepositMonitor — polls every active wallet's live SOL balance and records
   // an increase as a DEPOSIT ledger/audit event (see
   // packages/shared/src/wallet/balanceLedger.ts). Defaults on: deposits are

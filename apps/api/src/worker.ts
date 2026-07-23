@@ -8,6 +8,7 @@ declare module 'fastify' {
   }
 }
 import { PumpFunMonitor } from './solana/pumpfun.js';
+import { MonitorWatchdog } from './solana/monitorWatchdog.js';
 import { JupiterClient } from './solana/jupiter.js';
 import { DexScreenerClient } from './solana/dexscreener.js';
 import { TokenEventClassifier } from './detection/detectors.js';
@@ -67,9 +68,13 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
 
   const dexScreener = new DexScreenerClient(app.config.DEXSCREENER_API_BASE);
   const jupiter = new JupiterClient({ apiBase: app.config.JUPITER_API_BASE });
-  const dexRegistry = new DexRegistry(connection, dexScreener, app.log as never, {
-    PUMPSWAP: new PumpSwapExecutor(),
-  });
+  const dexRegistry = new DexRegistry(
+    connection,
+    dexScreener,
+    app.log as never,
+    { PUMPSWAP: new PumpSwapExecutor() },
+    app.config.DEX_MONITOR_IDLE_MS,
+  );
   // No-ops (undefined) when unset, same convention as every other optional
   // integration in this codebase — sends just go direct, never blocked on Jito.
   const jito = app.config.JITO_BLOCK_ENGINE_URL
@@ -212,7 +217,14 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // already track as PUMPFUN is a migration signal, handled the same way as the
   // pump.fun-side hint.
   const classifier = new TokenEventClassifier(app.log as never);
-  const monitor = new PumpFunMonitor(connection, app.log as never);
+  const monitor = new MonitorWatchdog(
+    new PumpFunMonitor(connection, app.log as never),
+    app.log as never,
+    {
+      label: 'pump.fun',
+      idleThresholdMs: app.config.PUMPFUN_MONITOR_IDLE_MS,
+    },
+  );
 
   const aiEnabled = hasAnyAiProvider({
     anthropicApiKey: app.config.ANTHROPIC_API_KEY,
