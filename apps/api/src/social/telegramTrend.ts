@@ -39,7 +39,6 @@ function stripHtml(html: string): string {
 
 export function isValidMintFormat(candidate: string): boolean {
   try {
-     
     new PublicKey(candidate);
     return true;
   } catch {
