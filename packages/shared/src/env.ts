@@ -286,6 +286,20 @@ export const envSchema = z.object({
   FAST_PATH_MIN_RECENT_BUYS: z.coerce.number().int().nonnegative().default(15),
   FAST_PATH_MIN_RECENT_VOLUME_USD: z.coerce.number().nonnegative().default(2000),
 
+  // Candidate retry (2026-07-23 audit): a brand-new pump.fun launch has no
+  // DexScreener listing yet and its mint/holder accounts can lag behind the
+  // fastest RPC read by a few seconds — candidatePipeline.ts's critical
+  // security gate correctly fails closed on both (dexscreener_validation_failed,
+  // holder_data_unknown, etc.), but treating that first failure as final meant
+  // *every* fresh launch was rejected forever, not just genuinely bad ones —
+  // confirmed live: zero buys for a full day while the gate worked exactly as
+  // designed. isRetryableRejection (candidatePipeline.ts) distinguishes "data
+  // not available yet" from "confirmed bad" — only the former gets re-tried,
+  // on the same fixed interval, up to this many times, before falling back to
+  // today's permanent-rejection behavior.
+  CANDIDATE_RETRY_INTERVAL_MS: z.coerce.number().min(2000).default(10000),
+  CANDIDATE_RETRY_MAX_ATTEMPTS: z.coerce.number().int().nonnegative().default(6),
+
   // EmergencyExitMonitor — Institutional Mode's safety net: force-closes an
   // OPEN institutional-mode position on a detected liquidity-removal/rug
   // signal, independent of that position's own TP/SL/trailing-stop (see

@@ -36,7 +36,11 @@ import { TradingSafety, verifySafetySystemReady, type SafetyConfig } from './tra
 import { PriceMonitor } from './trading/priceMonitor.js';
 import { EmergencyExitMonitor } from './trading/emergencyExitMonitor.js';
 import { DepositMonitor } from './wallet/depositMonitor.js';
-import { runCandidatePipeline, type CandidatePipelineDeps } from './detection/candidatePipeline.js';
+import {
+  runCandidatePipeline,
+  isRetryableRejection,
+  type CandidatePipelineDeps,
+} from './detection/candidatePipeline.js';
 import { PriorityConcurrencyQueue } from './lib/priorityQueue.js';
 import { SmartWalletTrackerService } from './trading/smartWalletTracker.js';
 import { EarlyMomentumDetectorService } from './trading/earlyMomentumDetector.js';
@@ -839,6 +843,15 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
    * against a re-delivered WS event), and — only on a pass — queues the
    * candidate for AI scoring with FAST_PATH priority when its momentum
    * clears the configured thresholds.
+   *
+   * Retry (2026-07-23 audit): a rejection whose reasons are all "couldn't
+   * verify yet" (isRetryableRejection — DexScreener hasn't indexed this brand
+   * new launch, or an on-chain read raced the RPC node) re-runs the whole
+   * pipeline after CANDIDATE_RETRY_INTERVAL_MS instead of rejecting for good
+   * on the very first attempt, up to CANDIDATE_RETRY_MAX_ATTEMPTS times. A
+   * rejection with even one confirmed-bad reason (honeypot, blacklisted
+   * deployer, ...) still falls straight through to the permanent-rejection
+   * path below, unchanged from before this audit.
    */
   async function runCandidateThroughPipeline(
     mint: string,
@@ -846,6 +859,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     tokenDetectedAt: number,
     poolAddress: string | undefined,
     deployerAddress: string | undefined,
+    attempt = 0,
   ): Promise<void> {
     const result = await runCandidatePipeline(candidatePipelineDeps, {
       mint,
@@ -854,9 +868,32 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       deployerAddress,
     });
 
+    const canRetry =
+      !result.passed &&
+      attempt < app.config.CANDIDATE_RETRY_MAX_ATTEMPTS &&
+      isRetryableRejection(result.reasons);
+    if (canRetry) {
+      app.log.info(
+        { mint, dex, attempt: attempt + 1, reasons: result.reasons },
+        'candidate pipeline: rejection reasons are all transient — retrying instead of rejecting for good',
+      );
+      setTimeout(() => {
+        void runCandidateThroughPipeline(
+          mint,
+          dex,
+          tokenDetectedAt,
+          poolAddress,
+          deployerAddress,
+          attempt + 1,
+        );
+      }, app.config.CANDIDATE_RETRY_INTERVAL_MS);
+      return;
+    }
+
     if (!result.riskFlags) {
-      // riskAnalyzer.analyze() itself threw — candidatePipeline already
-      // logged it; nothing here to upsert or score.
+      // riskAnalyzer.analyze() itself threw and retries (if any were left)
+      // are exhausted — candidatePipeline already logged it; nothing here to
+      // upsert or score.
       return;
     }
 

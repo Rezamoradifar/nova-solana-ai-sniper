@@ -59,6 +59,41 @@ function notifyRejectionOnce(
  * buyAmountSol is known. */
 const SELLABILITY_CHECK_NOTIONAL_SOL = 0.1;
 
+/**
+ * Production incident (2026-07-23 audit): a brand-new pump.fun launch has no
+ * DexScreener listing yet (indexing lags the on-chain create by anywhere from
+ * a few seconds to a couple of minutes) and its mint/holder-concentration
+ * on-chain reads can transiently fail against the very fastest RPC read this
+ * bot's own detection speed produces — both correctly fail this gate closed
+ * (never assumed safe), but treating that first failure as final rejected
+ * *every* fresh launch, not just genuinely bad ones: confirmed live, zero
+ * buys for a full day while every individual check kept working exactly as
+ * designed. This set is exactly the reasons that mean "couldn't verify yet"
+ * (an UNKNOWN state, or a request-level failure) rather than "verified bad" —
+ * see criticalSecurityGate.ts's own SAFE/UNSAFE/UNKNOWN breakdown, which this
+ * mirrors. A rejection is only worth retrying if every one of its reasons is
+ * in this set; a single confirmed-bad reason (honeypot_suspected,
+ * lp_not_locked_or_burned, deployer_blacklisted, ...) still rejects for good,
+ * exactly as before — this never loosens what the 2026-07-22 audit fixed.
+ */
+const RETRYABLE_REJECTION_REASONS = new Set([
+  'dexscreener_validation_failed',
+  'holder_data_unknown',
+  'mint_authority_unknown',
+  'freeze_authority_unknown',
+  'honeypot_check_unknown',
+  'risk_analysis_failed',
+  'deployer_check_failed',
+  'sellability_check_failed',
+]);
+
+/** Empty `reasons` (nothing rejected) is not "retryable" — there's nothing to
+ * retry. Mixed in with even one confirmed-bad reason, the whole rejection is
+ * treated as final, same as the gate's own all-or-nothing `allowed` verdict. */
+export function isRetryableRejection(reasons: string[]): boolean {
+  return reasons.length > 0 && reasons.every((r) => RETRYABLE_REJECTION_REASONS.has(r));
+}
+
 export interface CandidatePipelineDeps {
   riskAnalyzer: RiskAnalyzer;
   jupiter: JupiterClient;

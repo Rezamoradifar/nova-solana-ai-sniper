@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RiskFlags } from '@nova/shared';
-import { resetRejectionAlertDedupCache, runCandidatePipeline } from './candidatePipeline.js';
+import {
+  isRetryableRejection,
+  resetRejectionAlertDedupCache,
+  runCandidatePipeline,
+} from './candidatePipeline.js';
 
 beforeEach(() => {
   resetRejectionAlertDedupCache();
@@ -47,6 +51,36 @@ function fakePrisma(blacklistMatch: unknown = null) {
 }
 
 const CANDIDATE = { mint: 'MintABC', dex: 'RAYDIUM' as const, poolAddress: 'Pool1' };
+
+describe('isRetryableRejection', () => {
+  it('is retryable when every reason means "could not verify yet"', () => {
+    expect(isRetryableRejection(['dexscreener_validation_failed'])).toBe(true);
+    expect(isRetryableRejection(['holder_data_unknown'])).toBe(true);
+    expect(isRetryableRejection(['dexscreener_validation_failed', 'holder_data_unknown'])).toBe(
+      true,
+    );
+    expect(isRetryableRejection(['mint_authority_unknown', 'freeze_authority_unknown'])).toBe(true);
+    expect(isRetryableRejection(['risk_analysis_failed'])).toBe(true);
+    expect(isRetryableRejection(['deployer_check_failed'])).toBe(true);
+    expect(isRetryableRejection(['sellability_check_failed'])).toBe(true);
+  });
+
+  it('is never retryable once even one reason is a confirmed-bad verdict', () => {
+    expect(isRetryableRejection(['honeypot_suspected'])).toBe(false);
+    expect(isRetryableRejection(['lp_not_locked_or_burned'])).toBe(false);
+    expect(isRetryableRejection(['deployer_blacklisted'])).toBe(false);
+    expect(isRetryableRejection(['no_sell_route'])).toBe(false);
+    expect(isRetryableRejection(['holder_concentration_critical'])).toBe(false);
+    // Mixed: one transient + one confirmed-bad reason must still reject for good.
+    expect(isRetryableRejection(['dexscreener_validation_failed', 'honeypot_suspected'])).toBe(
+      false,
+    );
+  });
+
+  it('is not retryable when there is nothing to reject', () => {
+    expect(isRetryableRejection([])).toBe(false);
+  });
+});
 
 describe('runCandidatePipeline', () => {
   it('passes a clean token with no deployer address (nothing to check)', async () => {
