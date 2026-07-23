@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: '/snipes', label: 'Snipe Settings' },
   { to: '/leaderboard', label: 'Leaderboard' },
   { to: '/logs', label: 'Logs' },
+  { to: '/arbismart', label: 'ArbiSmart Contract' },
 ];
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {

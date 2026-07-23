@@ -12,6 +12,7 @@ import { WalletDetail } from './pages/WalletDetail.js';
 import { Snipes } from './pages/Snipes.js';
 import { Leaderboard } from './pages/Leaderboard.js';
 import { Logs } from './pages/Logs.js';
+import { ArbiSmart } from './pages/ArbiSmart.js';
 
 export function App() {
   return (
@@ -36,6 +37,7 @@ export function App() {
             <Route path="snipes" element={<Snipes />} />
             <Route path="leaderboard" element={<Leaderboard />} />
             <Route path="logs" element={<Logs />} />
+            <Route path="arbismart" element={<ArbiSmart />} />
           </Route>
         </Routes>
       </BrowserRouter>
