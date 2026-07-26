@@ -57,6 +57,11 @@ export default async function metricsRoutes(fastify: FastifyInstance) {
       // fallbackLaunchDiscovery.ts / scannerHealth.ts.
       fallbackLaunchDiscovery: fastify.fallbackLaunchDiscovery?.getHealth() ?? null,
       scannerHealth: fastify.scannerHealthCoordinator?.snapshot() ?? null,
+      // Massive Scanner Scalability (Phase 2, 2026-07-26) — discoveryQueue's
+      // live concurrency, backlog/throughput, and the process-wide event-
+      // loop-lag/CPU/RAM snapshot that drives it. null when
+      // SCANNER_CONCURRENCY_GOVERNOR_ENABLED=false.
+      scannerConcurrency: fastify.scannerConcurrencyGovernor?.snapshot() ?? null,
     };
   });
 }

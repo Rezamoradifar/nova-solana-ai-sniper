@@ -22,6 +22,10 @@ declare module 'fastify' {
     pumpFunMonitor?: PumpFunMonitor;
     fallbackLaunchDiscovery?: FallbackLaunchDiscovery;
     scannerHealthCoordinator?: ScannerHealthCoordinator;
+    // Massive Scanner Scalability (Phase 2, 2026-07-26) — exposed for
+    // /metrics/rpc, same "same instance, not a second one" convention as
+    // every other decorator above.
+    scannerConcurrencyGovernor?: ScannerConcurrencyGovernor;
   }
 }
 import {
@@ -58,6 +62,8 @@ import {
   type CandidatePipelineDeps,
 } from './detection/candidatePipeline.js';
 import { PriorityConcurrencyQueue } from './lib/priorityQueue.js';
+import { PerfMonitor } from './lib/perfMonitor.js';
+import { ScannerConcurrencyGovernor } from './detection/scannerConcurrencyGovernor.js';
 import { SmartWalletTrackerService } from './trading/smartWalletTracker.js';
 import { EarlyMomentumDetectorService } from './trading/earlyMomentumDetector.js';
 import {
@@ -1575,6 +1581,38 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     (err, item) => app.log.error({ err, source: item.source }, 'processDiscoveryItem failed'),
   );
 
+  // Massive Scanner Scalability (Phase 2, 2026-07-26): re-tunes
+  // discoveryQueue's concurrency from live signals instead of leaving it
+  // fixed at DISCOVERY_QUEUE_CONCURRENCY for the process's whole lifetime.
+  // Default on, same convention as DEPOSIT_MONITOR_ENABLED (core capacity
+  // management, not an opt-in experiment) — disable via
+  // SCANNER_CONCURRENCY_GOVERNOR_ENABLED=false to pin the fixed env value.
+  const perfMonitor = new PerfMonitor();
+  const scannerConcurrencyGovernor = new ScannerConcurrencyGovernor(
+    {
+      queue: discoveryQueue,
+      perfMonitor,
+      logger: app.log as never,
+      // Same ordering resolveAllRpcEndpoints/getConnection already use
+      // elsewhere in this function (Helius primary, QuickNode/Chainstack/
+      // custom fallback, public last) — see connection.ts's tier doc comment
+      // for why only this one label may ever gate scaling down.
+      primaryProviderLabel: resolveAllRpcEndpoints(solanaConfig)[0]?.label ?? 'primary',
+    },
+    {
+      intervalMs: app.config.SCANNER_CONCURRENCY_GOVERNOR_INTERVAL_MS,
+      minConcurrency: app.config.SCANNER_CONCURRENCY_MIN,
+      maxConcurrency: app.config.SCANNER_CONCURRENCY_MAX,
+      eventLoopLagCeilingMs: app.config.SCANNER_EVENT_LOOP_LAG_CEILING_MS,
+    },
+  );
+  if (app.config.SCANNER_CONCURRENCY_GOVERNOR_ENABLED) {
+    scannerConcurrencyGovernor.start();
+  } else {
+    perfMonitor.stop();
+  }
+  app.decorate('scannerConcurrencyGovernor', scannerConcurrencyGovernor);
+
   monitor.start(
     (event) => {
       sourceHealthMonitor.recordActivity('PUMPFUN');
@@ -1623,6 +1661,9 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     depositMonitor?.stop();
     sourceHealthMonitor.stop();
     shadowModePriceSampler?.stop();
+    if (app.config.SCANNER_CONCURRENCY_GOVERNOR_ENABLED) {
+      scannerConcurrencyGovernor.stop();
+    }
     await dexRegistry.stopAll();
   };
 }
