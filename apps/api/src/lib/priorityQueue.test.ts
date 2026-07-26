@@ -109,4 +109,111 @@ describe('PriorityConcurrencyQueue', () => {
     });
     expect(() => queue.enqueue(1)).not.toThrow();
   });
+
+  describe('setConcurrency (Massive Scanner Scalability, Phase 2, 2026-07-26)', () => {
+    it('increasing concurrency at runtime immediately starts more queued work, without waiting for a new enqueue', async () => {
+      let concurrent = 0;
+      let maxConcurrent = 0;
+      const gates = [deferred(), deferred(), deferred(), deferred()];
+      let call = 0;
+
+      const queue = new PriorityConcurrencyQueue<number>(1, async () => {
+        const gate = gates[call++]!;
+        concurrent++;
+        maxConcurrent = Math.max(maxConcurrent, concurrent);
+        await gate.promise;
+        concurrent--;
+      });
+
+      queue.enqueue(1);
+      queue.enqueue(2);
+      queue.enqueue(3);
+      queue.enqueue(4);
+      await flush();
+
+      expect(queue.active()).toBe(1);
+      expect(maxConcurrent).toBe(1);
+
+      queue.setConcurrency(3);
+      await flush();
+
+      expect(queue.getConcurrency()).toBe(3);
+      expect(queue.active()).toBe(3);
+      expect(maxConcurrent).toBe(3);
+
+      gates.forEach((g) => g.resolve());
+      await flush();
+    });
+
+    it('decreasing concurrency stops new items from starting once the lower limit is reached, without cancelling in-flight work', async () => {
+      const gates = [deferred(), deferred(), deferred(), deferred()];
+      let call = 0;
+      const queue = new PriorityConcurrencyQueue<number>(3, async () => {
+        const gate = gates[call++]!;
+        await gate.promise;
+      });
+
+      queue.enqueue(1);
+      queue.enqueue(2);
+      queue.enqueue(3);
+      queue.enqueue(4); // 4th item waits — concurrency is 3
+      await flush();
+      expect(queue.active()).toBe(3);
+      expect(queue.pending()).toBe(1);
+
+      queue.setConcurrency(1);
+      expect(queue.active()).toBe(3); // in-flight work is never cancelled
+
+      gates[0]!.resolve();
+      await flush();
+      // A slot freed up, but active(2) is still above the new limit(1) — the
+      // 4th item must stay queued rather than starting.
+      expect(queue.active()).toBe(2);
+      expect(queue.pending()).toBe(1);
+
+      gates[1]!.resolve();
+      await flush();
+      // Now at the limit — still no room for the 4th item.
+      expect(queue.active()).toBe(1);
+      expect(queue.pending()).toBe(1);
+
+      gates[2]!.resolve();
+      await flush();
+      // Below the limit again — the 4th item finally starts.
+      expect(queue.active()).toBe(1);
+      expect(queue.pending()).toBe(0);
+
+      gates[3]!.resolve();
+      await flush();
+      expect(queue.active()).toBe(0);
+    });
+
+    it('clamps a non-positive concurrency to 1 instead of stalling the queue forever', async () => {
+      const queue = new PriorityConcurrencyQueue<number>(1, async () => {});
+      queue.setConcurrency(0);
+      expect(queue.getConcurrency()).toBe(1);
+      queue.setConcurrency(-5);
+      expect(queue.getConcurrency()).toBe(1);
+    });
+  });
+
+  describe('processed (Massive Scanner Scalability, Phase 2, 2026-07-26)', () => {
+    it('counts every item drained, whether the handler resolved or rejected', async () => {
+      const queue = new PriorityConcurrencyQueue<number>(
+        2,
+        async (item) => {
+          if (item === 2) throw new Error('boom');
+        },
+        () => {},
+      );
+
+      expect(queue.processed()).toBe(0);
+      queue.enqueue(1);
+      queue.enqueue(2);
+      queue.enqueue(3);
+      await flush();
+
+      expect(queue.processed()).toBe(3);
+    });
+  });
 });

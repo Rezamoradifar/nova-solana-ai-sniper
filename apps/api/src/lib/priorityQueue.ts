@@ -21,12 +21,22 @@ export class PriorityConcurrencyQueue<T> {
   private readonly fastPath: T[] = [];
   private readonly normal: T[] = [];
   private running = 0;
+  private concurrency: number;
+  // Massive Scanner Scalability (Phase 2, 2026-07-26): total items drained
+  // (handler settled, success or failure alike) since construction — the
+  // queue's own throughput counter. A dynamic-concurrency governor (see
+  // detection/scannerConcurrencyGovernor.ts) diffs this over time to compute
+  // items/sec; nothing here reads the clock itself, same "just count, let
+  // the caller derive a rate" convention as lib/metrics.ts.
+  private processedCount = 0;
 
   constructor(
-    private readonly concurrency: number,
+    concurrency: number,
     private readonly handler: (item: T) => Promise<void>,
     private readonly onError: (err: unknown, item: T) => void = () => {},
-  ) {}
+  ) {
+    this.concurrency = concurrency;
+  }
 
   enqueue(item: T, priority: QueuePriority = 'NORMAL'): void {
     if (priority === 'FAST_PATH') {
@@ -47,6 +57,33 @@ export class PriorityConcurrencyQueue<T> {
     return this.running;
   }
 
+  /** Total items drained since construction — see processedCount's doc comment. */
+  processed(): number {
+    return this.processedCount;
+  }
+
+  /** Current worker-slot limit. */
+  getConcurrency(): number {
+    return this.concurrency;
+  }
+
+  /**
+   * Massive Scanner Scalability (Phase 2, 2026-07-26): lets a governor adjust
+   * capacity at runtime instead of the fixed value this queue was
+   * constructed with — e.g. scale up while the queue is backlogged and RPC
+   * capacity is healthy, scale down the moment it isn't. Silently clamps to
+   * at least 1 (a concurrency of 0 would permanently stall the queue) rather
+   * than throwing, since a governor's computed value is defensive-clamped
+   * upstream too (see dynamicConcurrency.ts) and this must never be the
+   * reason a candidate stops being processed. Immediately pumps so a
+   * same-tick increase can start new work right away instead of waiting for
+   * the next enqueue/completion event.
+   */
+  setConcurrency(n: number): void {
+    this.concurrency = Math.max(1, Math.floor(n));
+    this.pump();
+  }
+
   private pump(): void {
     while (this.running < this.concurrency) {
       const item = this.fastPath.shift() ?? this.normal.shift();
@@ -61,6 +98,7 @@ export class PriorityConcurrencyQueue<T> {
         .catch((err: unknown) => this.onError(err, item))
         .finally(() => {
           this.running--;
+          this.processedCount++;
           this.pump();
         });
     }
