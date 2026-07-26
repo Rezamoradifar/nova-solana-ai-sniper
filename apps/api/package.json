@@ -11,7 +11,8 @@
     "test": "vitest run --dir src",
     "broadcast": "dotenv -e ../../.env -- tsx scripts/broadcast.ts",
     "notify-low-balance": "dotenv -e ../../.env -- tsx scripts/notify-low-balance.ts",
-    "evaluate-shadow-mode": "dotenv -e ../../.env -- tsx scripts/evaluateShadowMode.ts"
+    "evaluate-shadow-mode": "dotenv -e ../../.env -- tsx scripts/evaluateShadowMode.ts",
+    "reconcile-pnl": "dotenv -e ../../.env -- tsx scripts/reconcilePnl.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",
