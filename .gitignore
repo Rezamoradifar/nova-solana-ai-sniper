@@ -45,3 +45,4 @@ apps/marketing-engine/generated-images/*
 # Claude Code local settings (not part of the project)
 .claude/
 .scratch/
+backups/

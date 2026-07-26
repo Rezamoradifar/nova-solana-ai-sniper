@@ -1,3 +1,4 @@
+
 // PM2 process manager config for bare-metal/VPS deployments (no Docker).
 // Usage: npm run build && pm2 start ecosystem.config.cjs
 // For Docker deployments, use docker-compose.yml instead — Compose's restart
