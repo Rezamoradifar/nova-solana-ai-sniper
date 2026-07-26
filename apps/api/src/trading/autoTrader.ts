@@ -13,6 +13,15 @@ import {
   TRAILING_STOP_PRESETS,
   type TrailingStopPreset,
 } from './adaptiveTrailingStop.js';
+import {
+  applyRiskTierSizing,
+  classifyRiskTier,
+  DEFAULT_RISK_TIER_AGE_THRESHOLDS,
+  DEFAULT_RISK_TIER_SIZE_CONFIG,
+  escalateTierForPump,
+  type RiskTierAgeThresholds,
+  type RiskTierSizeConfig,
+} from './riskTier.js';
 
 /**
  * "Once per user" for the low-balance warning, cheaply — a fixed TTL, not a
@@ -81,6 +90,15 @@ export interface AutoTraderDeps {
    * low-balance warning below is a no-op without it, same convention as every
    * other notifier?.notifyX(...) call site in this codebase. */
   notifier?: NotificationService;
+  /** Dynamic Risk Tiers (2026-07-23 USOH incident follow-up) — see
+   * riskTier.ts. Unlike entryFilterGloballyEnabled/
+   * opportunityScoreGateGloballyEnabled, this is not a feature flag: it's
+   * always active (defaults applied when omitted) since it's a direct safety
+   * response to a live incident, not an opt-in experiment. Every value here
+   * is a multiplier/threshold, never a hardcoded absolute SOL amount — see
+   * riskTier.ts's own doc comments. */
+  riskTierAgeThresholds?: RiskTierAgeThresholds;
+  riskTierSizeConfig?: RiskTierSizeConfig;
 }
 
 /**
@@ -133,6 +151,19 @@ export class AutoTrader {
      * config has opted into useOpportunityScoreGate.
      */
     finalOpportunityScore?: number,
+    /**
+     * Dynamic Risk Tiers (2026-07-23 USOH incident follow-up): the token's
+     * age in ms, resolved upstream (worker.ts, via riskTier.ts's
+     * resolveTokenAgeMs — which itself fails closed to 0/ULTRA_EARLY when the
+     * real on-chain age can't be determined). `undefined` (every existing
+     * test/caller that predates this feature) is deliberately treated as
+     * "tiering not evaluated for this call" -> ESTABLISHED/no size change,
+     * NOT as "unknown -> strictest tier" — that fail-closed behavior belongs
+     * to resolveTokenAgeMs itself, upstream, where a real "unknown" and "this
+     * caller doesn't participate" are actually distinguishable. Only the real
+     * production call site (worker.ts) passes a concrete number.
+     */
+    tokenAgeMs?: number,
   ) {
     // Two-stage discovery pipeline (2026-07-22): the critical security gate
     // and pre-buy sellability check that used to run here (once per token,
@@ -149,6 +180,27 @@ export class AutoTrader {
     });
 
     const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
+
+    // Dynamic Risk Tiers (2026-07-23 USOH incident follow-up): computed once
+    // per token, same as ruleScore above — every config's position size is
+    // scaled off the SAME tier, not re-derived per config. Extreme-pump
+    // protection (pumpProtection.ts) escalates the tier one notch stricter
+    // when riskFlags.extremePumpDetected is set, regardless of the token's
+    // actual age — a sudden extreme price move is its own fresh risk event
+    // (see riskTier.ts's escalateTierForPump doc comment). This never blocks
+    // a buy on its own (see criticalSecurityGate.ts: only a confirmed
+    // holderClusteringState==='UNSAFE' finding blocks) — it only shrinks size.
+    const baseRiskTier =
+      tokenAgeMs === undefined
+        ? 'ESTABLISHED'
+        : classifyRiskTier(
+            tokenAgeMs,
+            this.deps.riskTierAgeThresholds ?? DEFAULT_RISK_TIER_AGE_THRESHOLDS,
+          );
+    const riskTier = riskFlags.extremePumpDetected
+      ? escalateTierForPump(baseRiskTier)
+      : baseRiskTier;
+
     // Pipeline checkpoint: Scanner -> AI Filter / Risk Filter. Confirms this function
     // was actually reached for the token and shows the exact numbers every config
     // will be evaluated against, before any per-user gating happens. info (not debug)
@@ -160,6 +212,9 @@ export class AutoTrader {
         liquidityUsd: riskFlags.liquidityUsd,
         ruleScore,
         aiScore,
+        riskTier,
+        tokenAgeMs,
+        extremePumpDetected: riskFlags.extremePumpDetected ?? false,
       },
       'TOKEN ACCEPTED — evaluating against active auto-buy configs',
     );
@@ -277,11 +332,29 @@ export class AutoTrader {
             trailingStopPercent: config.trailingStopPercent ?? undefined,
           };
 
+      // Dynamic Risk Tiers (2026-07-23): scales the user's OWN configured
+      // buyAmountSol down for an early/ultra-early/pump-escalated tier —
+      // never a hardcoded absolute size (see riskTier.ts). At the default
+      // config, ESTABLISHED is an exact 1.0x no-op, so a config that never
+      // buys anything younger than 15min sees no behavior change at all.
+      const tieredBuyAmountSol = applyRiskTierSizing(
+        config.buyAmountSol,
+        riskTier,
+        this.deps.riskTierSizeConfig ?? DEFAULT_RISK_TIER_SIZE_CONFIG,
+      );
+
       // Pipeline checkpoint: PositionManager reached — every filter above passed,
       // this config is genuinely about to attempt a real (or paper) buy. info so
       // every attempt is traceable in production, not just its outcome.
       this.deps.logger.info(
-        { mint, userId: config.userId, walletId: wallet.id, amountSol: config.buyAmountSol },
+        {
+          mint,
+          userId: config.userId,
+          walletId: wallet.id,
+          configuredAmountSol: config.buyAmountSol,
+          amountSol: tieredBuyAmountSol,
+          riskTier,
+        },
         'BUY STARTED',
       );
       // Two-stage discovery pipeline (2026-07-22): captured right at this
@@ -299,7 +372,7 @@ export class AutoTrader {
           encryptionKey: this.deps.encryptionKey,
           tokenId,
           mint,
-          amountSol: config.buyAmountSol,
+          amountSol: tieredBuyAmountSol,
           slippageBps: config.maxSlippageBps,
           trailingStopPreset: preset,
           aiScore,

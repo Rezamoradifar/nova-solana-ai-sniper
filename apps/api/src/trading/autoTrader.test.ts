@@ -504,3 +504,159 @@ describe('AutoTrader — pre-buy sellability failure categorization (2026-07-21 
     expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'safety_blocked' }]);
   });
 });
+
+describe('AutoTrader — Dynamic Risk Tiers (2026-07-23 USOH incident follow-up)', () => {
+  const FIVE_MIN_MS = 5 * 60 * 1000;
+  const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+
+  it('omitting tokenAgeMs entirely (every pre-existing caller/test) reproduces exactly the configured buyAmountSol — no behavior change', async () => {
+    const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.1 }));
+  });
+
+  it("a token under 5 minutes old (Tier A: ULTRA_EARLY) gets the smallest position size, scaled off the user's own buyAmountSol", async () => {
+    const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+
+    await trader.evaluateAndMaybeBuy(
+      'MintABC',
+      'token-1',
+      RISK_FLAGS,
+      80,
+      undefined,
+      undefined,
+      FIVE_MIN_MS - 1,
+    );
+
+    // Default ultraEarlySizeBps = 2500 (25%) of 0.1 SOL.
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.025 }));
+  });
+
+  it('a token between 5 and 15 minutes old (Tier B: EARLY) gets a smaller-than-full but larger-than-ultra-early size', async () => {
+    const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+
+    await trader.evaluateAndMaybeBuy(
+      'MintABC',
+      'token-1',
+      RISK_FLAGS,
+      80,
+      undefined,
+      undefined,
+      FIVE_MIN_MS + 1,
+    );
+
+    // Default earlySizeBps = 5000 (50%) of 0.1 SOL.
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.05 }));
+  });
+
+  it("a token 15+ minutes old (Tier C: ESTABLISHED) gets the user's full configured size, unchanged", async () => {
+    const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+
+    await trader.evaluateAndMaybeBuy(
+      'MintABC',
+      'token-1',
+      RISK_FLAGS,
+      80,
+      undefined,
+      undefined,
+      FIFTEEN_MIN_MS + 1,
+    );
+
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.1 }));
+  });
+
+  it('a custom risk-tier size config (operator-tunable, never hardcoded) is honored', async () => {
+    const openPosition = vi.fn().mockResolvedValue({ trade: {}, position: {} });
+    const config = fakeConfig({ buyAmountSol: 1 });
+    const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([config]) } } as never;
+    const trader = new AutoTrader({
+      prisma,
+      riskAnalyzer: {} as never,
+      positionManager: { openPosition } as never,
+      logger: fakeLogger(),
+      encryptionKey: 'key',
+      riskTierSizeConfig: { ultraEarlySizeBps: 500, earlySizeBps: 2500, establishedSizeBps: 10000 },
+    });
+
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80, undefined, undefined, 0);
+
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.05 }));
+  });
+
+  describe('extreme-pump escalation (do not rely on price increase alone)', () => {
+    it('escalates an ESTABLISHED (15min+) token to EARLY-level sizing when an extreme pump is detected, without blocking the buy', async () => {
+      const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+      const pumpedFlags = { ...RISK_FLAGS, extremePumpDetected: true };
+
+      const results = await trader.evaluateAndMaybeBuy(
+        'MintABC',
+        'token-1',
+        pumpedFlags,
+        80,
+        undefined,
+        undefined,
+        FIFTEEN_MIN_MS + 1,
+      );
+
+      expect(results).toEqual([{ userId: 'user-1', bought: true }]);
+      // Escalated ESTABLISHED -> EARLY: 50% of 0.1 SOL, not the full 0.1.
+      expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.05 }));
+    });
+
+    it('an extreme pump on an already-ULTRA_EARLY token stays at the smallest size (cannot escalate further)', async () => {
+      const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+      const pumpedFlags = { ...RISK_FLAGS, extremePumpDetected: true };
+
+      await trader.evaluateAndMaybeBuy(
+        'MintABC',
+        'token-1',
+        pumpedFlags,
+        80,
+        undefined,
+        undefined,
+        0,
+      );
+
+      expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.025 }));
+    });
+
+    it('an extreme pump WITHOUT any manipulation signal (holderClusteringState SAFE) still buys — only reduces size, never blocks on price alone', async () => {
+      const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+      const cleanButPumped = {
+        ...RISK_FLAGS,
+        extremePumpDetected: true,
+        holderClusteringState: 'SAFE' as const,
+      };
+
+      const results = await trader.evaluateAndMaybeBuy(
+        'MintABC',
+        'token-1',
+        cleanButPumped,
+        80,
+        undefined,
+        undefined,
+        FIFTEEN_MIN_MS + 1,
+      );
+
+      expect(results).toEqual([{ userId: 'user-1', bought: true }]);
+    });
+
+    it('ordinary price movement (no extreme pump) does not affect sizing for an ESTABLISHED token', async () => {
+      const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+
+      await trader.evaluateAndMaybeBuy(
+        'MintABC',
+        'token-1',
+        RISK_FLAGS,
+        80,
+        undefined,
+        undefined,
+        FIFTEEN_MIN_MS + 1,
+      );
+
+      expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.1 }));
+    });
+  });
+});
