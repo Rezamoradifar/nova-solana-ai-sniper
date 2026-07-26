@@ -142,125 +142,181 @@ export class PriceMonitor {
         include: { token: true, wallet: true },
       });
 
-      for (const position of openPositions) {
-        try {
-          // 2026-07-21 audit (section E1): proactive, price-independent check
-          // that this position's wallet still actually holds tokens — before
-          // this fix, a position whose SELL had already succeeded on-chain
-          // (but whose verification step failed, e.g. a transient RPC hiccup)
-          // could stay OPEN indefinitely: the DB-vs-wallet reconciliation
-          // logic already existed inside PositionManager.closePositionLocked
-          // (the "wallet holds 0 of this token" branch) but was only ever
-          // reached as a side effect of a TP/SL-triggered sell attempt. Seven
-          // real production positions sat OPEN for up to 8 days this way
-          // because their price never moved enough to trigger one. This
-          // check runs every tick, for every open position, independent of
-          // price — reads only the wallet's already-plaintext public key, no
-          // secret ever touched. Cheap (one RPC call) at today's scale (~12
-          // open positions).
-          if (await this.reconcileIfWalletEmpty(position)) continue;
-
-          const pair = await this.deps.dexScreener.getBestSolanaPair(position.token.mint);
-          let currentPriceUsd = pair?.priceUsd ? Number(pair.priceUsd) : undefined;
-          if (currentPriceUsd === undefined || !Number.isFinite(currentPriceUsd)) {
-            currentPriceUsd = await this.handleMissingPrice(position);
-            if (currentPriceUsd === undefined) continue;
-          } else {
-            this.noPriceState.delete(position.id);
-            await this.clearMonitoringStateIfNeeded(position);
-          }
-
-          // Reject an implausible single-tick outlier before it can corrupt this
-          // position's (monotonic, self-reinforcing) high-water mark or fire a
-          // bogus exit off a phantom price — see exitEngine.ts's
-          // isPlausiblePriceUpdate doc comment for the live-verified incident.
-          const referencePriceUsd = position.highWaterMarkUsd ?? position.entryPriceUsd;
-          if (!isPlausiblePriceUpdate(referencePriceUsd, currentPriceUsd)) {
-            // Hard Loss Ceiling (2026-07-18): a rejected tick doesn't wait for
-            // the normal 3-rejection/10-minute reconciliation cycle if it
-            // already implies a loss beyond this position's ceiling — that
-            // wait is exactly what let a real position (ANSEMCOIN) sit
-            // unprotected for hours before its stop-loss could even see a
-            // real price. Cheap arithmetic first; only pays for a
-            // corroboration probe when the answer is yes.
-            const hardLoss = evaluateHardLossCeiling(
-              position.entryPriceUsd,
-              currentPriceUsd,
-              position.stopLossPercent ?? DEFAULT_MAX_LOSS_PERCENT, // defensive fallback — Step 3 means this is always populated
-            );
-            if (hardLoss.breached) {
-              const reconciliation = await this.probeAndReconcile(
-                position.token,
-                currentPriceUsd,
-                false,
-              );
-              if (reconciliation.accepted) {
-                this.outlierState.delete(position.id);
-                this.deps.logger.error(
-                  {
-                    positionId: position.id,
-                    mint: position.token.mint,
-                    entryPriceUsd: position.entryPriceUsd,
-                    currentPriceUsd,
-                    pnlPercent: hardLoss.pnlPercent,
-                    effectiveStopLossPercent: position.stopLossPercent,
-                    isSystemDefault: position.stopLossIsSystemDefault,
-                    source: reconciliation.source,
-                  },
-                  'HARD_LOSS_CEILING_TRIGGERED — forcing immediate exit ahead of normal outlier reconciliation',
-                );
-                await this.deps.positionManager.closePosition(
-                  position.id,
-                  position.walletId,
-                  position.wallet.encryptedSecret,
-                  this.deps.encryptionKey,
-                  { currentPriceUsd, reason: 'stop_loss' },
-                );
-                continue;
-              }
-              // Not corroborated — fall through to the routine path below unchanged.
-            }
-
-            const accepted = await this.handleOutlierRejection(
-              position.id,
-              position.token,
-              referencePriceUsd,
-              currentPriceUsd,
-            );
-            if (!accepted) continue;
-          }
-          this.outlierState.delete(position.id);
-
-          await this.deps.positionManager.checkAndMaybeClose(
-            position.id,
-            currentPriceUsd,
-            position.wallet.encryptedSecret,
-            this.deps.encryptionKey,
-          );
-        } catch (err) {
-          // Production Bug Fix (2026-07-14): this catch previously covered both
-          // a DexScreener price-fetch failure above AND a SELL execution
-          // failure from checkAndMaybeClose below under the same generic
-          // message, with no way to tell which happened or why from the log
-          // line alone. PositionManager tags every SELL failure it throws
-          // with `.sellFailureCategory` (see sellFailureClassifier.ts) — when
-          // present, log it as a distinct, categorized SELL failure instead.
-          const category = (err as { sellFailureCategory?: string } | null)?.sellFailureCategory;
-          if (category) {
-            this.deps.logger.error(
-              { err, positionId: position.id, mint: position.token.mint, category },
-              `SELL execution failed [${category}]`,
-            );
-          } else {
-            this.deps.logger.error(
-              { err, positionId: position.id },
-              'price check failed for open position',
-            );
-          }
-        }
-      }
+      // Monitoring-responsiveness fix (2026-07-23, USOH incident follow-up):
+      // this used to be a sequential for-loop with an `await` per position —
+      // one position stuck retrying a failed SELL (confirmTransaction waiting
+      // out a near-full blockhash-validity window, tens of seconds) blocked
+      // price/stop-loss evaluation for every OTHER open position until it
+      // finished. Live-verified 2026-07-23: two stuck USOH positions were
+      // enough to starve the rest of the tick. Positions are fully
+      // independent (different wallets/tokens/locks, all already keyed by
+      // position/wallet id — see PositionManager's openLocks/
+      // unverifiedSwapLocks) so processing them concurrently is safe; only
+      // the per-tick DB read above and the `this.ticking` re-entrancy guard
+      // need to stay tick-level.
+      await Promise.allSettled(openPositions.map((position) => this.processPosition(position)));
     } finally {
       this.ticking = false;
+    }
+  }
+
+  private async processPosition(
+    position: MonitoringStateFields & {
+      walletId: string;
+      amountToken: number;
+      remainingAmountToken: number | null;
+      highWaterMarkUsd: number | null;
+      entryPriceUsd: number;
+      stopLossPercent: number | null;
+      stopLossIsSystemDefault: boolean;
+      wallet: { publicKey: string; encryptedSecret: string };
+    },
+  ): Promise<void> {
+    try {
+      // 2026-07-21 audit (section E1): proactive, price-independent check
+      // that this position's wallet still actually holds tokens — before
+      // this fix, a position whose SELL had already succeeded on-chain
+      // (but whose verification step failed, e.g. a transient RPC hiccup)
+      // could stay OPEN indefinitely: the DB-vs-wallet reconciliation
+      // logic already existed inside PositionManager.closePositionLocked
+      // (the "wallet holds 0 of this token" branch) but was only ever
+      // reached as a side effect of a TP/SL-triggered sell attempt. Seven
+      // real production positions sat OPEN for up to 8 days this way
+      // because their price never moved enough to trigger one. This
+      // check runs every tick, for every open position, independent of
+      // price — reads only the wallet's already-plaintext public key, no
+      // secret ever touched. Cheap (one RPC call) at today's scale (~12
+      // open positions).
+      if (await this.reconcileIfWalletEmpty(position)) return;
+
+      const pair = await this.deps.dexScreener.getBestSolanaPair(position.token.mint);
+      let currentPriceUsd = pair?.priceUsd ? Number(pair.priceUsd) : undefined;
+      if (currentPriceUsd === undefined || !Number.isFinite(currentPriceUsd)) {
+        currentPriceUsd = await this.handleMissingPrice(position);
+        if (currentPriceUsd === undefined) return;
+      } else {
+        this.noPriceState.delete(position.id);
+        await this.clearMonitoringStateIfNeeded(position);
+      }
+
+      // Emergency liquidity-deterioration detection (2026-07-23, USOH
+      // incident follow-up, requirement #12): a signal only — feeds into the
+      // SAME stop-loss/hard-ceiling decision below via an extra corroboration
+      // source, never an independent forced-sell path. See
+      // probeLiquidityCollapse's own doc comment.
+      const liquidityCollapse = await this.probeLiquidityCollapse(position.token, currentPriceUsd);
+      if (liquidityCollapse.collapsed) {
+        this.deps.logger.warn(
+          {
+            positionId: position.id,
+            mint: position.token.mint,
+            liquidityUsd: liquidityCollapse.liquidityUsd,
+            referenceLiquidityUsd: liquidityCollapse.referenceLiquidityUsd,
+          },
+          'liquidity deterioration detected for open position — treated as corroboration for a price crash, never an independent forced exit',
+        );
+        // Immediate alert (2026-07-23, requirement #9) — deduped per position
+        // for an hour, same TTL convention as every other alert in this file,
+        // so a sustained collapse doesn't spam on every 15s tick.
+        if (!this.stalePriceAlerted.has(`liquidity_collapse:${position.id}`)) {
+          this.stalePriceAlerted.add(`liquidity_collapse:${position.id}`);
+          await this.deps.notifier?.notifyError(
+            'liquidity collapse detected',
+            `Position ${position.id} (${position.token.symbol ?? position.token.mint}): on-chain liquidity dropped to $${liquidityCollapse.liquidityUsd?.toFixed(2)} from a reference of $${liquidityCollapse.referenceLiquidityUsd?.toFixed(2)} — treated as corroboration for the current price reading, never an independent forced sell. Stop-loss/hard-loss-ceiling logic will act on it if the configured threshold is actually breached.`,
+          );
+        }
+      }
+
+      // Reject an implausible single-tick outlier before it can corrupt this
+      // position's (monotonic, self-reinforcing) high-water mark or fire a
+      // bogus exit off a phantom price — see exitEngine.ts's
+      // isPlausiblePriceUpdate doc comment for the live-verified incident.
+      const referencePriceUsd = position.highWaterMarkUsd ?? position.entryPriceUsd;
+      if (!isPlausiblePriceUpdate(referencePriceUsd, currentPriceUsd)) {
+        // Hard Loss Ceiling (2026-07-18): a rejected tick doesn't wait for
+        // the normal 3-rejection/10-minute reconciliation cycle if it
+        // already implies a loss beyond this position's ceiling — that
+        // wait is exactly what let a real position (ANSEMCOIN) sit
+        // unprotected for hours before its stop-loss could even see a
+        // real price. Cheap arithmetic first; only pays for a
+        // corroboration probe when the answer is yes.
+        const hardLoss = evaluateHardLossCeiling(
+          position.entryPriceUsd,
+          currentPriceUsd,
+          position.stopLossPercent ?? DEFAULT_MAX_LOSS_PERCENT, // defensive fallback — Step 3 means this is always populated
+        );
+        if (hardLoss.breached) {
+          const reconciliation = await this.probeAndReconcile(
+            position.token,
+            currentPriceUsd,
+            false,
+            liquidityCollapse.collapsed,
+          );
+          if (reconciliation.accepted) {
+            this.outlierState.delete(position.id);
+            this.deps.logger.error(
+              {
+                positionId: position.id,
+                mint: position.token.mint,
+                entryPriceUsd: position.entryPriceUsd,
+                currentPriceUsd,
+                pnlPercent: hardLoss.pnlPercent,
+                effectiveStopLossPercent: position.stopLossPercent,
+                isSystemDefault: position.stopLossIsSystemDefault,
+                source: reconciliation.source,
+                liquidityCollapseCorroborated: liquidityCollapse.collapsed,
+              },
+              'HARD_LOSS_CEILING_TRIGGERED — forcing immediate exit ahead of normal outlier reconciliation',
+            );
+            await this.deps.positionManager.closePosition(
+              position.id,
+              position.walletId,
+              position.wallet.encryptedSecret,
+              this.deps.encryptionKey,
+              { currentPriceUsd, reason: 'stop_loss' },
+            );
+            return;
+          }
+          // Not corroborated — fall through to the routine path below unchanged.
+        }
+
+        const accepted = await this.handleOutlierRejection(
+          position.id,
+          position.token,
+          referencePriceUsd,
+          currentPriceUsd,
+          liquidityCollapse.collapsed,
+        );
+        if (!accepted) return;
+      }
+      this.outlierState.delete(position.id);
+
+      await this.deps.positionManager.checkAndMaybeClose(
+        position.id,
+        currentPriceUsd,
+        position.wallet.encryptedSecret,
+        this.deps.encryptionKey,
+      );
+    } catch (err) {
+      // Production Bug Fix (2026-07-14): this catch previously covered both
+      // a DexScreener price-fetch failure above AND a SELL execution
+      // failure from checkAndMaybeClose below under the same generic
+      // message, with no way to tell which happened or why from the log
+      // line alone. PositionManager tags every SELL failure it throws
+      // with `.sellFailureCategory` (see sellFailureClassifier.ts) — when
+      // present, log it as a distinct, categorized SELL failure instead.
+      const category = (err as { sellFailureCategory?: string } | null)?.sellFailureCategory;
+      if (category) {
+        this.deps.logger.error(
+          { err, positionId: position.id, mint: position.token.mint, category },
+          `SELL execution failed [${category}]`,
+        );
+      } else {
+        this.deps.logger.error(
+          { err, positionId: position.id },
+          'price check failed for open position',
+        );
+      }
     }
   }
 
@@ -511,6 +567,7 @@ export class PriceMonitor {
     token: Token,
     referencePriceUsd: number,
     currentPriceUsd: number,
+    liquidityDropCorroborates = false,
   ): Promise<boolean> {
     const state = this.outlierState.get(positionId) ?? { count: 0, firstRejectedAt: Date.now() };
     state.count += 1;
@@ -536,7 +593,12 @@ export class PriceMonitor {
     }
 
     const forcedAfterCeiling = elapsedMs >= OUTLIER_FORCE_ACCEPT_AFTER_MS;
-    const reconciliation = await this.probeAndReconcile(token, currentPriceUsd, forcedAfterCeiling);
+    const reconciliation = await this.probeAndReconcile(
+      token,
+      currentPriceUsd,
+      forcedAfterCeiling,
+      liquidityDropCorroborates,
+    );
 
     if (!reconciliation.accepted) {
       this.deps.logger.warn(
@@ -594,6 +656,7 @@ export class PriceMonitor {
     token: Token,
     candidatePriceUsd: number,
     forcedAfterCeiling: boolean,
+    liquidityDropCorroborates = false,
   ): Promise<PriceReconciliationResult> {
     const [jupiterReverseQuotePriceUsd, nativeDexReservesPriceUsd] = await Promise.all([
       this.probeJupiterReversePrice(token),
@@ -604,7 +667,52 @@ export class PriceMonitor {
       jupiterReverseQuotePriceUsd,
       nativeDexReservesPriceUsd,
       forcedAfterCeiling,
+      liquidityDropCorroborates,
     });
+  }
+
+  /**
+   * Emergency liquidity-deterioration detection (2026-07-23, USOH incident
+   * follow-up, requirement #12): compares the token's current DexScreener
+   * liquidity against its last-known-good value on file (Token.liquidityUsd,
+   * updated on every accepted tick elsewhere in the pipeline) — a drop past
+   * `collapseRatio` (default: liquidity fell to 20% or less of its reference)
+   * is treated as a real, corroborating signal that a price crash is genuine,
+   * not a bad reading. Deliberately narrow: this NEVER triggers a sell by
+   * itself — it only feeds reconcilePriceOutlier as one more independent
+   * source, so the actual exit still goes through the position's own
+   * configured stop-loss (evaluateHardLossCeiling upstream in
+   * processPosition). Returns collapsed:false (never throws) on any read
+   * failure — an unresolved liquidity comparison is not evidence of anything.
+   */
+  private async probeLiquidityCollapse(
+    token: Token,
+    currentPriceUsd: number,
+  ): Promise<{ collapsed: boolean; liquidityUsd?: number; referenceLiquidityUsd?: number }> {
+    const referenceLiquidityUsd = token.liquidityUsd;
+    if (
+      referenceLiquidityUsd === null ||
+      !Number.isFinite(referenceLiquidityUsd) ||
+      referenceLiquidityUsd <= 0
+    ) {
+      return { collapsed: false };
+    }
+    try {
+      const pair = await this.deps.dexScreener.getBestSolanaPair(token.mint);
+      const liquidityUsd = pair?.liquidity?.usd;
+      if (liquidityUsd === undefined || !Number.isFinite(liquidityUsd)) {
+        return { collapsed: false, referenceLiquidityUsd };
+      }
+      const collapseRatio = 0.2;
+      const collapsed = liquidityUsd <= referenceLiquidityUsd * collapseRatio;
+      return { collapsed, liquidityUsd, referenceLiquidityUsd };
+    } catch (err) {
+      this.deps.logger.debug(
+        { mint: token.mint, err, currentPriceUsd },
+        'liquidity-collapse probe failed',
+      );
+      return { collapsed: false, referenceLiquidityUsd };
+    }
   }
 
   /**

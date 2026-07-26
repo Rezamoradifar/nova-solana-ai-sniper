@@ -179,6 +179,33 @@ describe('reconcilePriceOutlier', () => {
     const result = reconcilePriceOutlier({ candidatePriceUsd: 0.02151, forcedAfterCeiling: false });
     expect(result.accepted).toBe(false);
   });
+
+  describe('liquidity-collapse corroboration (2026-07-23 USOH incident follow-up, requirement #12)', () => {
+    it('accepts when a real liquidity collapse corroborates the crash', () => {
+      const result = reconcilePriceOutlier({
+        candidatePriceUsd: 0.004,
+        liquidityDropCorroborates: true,
+      });
+      expect(result).toEqual({ accepted: true, source: 'liquidity_collapse' });
+    });
+
+    it('a price-based source still takes priority over the liquidity signal', () => {
+      const result = reconcilePriceOutlier({
+        candidatePriceUsd: 0.02151,
+        jupiterReverseQuotePriceUsd: 0.019,
+        liquidityDropCorroborates: true,
+      });
+      expect(result.source).toBe('jupiter_reverse_quote');
+    });
+
+    it('rejects when liquidity did not corroborate and no other source did either', () => {
+      const result = reconcilePriceOutlier({
+        candidatePriceUsd: 0.02151,
+        liquidityDropCorroborates: false,
+      });
+      expect(result).toEqual({ accepted: false });
+    });
+  });
 });
 
 describe('resolveEffectiveStopLossPercent', () => {

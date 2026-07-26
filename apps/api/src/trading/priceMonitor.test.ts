@@ -355,3 +355,167 @@ describe('PriceMonitor — persisted monitoring state survives a process restart
     expect(notifyError.mock.calls[0]![0]).toBe('stale price feed recovered');
   });
 });
+
+describe('PriceMonitor — concurrent position processing (2026-07-23 USOH incident follow-up, requirement #5)', () => {
+  it('a slow/stuck position does not delay checkAndMaybeClose for other open positions in the same tick', async () => {
+    const slowPosition = fakePosition({ id: 'pos-slow' });
+    const fastPosition = fakePosition({ id: 'pos-fast' });
+
+    let slowResolved = false;
+    let fastCalledBeforeSlowResolved = false;
+    const checkAndMaybeClose = vi.fn(async (positionId: string) => {
+      if (positionId === 'pos-slow') {
+        // Simulate a position stuck retrying a failed SELL for a while —
+        // pre-fix (sequential for-loop), this would have blocked pos-fast
+        // from ever being checked until this resolved.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        slowResolved = true;
+        return;
+      }
+      if (positionId === 'pos-fast' && !slowResolved) {
+        fastCalledBeforeSlowResolved = true;
+      }
+    });
+
+    const deps = buildDeps({}, [slowPosition, fastPosition]);
+    deps.positionManager.checkAndMaybeClose = checkAndMaybeClose as never;
+    const monitor = new PriceMonitor(deps);
+
+    await monitor.tick();
+
+    expect(checkAndMaybeClose).toHaveBeenCalledTimes(2);
+    expect(fastCalledBeforeSlowResolved).toBe(true);
+  });
+
+  it('one position throwing does not prevent the others from being processed in the same tick', async () => {
+    const failingPosition = fakePosition({ id: 'pos-failing' });
+    const okPosition = fakePosition({ id: 'pos-ok' });
+
+    const checkAndMaybeClose = vi.fn(async (positionId: string) => {
+      if (positionId === 'pos-failing') throw new Error('SELL FAILED [blockhash_expired]');
+    });
+
+    const deps = buildDeps({}, [failingPosition, okPosition]);
+    deps.positionManager.checkAndMaybeClose = checkAndMaybeClose as never;
+    const monitor = new PriceMonitor(deps);
+
+    await monitor.tick();
+
+    expect(checkAndMaybeClose).toHaveBeenCalledWith(
+      'pos-ok',
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+});
+
+describe('PriceMonitor — emergency liquidity-deterioration detection (2026-07-23, requirement #12)', () => {
+  it('immediately alerts on a detected liquidity collapse (requirement #9)', async () => {
+    const position = fakePosition({
+      entryPriceUsd: 1,
+      highWaterMarkUsd: 1,
+      token: {
+        mint: 'ED5nyyWEzpPPiWimP8vYm7sD7TD3LAt3Q3gRTWHzPJBY',
+        decimals: 6,
+        dex: 'RAYDIUM',
+        poolAddress: null,
+        symbol: 'ABC',
+        liquidityUsd: 700_000,
+      },
+    });
+    const notifyError = vi.fn().mockResolvedValue(undefined);
+    const deps = buildDeps(
+      {
+        dexScreener: {
+          getBestSolanaPair: vi
+            .fn()
+            .mockResolvedValue({ priceUsd: '0.95', liquidity: { usd: 5_000 } }),
+        } as unknown as DexScreenerClient,
+        notifier: { notifyError } as never,
+      },
+      [position],
+    );
+    const monitor = new PriceMonitor(deps);
+
+    await monitor.tick();
+
+    expect(notifyError).toHaveBeenCalledWith(
+      'liquidity collapse detected',
+      expect.stringContaining('pos-1'),
+    );
+  });
+
+  it('a real liquidity collapse corroborates an outlier-rejected crash and force-closes via the existing Hard Loss Ceiling path — never an independent forced sell', async () => {
+    const position = fakePosition({
+      entryPriceUsd: 0.1,
+      highWaterMarkUsd: 0.1425,
+      stopLossPercent: 20,
+      token: {
+        mint: 'ED5nyyWEzpPPiWimP8vYm7sD7TD3LAt3Q3gRTWHzPJBY',
+        decimals: 6,
+        dex: 'RAYDIUM',
+        poolAddress: null,
+        symbol: 'ABC',
+        liquidityUsd: 700_000, // reference — matches Token.liquidityUsd on file
+      },
+    });
+    const deps = buildDeps(
+      {
+        dexScreener: {
+          // Price crashed past the 20x plausibility band AND liquidity
+          // collapsed to well under 20% of its reference — both signals
+          // agree this is a real crash, not a bad reading.
+          getBestSolanaPair: vi
+            .fn()
+            .mockResolvedValue({ priceUsd: '0.004', liquidity: { usd: 5_000 } }),
+        } as unknown as DexScreenerClient,
+      },
+      [position],
+    );
+    const monitor = new PriceMonitor(deps);
+
+    await monitor.tick();
+
+    expect(deps.positionManager.closePosition).toHaveBeenCalledWith(
+      'pos-1',
+      'wallet-1',
+      'secret',
+      'key',
+      expect.objectContaining({ reason: 'stop_loss' }),
+    );
+  });
+
+  it('does not force an exit from liquidity data alone when the price itself is still plausible — signal only, gated by the existing stop-loss logic', async () => {
+    const position = fakePosition({
+      entryPriceUsd: 1,
+      highWaterMarkUsd: 1,
+      stopLossPercent: 20,
+      token: {
+        mint: 'ED5nyyWEzpPPiWimP8vYm7sD7TD3LAt3Q3gRTWHzPJBY',
+        decimals: 6,
+        dex: 'RAYDIUM',
+        poolAddress: null,
+        symbol: 'ABC',
+        liquidityUsd: 700_000,
+      },
+    });
+    const deps = buildDeps(
+      {
+        dexScreener: {
+          // Price is within the plausible band (no crash), even though
+          // liquidity also happens to have dropped — never enough alone.
+          getBestSolanaPair: vi
+            .fn()
+            .mockResolvedValue({ priceUsd: '0.95', liquidity: { usd: 5_000 } }),
+        } as unknown as DexScreenerClient,
+      },
+      [position],
+    );
+    const monitor = new PriceMonitor(deps);
+
+    await monitor.tick();
+
+    expect(deps.positionManager.closePosition).not.toHaveBeenCalled();
+  });
+});

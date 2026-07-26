@@ -20,7 +20,7 @@ export type EvaluateExitReason = 'take_profit' | 'stop_loss' | 'trailing_stop';
 export type ExitReason = EvaluateExitReason | 'emergency' | 'manual_emergency';
 
 export type PriceReconciliationSource =
-  'jupiter_reverse_quote' | 'native_dex_reserves' | 'forced_after_ceiling';
+  'jupiter_reverse_quote' | 'native_dex_reserves' | 'liquidity_collapse' | 'forced_after_ceiling';
 
 export interface PriceReconciliationResult {
   accepted: boolean;
@@ -104,6 +104,20 @@ export function reconcilePriceOutlier(params: {
   nativeDexReservesPriceUsd?: number;
   forcedAfterCeiling?: boolean;
   corroborationToleranceMultiplier?: number;
+  /**
+   * Emergency liquidity-deterioration detection (2026-07-23, USOH incident
+   * follow-up, requirement #12): a genuine price crash in an AMM is almost
+   * always accompanied by a real liquidity drop (that's mechanically how an
+   * AMM price moves) — a bad/glitched price *reading*, by contrast, has no
+   * reason to also show a liquidity change. This is a THIRD independent
+   * corroboration source alongside the two price-based probes: true only
+   * when the caller has already confirmed a liquidity collapse (see
+   * priceMonitor.ts's probeLiquidityCollapse) for THIS SAME tick. A signal
+   * only — never sufficient on its own to force an exit outside this
+   * existing reconciliation flow (still gated by the position's own
+   * configured stop-loss via evaluateHardLossCeiling upstream).
+   */
+  liquidityDropCorroborates?: boolean;
 }): PriceReconciliationResult {
   const tolerance = params.corroborationToleranceMultiplier ?? 3;
   const agrees = (otherPriceUsd: number | undefined): boolean => {
@@ -119,6 +133,9 @@ export function reconcilePriceOutlier(params: {
   }
   if (agrees(params.nativeDexReservesPriceUsd)) {
     return { accepted: true, source: 'native_dex_reserves' };
+  }
+  if (params.liquidityDropCorroborates) {
+    return { accepted: true, source: 'liquidity_collapse' };
   }
   if (params.forcedAfterCeiling) {
     return { accepted: true, source: 'forced_after_ceiling' };
