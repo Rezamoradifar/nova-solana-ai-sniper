@@ -35,6 +35,7 @@ const {
   hasAnyAiProvider,
   resolveGeminiProvider,
   resolveOpenRouterProvider,
+  resolveOllamaProvider,
   resolvePrimaryFallbackProvider,
 } = await import('./provider.js');
 
@@ -154,6 +155,24 @@ describe('resolveGeminiProvider / resolveOpenRouterProvider (multi-LLM consensus
   it('resolveOpenRouterProvider throws a clear error if the key is set but the model is missing', () => {
     expect(() => resolveOpenRouterProvider({ openrouterApiKey: 'or-key' })).toThrow(
       /OPENROUTER_MODEL must be set/,
+    );
+  });
+
+  it('resolveOllamaProvider returns undefined when OLLAMA_HOST is not configured', () => {
+    expect(resolveOllamaProvider({})).toBeUndefined();
+  });
+
+  it('resolveOllamaProvider returns an ollama provider when host + model are configured', () => {
+    const provider = resolveOllamaProvider({
+      ollamaHost: 'http://100.103.226.112:11434',
+      ollamaModel: 'phi4',
+    });
+    expect(provider?.name).toBe('ollama');
+  });
+
+  it('resolveOllamaProvider throws a clear error if the host is set but the model is missing', () => {
+    expect(() => resolveOllamaProvider({ ollamaHost: 'http://100.103.226.112:11434' })).toThrow(
+      /OLLAMA_MODEL must be set/,
     );
   });
 });
@@ -335,5 +354,72 @@ describe('OpenRouterProvider.generateText', () => {
     expect(caught).toBeInstanceOf(Error);
     expect((caught as Error).message).not.toContain('super-secret-or-key');
     expect(fetchMock).toHaveBeenCalled();
+  });
+});
+
+describe('OllamaProvider.generateText', () => {
+  function stubFetchOnce(status: number, body: unknown): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('returns the response text on a normal successful call', async () => {
+    stubFetchOnce(200, { response: '{"score":90,"decision":"BUY"}', done: true });
+    const provider = resolveOllamaProvider({
+      ollamaHost: 'http://100.103.226.112:11434',
+      ollamaModel: 'phi4',
+    })!;
+    await expect(provider.generateText('prompt')).resolves.toBe('{"score":90,"decision":"BUY"}');
+  });
+
+  it('posts to /api/generate with the configured model, stream:false, and the system prompt', async () => {
+    const fetchMock = stubFetchOnce(200, { response: 'ok', done: true });
+    const provider = resolveOllamaProvider({
+      ollamaHost: 'http://100.103.226.112:11434',
+      ollamaModel: 'phi4',
+    })!;
+    await provider.generateText('the prompt', { system: 'the system prompt', maxTokens: 300 });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://100.103.226.112:11434/api/generate',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body);
+    expect(body).toMatchObject({
+      model: 'phi4',
+      prompt: 'the prompt',
+      system: 'the system prompt',
+      stream: false,
+      options: { num_predict: 300 },
+    });
+  });
+
+  it('returns an empty string rather than throwing when response is missing', async () => {
+    stubFetchOnce(200, { done: true });
+    const provider = resolveOllamaProvider({
+      ollamaHost: 'http://100.103.226.112:11434',
+      ollamaModel: 'phi4',
+    })!;
+    await expect(provider.generateText('prompt')).resolves.toBe('');
+  });
+
+  it('throws on a non-2xx response (no retry — a timeout/outage should fail fast so the caller can exclude this vote)', async () => {
+    const fetchMock = stubFetchOnce(500, 'internal error');
+    const provider = resolveOllamaProvider({
+      ollamaHost: 'http://100.103.226.112:11434',
+      ollamaModel: 'phi4',
+    })!;
+    await expect(provider.generateText('prompt')).rejects.toThrow(/500/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws on an embedded error field in an HTTP 200 response', async () => {
+    stubFetchOnce(200, { error: 'model "phi4" not found, try pulling it first' });
+    const provider = resolveOllamaProvider({
+      ollamaHost: 'http://100.103.226.112:11434',
+      ollamaModel: 'phi4',
+    })!;
+    await expect(provider.generateText('prompt')).rejects.toThrow(/not found/);
   });
 });

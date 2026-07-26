@@ -164,6 +164,14 @@ export const envSchema = z.object({
   // fail-closed handling turns that into a SKIP — never a silent switch to a
   // different, unvetted model. Override via this var, not by editing code.
   OPENROUTER_MODEL: z.string().default('nvidia/nemotron-3-ultra-550b-a55b:free'),
+  // Self-hosted Ollama (2026-07-26): third, best-effort consensus vote — see
+  // packages/ai/src/consensus.ts's `ollama` parameter and provider.ts's
+  // resolveOllamaProvider. Both optional, same undefined-means-not-configured
+  // convention as OPENROUTER_API_KEY/OPENROUTER_MODEL above; unlike a Gemini/
+  // OpenRouter outage, an unreachable/misbehaving Ollama host never blocks a
+  // BUY on its own (see consensus.ts's ollamaParticipated).
+  OLLAMA_HOST: z.string().url().optional(),
+  OLLAMA_MODEL: z.string().optional(),
 
   // Telegram
   TELEGRAM_BOT_TOKEN: z.string().optional(),

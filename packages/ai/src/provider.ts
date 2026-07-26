@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { ApiError, GoogleGenAI } from '@google/genai';
 
-export type AiProviderName = 'anthropic' | 'openai' | 'gemini' | 'openrouter';
+export type AiProviderName = 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'ollama';
 
 export interface GenerateOptions {
   system?: string;
@@ -208,6 +208,61 @@ class OpenRouterProvider implements AiProvider {
   }
 }
 
+/**
+ * Self-hosted Ollama (2026-07-26): a third, best-effort consensus vote
+ * alongside Gemini/OpenRouter (see consensus.ts's `ollama` parameter) —
+ * "best-effort" because unlike those two, an Ollama failure/timeout must
+ * never force a SKIP; the caller degrades to today's two-provider gate
+ * instead. 45s timeout (vs. Gemini/OpenRouter's 15s) because this hits a
+ * self-hosted box with no SLA and no cold-start guarantee — a live probe
+ * against phi4:14.7B here measured ~8s just to load the model into memory
+ * before a single token was generated. No retry: a second attempt at up to
+ * 45s more would dominate the parallel Promise.all this runs inside of for
+ * comparatively little benefit — a timeout just excludes this vote for that
+ * one token, which is the intended fail-open behavior anyway.
+ */
+const OLLAMA_TIMEOUT_MS = 45_000;
+
+interface OllamaGenerateResponseBody {
+  response?: string;
+  error?: string;
+}
+
+export class OllamaProvider implements AiProvider {
+  readonly name = 'ollama' as const;
+
+  constructor(
+    private readonly host: string,
+    private readonly model: string,
+  ) {}
+
+  async generateText(prompt: string, options?: GenerateOptions): Promise<string> {
+    const res = await fetch(`${this.host}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: this.model,
+        prompt,
+        system: options?.system,
+        stream: false,
+        options: {
+          temperature: options?.temperature ?? 0.7,
+          num_predict: options?.maxTokens ?? 1024,
+        },
+      }),
+      signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      throw new Error(`Ollama request failed: ${res.status} ${await res.text()}`);
+    }
+    const data = (await res.json()) as OllamaGenerateResponseBody;
+    if (data.error) {
+      throw new Error(`Ollama error: ${data.error}`);
+    }
+    return data.response ?? '';
+  }
+}
+
 export interface AiProviderKeys {
   anthropicApiKey?: string;
   openaiApiKey?: string;
@@ -255,6 +310,26 @@ export function resolveOpenRouterProvider(
     throw new Error('OPENROUTER_MODEL must be set when OPENROUTER_API_KEY is configured.');
   }
   return new OpenRouterProvider(keys.openrouterApiKey, keys.openrouterModel);
+}
+
+export interface OllamaProviderConfig {
+  ollamaHost?: string;
+  ollamaModel?: string;
+}
+
+/**
+ * No API key — a host URL + model name instead, same optional-third-voter
+ * role resolveGeminiProvider/resolveOpenRouterProvider fill for consensus
+ * mode (see consensus.ts). Returns undefined (not an error) when unconfigured,
+ * same convention as those two, so the caller degrades to the existing
+ * two-provider consensus with zero special-casing.
+ */
+export function resolveOllamaProvider(keys: OllamaProviderConfig): AiProvider | undefined {
+  if (!keys.ollamaHost) return undefined;
+  if (!keys.ollamaModel) {
+    throw new Error('OLLAMA_MODEL must be set when OLLAMA_HOST is configured.');
+  }
+  return new OllamaProvider(keys.ollamaHost, keys.ollamaModel);
 }
 
 /**

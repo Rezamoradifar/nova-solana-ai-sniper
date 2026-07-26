@@ -165,7 +165,7 @@ export interface AiScore {
   summary: string;
   /** Back-compat alias — reasons+warnings combined, same list previous callers read as "flags". */
   flags: string[];
-  provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter';
+  provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'ollama';
 }
 
 export type OrderSide = 'buy' | 'sell';
