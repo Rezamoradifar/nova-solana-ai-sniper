@@ -2426,6 +2426,104 @@ describe('PositionManager permanent (no-route) SELL failure handling (2026-07-26
       }
     },
   );
+
+  it('checkAndMaybeClose defers a retry while the exponential backoff window for a prior permanent failure has not elapsed yet — no swap is attempted even though TP/SL would otherwise fire', async () => {
+    const prepareSwap = vi.fn();
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const connection = { sendTransaction: vi.fn() } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const debugLog = vi.fn();
+    const prisma = {
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(
+          baseNoRoutePosition({
+            stopLossPercent: 10,
+            takeProfitPercent: 50,
+            noRouteSellFailureCount: 1,
+            // 1 second ago — well within the default 60s (1x base) backoff
+            // window for a single prior permanent failure.
+            lastSellFailureAt: new Date(Date.now() - 1_000),
+          }),
+        ),
+        update: vi.fn(),
+      },
+    } as never;
+    const logger = { debug: debugLog, info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      logger,
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    // currentPriceUsd=100 against entryPriceUsd=0.001/takeProfitPercent=50
+    // would ordinarily fire take-profit immediately — proves the backoff
+    // gate runs before evaluateExit, not just before the swap itself.
+    const result = await manager.checkAndMaybeClose('position-noroute', 100, 'enc', 'key');
+
+    expect(result).toEqual({ closed: false });
+    expect(prepareSwap).not.toHaveBeenCalled();
+    expect(debugLog).toHaveBeenCalledWith(
+      expect.anything(),
+      'Deferring SELL retry — exponential backoff window for a prior permanent-route failure has not elapsed yet.',
+    );
+  });
+
+  it('checkAndMaybeClose attempts a retry once the exponential backoff window for a prior permanent failure has elapsed', async () => {
+    const prepareSwap = vi.fn().mockRejectedValue(new Error('slippage tolerance exceeded'));
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const connection = {
+      getParsedTokenAccountsByOwner: vi.fn().mockResolvedValue({
+        value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: '1000' } } } } } }],
+      }),
+      sendTransaction: vi.fn(),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const positionUpdate = statefulPositionUpdateMock(baseNoRoutePosition());
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(
+          baseNoRoutePosition({
+            stopLossPercent: 10,
+            takeProfitPercent: 50,
+            noRouteSellFailureCount: 1,
+            // 2 minutes ago — past the default 60s (1x base) backoff window
+            // for a single prior permanent failure.
+            lastSellFailureAt: new Date(Date.now() - 120_000),
+          }),
+        ),
+        update: positionUpdate,
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    await expect(manager.checkAndMaybeClose('position-noroute', 100, 'enc', 'key')).rejects.toThrow(
+      /slippage/,
+    );
+
+    expect(prepareSwap).toHaveBeenCalled();
+  });
 });
 
 describe('PositionManager SELL broadcast-stage retry (2026-07-23 USOH incident production fix)', () => {

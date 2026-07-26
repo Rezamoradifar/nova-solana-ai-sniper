@@ -253,6 +253,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     undefined, // institutionalModeGloballyEnabled — keep default
     undefined, // partialExitsGloballyEnabled — keep default
     app.config.SELL_MAX_PERMANENT_ROUTE_RETRIES,
+    app.config.SELL_PERMANENT_RETRY_BACKOFF_BASE_MS,
+    app.config.SELL_PERMANENT_RETRY_BACKOFF_MAX_MS,
   );
   if (!app.hasDecorator('positionManager')) {
     app.decorate('positionManager', positionManager);

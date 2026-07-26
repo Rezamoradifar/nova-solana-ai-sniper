@@ -23,6 +23,7 @@ import {
   type SellFailureCategory,
   type SellFailureClassification,
 } from './sellFailureClassifier.js';
+import { computeSellRetryBackoffMs } from './sellRetryBackoff.js';
 import { computeTrailingStopDisplay, defaultExitParams } from './adaptiveTrailingStop.js';
 import { eventBus } from '../lib/eventBus.js';
 import { latencyTracker } from '../lib/latencyTracker.js';
@@ -372,6 +373,18 @@ export class PositionManager {
      * failure counter reaching the thousands.
      */
     private readonly maxPermanentRouteRetries: number = 3,
+    /**
+     * SELL_PERMANENT_RETRY_BACKOFF_BASE_MS/MAX_MS (2026-07-26, Phase 6): how
+     * long checkAndMaybeClose must wait after a position's most recent
+     * permanent (no-route) SELL failure before attempting another sell for
+     * it — see sellRetryBackoff.ts. Doubles each consecutive permanent
+     * failure, capped at the Max. Defaults match sellRetryBackoff.ts's own
+     * production defaults (1min doubling up to 30min) so every existing
+     * caller/test that omits these gets the real production cadence, not an
+     * arbitrary test-only value.
+     */
+    private readonly sellPermanentRetryBackoffBaseMs: number = 60_000,
+    private readonly sellPermanentRetryBackoffMaxMs: number = 1_800_000,
   ) {}
 
   /**
@@ -1356,6 +1369,42 @@ export class PositionManager {
         'Skipping position permanently because no Jupiter route exists.',
       );
       return { closed: false as const };
+    }
+
+    // Exponential retry backoff (2026-07-26, Phase 6) — a position that has
+    // already failed with a permanent (no-route) classification at least once
+    // but hasn't yet crossed maxPermanentRouteRetries must still wait out a
+    // growing delay before the next attempt, instead of retrying on the very
+    // next price tick with zero delay (the original NO_SELL_ROUTE production
+    // bug: a routeless position's entire retry budget burned in well under a
+    // minute). lastSellFailureAt is set by the exact same failure event that
+    // increments noRouteSellFailureCount (see the catch block in
+    // closePositionLocked/executePartialSellLocked), so the two stay in sync —
+    // no separate "when was the last permanent failure" column is needed.
+    // Only gates the automatic tick path here; a direct manual/emergency sell
+    // (closePosition/executePartialSell called outside this method) is an
+    // explicit, infrequent, human-initiated action and is deliberately not
+    // subject to this backoff.
+    if (position.noRouteSellFailureCount > 0 && position.lastSellFailureAt) {
+      const backoffMs = computeSellRetryBackoffMs(
+        position.noRouteSellFailureCount,
+        this.sellPermanentRetryBackoffBaseMs,
+        this.sellPermanentRetryBackoffMaxMs,
+      );
+      const elapsedMs = Date.now() - position.lastSellFailureAt.getTime();
+      if (elapsedMs < backoffMs) {
+        this.logger.debug(
+          {
+            positionId,
+            mint: position.token.mint,
+            noRouteSellFailureCount: position.noRouteSellFailureCount,
+            elapsedMs,
+            backoffMs,
+          },
+          'Deferring SELL retry — exponential backoff window for a prior permanent-route failure has not elapsed yet.',
+        );
+        return { closed: false as const };
+      }
     }
 
     const institutionalActive =

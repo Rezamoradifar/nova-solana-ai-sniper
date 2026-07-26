@@ -428,6 +428,14 @@ export const envSchema = z.object({
   // attempts for it (see Position.sellUnsellable in schema.prisma).
   SELL_MAX_PERMANENT_ROUTE_RETRIES: z.coerce.number().int().positive().default(3),
 
+  // NO_SELL_ROUTE fix (2026-07-26, Phase 6): exponential backoff between
+  // permanent (no-route) SELL retries — see sellRetryBackoff.ts. Before this,
+  // every attempt up to SELL_MAX_PERMANENT_ROUTE_RETRIES fired on the very
+  // next price tick with zero delay. Base is the wait after the 1st failure;
+  // it doubles each subsequent failure, capped at Max.
+  SELL_PERMANENT_RETRY_BACKOFF_BASE_MS: z.coerce.number().int().positive().default(60_000),
+  SELL_PERMANENT_RETRY_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(1_800_000),
+
   // DepositMonitor — polls every active wallet's live SOL balance and records
   // an increase as a DEPOSIT ledger/audit event (see
   // packages/shared/src/wallet/balanceLedger.ts). Defaults on: deposits are

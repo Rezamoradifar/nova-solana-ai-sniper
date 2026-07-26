@@ -92,6 +92,8 @@ export const apiEnvSchema = envSchema.pick({
   BUNDLE_CLUSTER_MIN_SUPPLY_PERCENT: true,
   EXTREME_PUMP_H1_THRESHOLD_PERCENT: true,
   SELL_MAX_PERMANENT_ROUTE_RETRIES: true,
+  SELL_PERMANENT_RETRY_BACKOFF_BASE_MS: true,
+  SELL_PERMANENT_RETRY_BACKOFF_MAX_MS: true,
 });
 
 export function loadApiEnv() {
