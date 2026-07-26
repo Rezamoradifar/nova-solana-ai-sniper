@@ -7,51 +7,29 @@ import {
   evaluateCriticalSecurityGate,
 } from '../trading/criticalSecurityGate.js';
 import { checkSellability, isTransientQuoteError } from '../trading/sellabilityCheck.js';
+import { checkMintBlacklist } from '../trading/mintBlacklist.js';
 import type { JupiterClient } from '../solana/jupiter.js';
 import { SOL_MINT } from '../solana/jupiter.js';
-import { TtlCache } from '../lib/ttlCache.js';
+import { securityGateStats } from './securityGateStats.js';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
 /**
- * Telegram rejection-alert dedupe (2026-07-22 audit): before this, every
- * single candidatePipeline rejection sent a Telegram alert, even for a mint
- * that had already been reported minutes (or seconds) ago with the exact
- * same reasons — a launch that keeps getting re-evaluated (repeated WS
- * events, a retried queue item) spammed the same "BUY CANCELLED" message
- * over and over. Keyed on mint + the exact sorted reason set, so a genuine
- * state change (e.g. holder data resolving from unknown to a real number, or
- * liquidity source flipping to dexscreener) is a different key and still
- * alerts — only a truly repeated, unchanged verdict is suppressed.
+ * Section 8 audit (2026-07-23, "excessive Telegram alerts" incident): before
+ * this, every unique (mint, reason-set) rejection sent an individual
+ * Telegram alert (deduped only by a 30-minute TTL, not suppressed outright) —
+ * with real production traffic that's still a constant stream of "🚨 Error in
+ * critical security gate" pings for completely normal gate behavior (a token
+ * correctly not being bought), not a system error. Every rejection is now
+ * recorded into securityGateStats instead — a periodic 15-minute summary
+ * (securityGateSummaryReporter.ts) reports the aggregate to Telegram; nothing
+ * here sends an individual message anymore. `notifier` is no longer used by
+ * this module at all, but stays part of CandidatePipelineDeps unchanged
+ * (worker.ts still passes it; a future genuinely-immediate alert here would
+ * need it).
  */
-const REJECTION_ALERT_DEDUP_TTL_MS = 30 * 60 * 1000;
-const rejectionAlertCache = new TtlCache<string>(REJECTION_ALERT_DEDUP_TTL_MS);
-
-/** Test-only: clears the dedup cache so tests never leak state into each
- * other — same convention as resilientConnection.ts's counter/cooldown
- * registries. */
-export function resetRejectionAlertDedupCache(): void {
-  rejectionAlertCache.clear();
-}
-
-function rejectionAlertKey(mint: string, reasons: string[]): string {
-  return `${mint}|${[...reasons].sort().join(',')}`;
-}
-
-/** Fire-and-forget, deduped — never awaited by a caller that needs the alert
- * to have been sent; a Telegram send stalling must never delay pipeline
- * throughput. */
-function notifyRejectionOnce(
-  notifier: NotificationService | undefined,
-  mint: string,
-  reasons: string[],
-  message: string,
-  title: string,
-): void {
-  const key = rejectionAlertKey(mint, reasons);
-  if (rejectionAlertCache.has(key)) return;
-  rejectionAlertCache.add(key);
-  void notifier?.notifyError(title, message);
+function recordRejection(reasons: string[]): void {
+  securityGateStats.recordBlocked(reasons);
 }
 
 /** Same representative trade size the old autoTrader.ts pre-check used — see
@@ -71,12 +49,9 @@ const SELLABILITY_CHECK_NOTIONAL_SOL = 0.1;
  * designed. This set is exactly the reasons that mean "couldn't verify yet"
  * (an UNKNOWN state, or a request-level failure) rather than "verified bad" —
  * see criticalSecurityGate.ts's own SAFE/UNSAFE/UNKNOWN breakdown, which this
- * mirrors. A rejection is only worth retrying if every one of its reasons is
- * in this set; a single confirmed-bad reason (honeypot_suspected,
- * lp_not_locked_or_burned, deployer_blacklisted, ...) still rejects for good,
- * exactly as before — this never loosens what the 2026-07-22 audit fixed.
+ * mirrors.
  */
-const RETRYABLE_REJECTION_REASONS = new Set([
+const DATA_UNAVAILABLE_REJECTION_REASONS = new Set([
   'dexscreener_validation_failed',
   'holder_data_unknown',
   'mint_authority_unknown',
@@ -84,7 +59,47 @@ const RETRYABLE_REJECTION_REASONS = new Set([
   'honeypot_check_unknown',
   'risk_analysis_failed',
   'deployer_check_failed',
+  'mint_check_failed',
   'sellability_check_failed',
+]);
+
+/**
+ * Follow-up audit (2026-07-23, "excessive rejections" incident): a 22-hour
+ * production log sample showed 189 distinct rejected mints, 92% of them
+ * failing `dexscreener_validation_failed` and 91.5% `honeypot_suspected` —
+ * and of the 15 that *did* enter the (then 60-second) retry window above,
+ * zero ever resolved to a pass. Cross-referencing riskFlags on those
+ * rejections: `holder_concentration_critical`/`holder_count_critical` fire
+ * because a token seconds old genuinely has almost no holders yet (the
+ * on-chain reading is real, not unknown), and `honeypot_suspected` very
+ * commonly fires purely because bonding-curve liquidity hasn't accumulated
+ * past the $500 floor yet (riskAnalyzer.ts's isHoneypotSuspected) — both are
+ * real, resolved readings of a token that is simply too young to have
+ * revealed itself, not confirmed fraud. `lp_not_locked_or_burned` is the same
+ * story at zero liquidity. None of these are removed as gate criteria and
+ * none of their thresholds change — a token that still fails them once it's
+ * had real time to trade is rejected for good, exactly as before. Retrying
+ * them is provably safe, not a weakening: the full pipeline (including this
+ * exact gate) always re-runs before any buy, so nothing new is ever accepted
+ * that wouldn't have passed anyway — the only thing that changes is how long
+ * we wait, on a token that hasn't yet had the chance to prove itself either
+ * way, before giving up. `mint_authority_not_revoked`/
+ * `freeze_authority_not_revoked` (the *confirmed*, non-`_unknown` variants),
+ * `deployer_blacklisted`, `mint_blacklisted`, `no_sell_route`, and every
+ * holder-clustering reason are deliberately EXCLUDED — those describe a
+ * structural property that time alone does not change, so they keep
+ * rejecting for good on the very first attempt.
+ */
+const AGE_DEPENDENT_REJECTION_REASONS = new Set([
+  'holder_concentration_critical',
+  'holder_count_critical',
+  'honeypot_suspected',
+  'lp_not_locked_or_burned',
+]);
+
+const RETRYABLE_REJECTION_REASONS = new Set([
+  ...DATA_UNAVAILABLE_REJECTION_REASONS,
+  ...AGE_DEPENDENT_REJECTION_REASONS,
 ]);
 
 /** Empty `reasons` (nothing rejected) is not "retryable" — there's nothing to
@@ -174,24 +189,35 @@ export async function runCandidatePipeline(
 ): Promise<CandidatePipelineResult> {
   const analysisStartedAt = Date.now();
 
-  const [riskFlagsResult, deployerBlacklistResult, forwardQuoteResult] = await Promise.allSettled([
-    deps.riskAnalyzer.analyze({
-      mint: candidate.mint,
-      dex: candidate.dex,
-      poolAddress: candidate.poolAddress,
-    }),
-    candidate.deployerAddress === undefined
-      ? Promise.resolve(undefined)
-      : deps.prisma.blacklistEntry.findUnique({
-          where: { type_value: { type: 'DEPLOYER', value: candidate.deployerAddress } },
-        }),
-    deps.jupiter.getQuote({
-      inputMint: SOL_MINT,
-      outputMint: candidate.mint,
-      amountLamports: BigInt(Math.floor(SELLABILITY_CHECK_NOTIONAL_SOL * LAMPORTS_PER_SOL)),
-      slippageBps: 300,
-    }),
-  ]);
+  const [riskFlagsResult, deployerBlacklistResult, mintBlacklistResult, forwardQuoteResult] =
+    await Promise.allSettled([
+      deps.riskAnalyzer.analyze({
+        mint: candidate.mint,
+        dex: candidate.dex,
+        poolAddress: candidate.poolAddress,
+        deployerAddress: candidate.deployerAddress,
+      }),
+      candidate.deployerAddress === undefined
+        ? Promise.resolve(undefined)
+        : deps.prisma.blacklistEntry.findUnique({
+            where: { type_value: { type: 'DEPLOYER', value: candidate.deployerAddress } },
+          }),
+      // Blacklist consistency fix (2026-07-23 USOH incident follow-up): this
+      // mint check previously only ran inline in worker.ts's
+      // handleTelegramSignal — an on-chain-detected candidate reaching this
+      // pipeline directly (runCandidateThroughPipeline) never checked the
+      // MINT blacklist at all, so a MINT entry added during incident response
+      // only blocked re-processing via Telegram, not on-chain detection.
+      // Both paths now go through checkMintBlacklist, so this is a single
+      // source of truth regardless of discovery source.
+      checkMintBlacklist(deps.prisma, candidate.mint),
+      deps.jupiter.getQuote({
+        inputMint: SOL_MINT,
+        outputMint: candidate.mint,
+        amountLamports: BigInt(Math.floor(SELLABILITY_CHECK_NOTIONAL_SOL * LAMPORTS_PER_SOL)),
+        slippageBps: 300,
+      }),
+    ]);
 
   const dexValidatedAt = Date.now();
 
@@ -210,6 +236,16 @@ export async function runCandidatePipeline(
 
   const criticalGate = evaluateCriticalSecurityGate(riskFlags);
   const reasons = [...criticalGate.reasons];
+
+  if (mintBlacklistResult.status === 'rejected') {
+    deps.logger.warn(
+      { mint: candidate.mint, err: mintBlacklistResult.reason },
+      'candidatePipeline: mint blacklist lookup failed — failing closed',
+    );
+    reasons.push('mint_check_failed');
+  } else if (mintBlacklistResult.value.blacklisted) {
+    reasons.push('mint_blacklisted');
+  }
 
   if (candidate.deployerAddress !== undefined) {
     if (deployerBlacklistResult.status === 'rejected') {
@@ -248,15 +284,9 @@ export async function runCandidatePipeline(
         location:
           'apps/api/src/detection/candidatePipeline.ts:runCandidatePipeline (critical security gate)',
       },
-      `BUY CANCELLED — CRITICAL SECURITY GATE\nReasons:\n${reasons.join(', ')}`,
+      `SECURITY GATE BLOCKED CANDIDATE\nReasons:\n${reasons.join(', ')}`,
     );
-    notifyRejectionOnce(
-      deps.notifier,
-      candidate.mint,
-      reasons,
-      `Auto-buy blocked for ${candidate.mint}: ${reasons.join(', ')}`,
-      'critical security gate',
-    );
+    recordRejection(reasons);
     return {
       passed: false,
       reasons,
@@ -280,15 +310,9 @@ export async function runCandidatePipeline(
         location:
           'apps/api/src/detection/candidatePipeline.ts:runCandidatePipeline (sellability check)',
       },
-      `BUY CANCELLED — PRE-BUY SELLABILITY CHECK\nReason:\n${forwardReason}`,
+      `SECURITY GATE BLOCKED CANDIDATE — PRE-BUY SELLABILITY CHECK\nReason:\n${forwardReason}`,
     );
-    notifyRejectionOnce(
-      deps.notifier,
-      candidate.mint,
-      [forwardReason],
-      `Auto-buy blocked for ${candidate.mint}: ${forwardReason}`,
-      'pre-buy sellability check',
-    );
+    recordRejection([forwardReason]);
     return {
       passed: false,
       reasons: [forwardReason],
@@ -315,15 +339,9 @@ export async function runCandidatePipeline(
         location:
           'apps/api/src/detection/candidatePipeline.ts:runCandidatePipeline (sellability check)',
       },
-      `BUY CANCELLED — PRE-BUY SELLABILITY CHECK\nReason:\n${sellability.reason}`,
+      `SECURITY GATE BLOCKED CANDIDATE — PRE-BUY SELLABILITY CHECK\nReason:\n${sellability.reason}`,
     );
-    notifyRejectionOnce(
-      deps.notifier,
-      candidate.mint,
-      [sellability.reason ?? 'no_sell_route'],
-      `Auto-buy blocked for ${candidate.mint}: ${sellability.reason}`,
-      'pre-buy sellability check',
-    );
+    recordRejection([sellability.reason ?? 'no_sell_route']);
     return {
       passed: false,
       reasons: [sellability.reason ?? 'no_sell_route'],
@@ -332,6 +350,7 @@ export async function runCandidatePipeline(
     };
   }
 
+  securityGateStats.recordPassed();
   return {
     passed: true,
     riskFlags,

@@ -4,7 +4,10 @@ import type { Redis } from 'ioredis';
 import {
   getKillSwitchState,
   getOrCreateBusinessSettings,
+  getScannerAutoBuyPauseReason,
+  getScannerAutoBuyPauseState,
   setKillSwitchState,
+  setScannerAutoBuyPauseState,
   type Logger,
 } from '@nova/shared';
 
@@ -91,6 +94,39 @@ export function registerAdminCommands(
     const active = await getKillSwitchState(redis);
     await ctx.reply(
       `Kill switch is currently ${active ? '🚨 ACTIVE (new trades blocked)' : '✅ inactive'}.\n\nUsage: /killswitch on | off`,
+    );
+  });
+
+  // Recurring pump.fun outage follow-up (2026-07-23): scannerHealth.ts sets this
+  // Redis flag automatically the moment launch detection is confirmed fully
+  // down (every source unhealthy) — narrower than the kill switch above (blocks
+  // NEW auto-buys only; SELL/TP/SL and existing position monitoring are never
+  // affected). By design this does NOT auto-clear when detection recovers
+  // (unless SCANNER_AUTO_BUY_AUTO_RESUME_ENABLED is explicitly set) — an admin
+  // must confirm it's safe to resume auto-buying via this command.
+  bot.command('resumeautobuy', admin, async (ctx) => {
+    const arg = String(ctx.match).trim().toLowerCase();
+
+    if (arg === 'off' || arg === 'resume') {
+      await setScannerAutoBuyPauseState(redis, false);
+      logger.warn(
+        { adminId: ctx.from?.id },
+        'admin manually resumed auto-buy after scanner outage',
+      );
+      await ctx.reply('✅ Auto-buy resumed — new launches will be evaluated again.');
+      return;
+    }
+    if (arg === 'on' || arg === 'pause') {
+      await setScannerAutoBuyPauseState(redis, true, 'manually paused by admin');
+      logger.warn({ adminId: ctx.from?.id }, 'admin manually paused auto-buy');
+      await ctx.reply('⏸️ Auto-buy paused — existing positions are unaffected.');
+      return;
+    }
+
+    const active = await getScannerAutoBuyPauseState(redis);
+    const reason = active ? await getScannerAutoBuyPauseReason(redis) : undefined;
+    await ctx.reply(
+      `Auto-buy is currently ${active ? `⏸️ PAUSED${reason ? ` (${reason})` : ''}` : '✅ active'}.\n\nUsage: /resumeautobuy on | off`,
     );
   });
 

@@ -41,14 +41,22 @@ export default async function metricsRoutes(fastify: FastifyInstance) {
       },
       discoverySourceHealth: fastify.sourceHealthMonitor?.snapshot() ?? {},
       webSocketSubscriptions: {
-        // Every real-time discovery source (pump.fun + the 4 native DEXs) binds
-        // its onLogs subscription to the primary provider only (see
+        // The 4 native DEX scanners (PumpSwap/Raydium/Orca/Meteora) still bind
+        // their onLogs subscription to the primary provider only (see
         // resilientConnection.ts's SUBSCRIPTION_METHODS doc comment) — reported
         // as connected once the worker has started, since a dropped underlying
         // socket surfaces as discoverySourceHealth going silent, not as a
         // distinct connection-state flag today.
         status: fastify.sourceHealthMonitor ? 'connected' : 'not_started',
+        // Recurring pump.fun outage follow-up (2026-07-23): pump.fun itself now
+        // has real per-provider health/reconnect visibility instead of the
+        // generic placeholder above — see PumpFunMonitor.getHealth().
+        pumpfun: fastify.pumpFunMonitor?.getHealth() ?? null,
       },
+      // Fallback launch discovery + overall scanner health state — see
+      // fallbackLaunchDiscovery.ts / scannerHealth.ts.
+      fallbackLaunchDiscovery: fastify.fallbackLaunchDiscovery?.getHealth() ?? null,
+      scannerHealth: fastify.scannerHealthCoordinator?.snapshot() ?? null,
     };
   });
 }

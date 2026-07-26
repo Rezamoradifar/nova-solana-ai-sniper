@@ -123,6 +123,89 @@ export interface ReferralEarnedNotification {
   sourceSymbol: string;
 }
 
+/**
+ * Section 8 audit (2026-07-23, "excessive Telegram alerts" incident) — the
+ * periodic replacement for what used to be one individual alert per rejected
+ * candidate. Sent by securityGateSummaryReporter.ts on a fixed interval
+ * (default 15 minutes), never per-candidate.
+ */
+export interface SecurityGateSummaryReport {
+  candidatesScanned: number;
+  passedSecurity: number;
+  /** Live snapshot at report time (currently sitting in a retry backoff),
+   * not a count of events during the window — see securityGateStats.ts. */
+  pendingVerification: number;
+  blocked: number;
+  /** Raw reason code -> count for this window, e.g. `honeypot_suspected: 20`. */
+  blockedReasonCounts: Record<string, number>;
+  aiConsensusRejected: number;
+  providerUnavailableCount: number;
+  averageVerificationLatencyMs?: number;
+  retrySuccessRate?: number;
+}
+
+/** Human-readable labels for the raw reason codes candidatePipeline.ts/
+ * criticalSecurityGate.ts produce — falls back to the raw code (escaped) for
+ * anything not in this list, so a new reason added later never goes missing
+ * from the report, just unstyled. */
+const SECURITY_GATE_REASON_LABELS: Record<string, string> = {
+  honeypot_suspected: 'Confirmed honeypot signal',
+  honeypot_check_unknown: 'Honeypot check unavailable',
+  holder_concentration_critical: 'Holder concentration critical',
+  holder_count_critical: 'Holder count critical',
+  holder_data_unknown: 'Holder data unavailable',
+  bundled_wallet_cluster_detected: 'Bundled wallets detected',
+  dexscreener_validation_failed: 'DexScreener validation unavailable/pending',
+  lp_not_locked_or_burned: 'No liquidity resolved yet',
+  mint_authority_not_revoked: 'Mint authority not revoked',
+  mint_authority_unknown: 'Mint authority check unavailable',
+  freeze_authority_not_revoked: 'Freeze authority not revoked',
+  freeze_authority_unknown: 'Freeze authority check unavailable',
+  deployer_blacklisted: 'Deployer blacklisted',
+  mint_blacklisted: 'Mint blacklisted',
+  deployer_check_failed: 'Deployer blacklist check failed',
+  mint_check_failed: 'Mint blacklist check failed',
+  no_sell_route: 'No sell route',
+  sellability_check_failed: 'Sellability check unavailable',
+  exit_price_impact_too_high: 'Sell price impact too high',
+  risk_analysis_failed: 'Risk analysis failed',
+};
+
+/** Pure so it's independently unit-tested, same convention as every other
+ * format*Message function in this file. Not localized (same convention as
+ * formatErrorMessage/notifyError below) — this is an owner-only ops report,
+ * not a user-facing trading alert. */
+export function formatSecurityGateSummaryMessage(report: SecurityGateSummaryReport): string {
+  const reasonLines = Object.entries(report.blockedReasonCounts)
+    .sort(([, a], [, b]) => b - a)
+    .map(
+      ([reason, count]) => `${SECURITY_GATE_REASON_LABELS[reason] ?? escapeMd(reason)}: ${count}`,
+    )
+    .join('\n');
+
+  const latencyLine =
+    report.averageVerificationLatencyMs !== undefined
+      ? `\nAvg verification latency: ${(report.averageVerificationLatencyMs / 1000).toFixed(1)}s`
+      : '';
+  const retryLine =
+    report.retrySuccessRate !== undefined
+      ? `\nRetry success rate: ${(report.retrySuccessRate * 100).toFixed(0)}%`
+      : '';
+  const consensusLine =
+    report.aiConsensusRejected > 0 ? `\nAI consensus rejected: ${report.aiConsensusRejected}` : '';
+
+  return (
+    `🛡️ *Security Gate Summary* — Last 15 minutes\n\n` +
+    `Candidates scanned: ${report.candidatesScanned}\n` +
+    `Passed security: ${report.passedSecurity}\n` +
+    `Pending verification: ${report.pendingVerification}\n` +
+    `Blocked: ${report.blocked}\n` +
+    `Provider unavailable: ${report.providerUnavailableCount}` +
+    `${consensusLine}${latencyLine}${retryLine}\n\n` +
+    `${reasonLines.length > 0 ? `Reasons:\n${reasonLines}` : ''}`
+  ).trim();
+}
+
 /** `https://dexscreener.com/solana/{mint}` — the one chart-link format used everywhere. */
 export function buildDexScreenerLink(mint: string): string {
   return `https://dexscreener.com/solana/${mint}`;
@@ -507,6 +590,13 @@ export class NotificationService {
     // otherwise break Telegram's legacy Markdown parser and silently swallow the
     // one alert an operator relies on to notice something is broken.
     await this.sendToOwner(`🚨 *Error* in ${escapeMd(context)}\n${escapeMd(message)}`);
+  }
+
+  /** Owner-only, same convention as notifyError/notifySocialMention — an
+   * operational/ops signal, not a per-user trading alert. See
+   * securityGateSummaryReporter.ts, which calls this on a fixed interval. */
+  async notifySecurityGateSummary(report: SecurityGateSummaryReport): Promise<void> {
+    await this.sendToOwner(formatSecurityGateSummaryMessage(report));
   }
 
   async notifySocialMention(text: string, tweetId: string): Promise<void> {

@@ -1,13 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RiskFlags } from '@nova/shared';
-import {
-  isRetryableRejection,
-  resetRejectionAlertDedupCache,
-  runCandidatePipeline,
-} from './candidatePipeline.js';
+import { isRetryableRejection, runCandidatePipeline } from './candidatePipeline.js';
+import { securityGateStats } from './securityGateStats.js';
 
 beforeEach(() => {
-  resetRejectionAlertDedupCache();
+  securityGateStats.resetForTests();
 });
 
 function fakeLogger() {
@@ -44,9 +41,28 @@ function fakeSellableJupiter() {
   } as never;
 }
 
-function fakePrisma(blacklistMatch: unknown = null) {
+/** Argument-aware fake — MINT and DEPLOYER blacklist lookups must be
+ * independently controllable now that runCandidatePipeline checks both. */
+function fakePrisma(opts: { deployerBlacklist?: unknown; mintBlacklist?: unknown } = {}) {
   return {
-    blacklistEntry: { findUnique: vi.fn().mockResolvedValue(blacklistMatch) },
+    blacklistEntry: {
+      findUnique: vi
+        .fn()
+        .mockImplementation(({ where }: { where: { type_value: { type: string } } }) => {
+          if (where.type_value.type === 'MINT') return Promise.resolve(opts.mintBlacklist ?? null);
+          if (where.type_value.type === 'DEPLOYER')
+            return Promise.resolve(opts.deployerBlacklist ?? null);
+          return Promise.resolve(null);
+        }),
+    },
+  } as never;
+}
+
+/** Same shape, but the mock throws for any lookup — used by tests that need
+ * a lookup failure independent of which blacklist type triggers it. */
+function fakePrismaThatThrows(err: Error) {
+  return {
+    blacklistEntry: { findUnique: vi.fn().mockRejectedValue(err) },
   } as never;
 }
 
@@ -62,19 +78,31 @@ describe('isRetryableRejection', () => {
     expect(isRetryableRejection(['mint_authority_unknown', 'freeze_authority_unknown'])).toBe(true);
     expect(isRetryableRejection(['risk_analysis_failed'])).toBe(true);
     expect(isRetryableRejection(['deployer_check_failed'])).toBe(true);
+    expect(isRetryableRejection(['mint_check_failed'])).toBe(true);
     expect(isRetryableRejection(['sellability_check_failed'])).toBe(true);
   });
 
-  it('is never retryable once even one reason is a confirmed-bad verdict', () => {
-    expect(isRetryableRejection(['honeypot_suspected'])).toBe(false);
-    expect(isRetryableRejection(['lp_not_locked_or_burned'])).toBe(false);
+  it('is never retryable once even one reason is a confirmed-bad, non-age-dependent verdict', () => {
     expect(isRetryableRejection(['deployer_blacklisted'])).toBe(false);
+    expect(isRetryableRejection(['mint_blacklisted'])).toBe(false);
     expect(isRetryableRejection(['no_sell_route'])).toBe(false);
-    expect(isRetryableRejection(['holder_concentration_critical'])).toBe(false);
-    // Mixed: one transient + one confirmed-bad reason must still reject for good.
-    expect(isRetryableRejection(['dexscreener_validation_failed', 'honeypot_suspected'])).toBe(
+    // Mixed: one transient + one confirmed-bad (non-age-dependent) reason must still reject for good.
+    expect(isRetryableRejection(['dexscreener_validation_failed', 'deployer_blacklisted'])).toBe(
       false,
     );
+  });
+
+  it('is retryable for age-dependent reasons (2026-07-23 follow-up audit: real but too-young-to-resolve readings)', () => {
+    expect(isRetryableRejection(['honeypot_suspected'])).toBe(true);
+    expect(isRetryableRejection(['lp_not_locked_or_burned'])).toBe(true);
+    expect(isRetryableRejection(['holder_concentration_critical'])).toBe(true);
+    expect(isRetryableRejection(['holder_count_critical'])).toBe(true);
+    // Mixed: one transient + one age-dependent reason is still fully retryable.
+    expect(isRetryableRejection(['dexscreener_validation_failed', 'honeypot_suspected'])).toBe(
+      true,
+    );
+    // Mixed: one age-dependent + one confirmed-bad (structural) reason still rejects for good.
+    expect(isRetryableRejection(['honeypot_suspected', 'deployer_blacklisted'])).toBe(false);
   });
 
   it('is not retryable when there is nothing to reject', () => {
@@ -133,7 +161,9 @@ describe('runCandidatePipeline', () => {
       {
         riskAnalyzer: fakeRiskAnalyzer(safeFlags()),
         jupiter: fakeSellableJupiter(),
-        prisma: fakePrisma({ id: 'bl-1', type: 'DEPLOYER', value: 'BadDeployer111' }),
+        prisma: fakePrisma({
+          deployerBlacklist: { id: 'bl-1', type: 'DEPLOYER', value: 'BadDeployer111' },
+        }),
         logger: fakeLogger(),
       },
       { ...CANDIDATE, deployerAddress: 'BadDeployer111' },
@@ -148,7 +178,7 @@ describe('runCandidatePipeline', () => {
       {
         riskAnalyzer: fakeRiskAnalyzer(safeFlags()),
         jupiter: fakeSellableJupiter(),
-        prisma: fakePrisma(null),
+        prisma: fakePrisma(),
         logger: fakeLogger(),
       },
       { ...CANDIDATE, deployerAddress: 'GoodDeployer111' },
@@ -157,7 +187,7 @@ describe('runCandidatePipeline', () => {
     expect(result.passed).toBe(true);
   });
 
-  it('a missing/unresolved deployer address passes through — not a fail-closed skip (deny-list check, not a token-risk signal)', async () => {
+  it('a missing/unresolved deployer address passes through — not a fail-closed skip (deny-list check, not a token-risk signal); the MINT check still runs regardless', async () => {
     const prisma = fakePrisma();
     const result = await runCandidatePipeline(
       {
@@ -170,16 +200,19 @@ describe('runCandidatePipeline', () => {
     );
 
     expect(result.passed).toBe(true);
-    expect(
-      (prisma as { blacklistEntry: { findUnique: ReturnType<typeof vi.fn> } }).blacklistEntry
-        .findUnique,
-    ).not.toHaveBeenCalled();
+    const findUnique = (prisma as { blacklistEntry: { findUnique: ReturnType<typeof vi.fn> } })
+      .blacklistEntry.findUnique;
+    // The MINT blacklist check is unconditional (runs for every candidate —
+    // see mintBlacklist.test.ts), but no DEPLOYER-type lookup should have
+    // been attempted since no deployer address was ever available.
+    expect(findUnique).toHaveBeenCalledTimes(1);
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { type_value: { type: 'MINT', value: CANDIDATE.mint } },
+    });
   });
 
   it('fails closed when the deployer blacklist lookup itself errors (distinct from an unresolved address)', async () => {
-    const prisma = {
-      blacklistEntry: { findUnique: vi.fn().mockRejectedValue(new Error('db down')) },
-    } as never;
+    const prisma = fakePrismaThatThrows(new Error('db down'));
     const result = await runCandidatePipeline(
       {
         riskAnalyzer: fakeRiskAnalyzer(safeFlags()),
@@ -191,7 +224,43 @@ describe('runCandidatePipeline', () => {
     );
 
     expect(result.passed).toBe(false);
-    if (!result.passed) expect(result.reasons).toContain('deployer_check_failed');
+    if (!result.passed) {
+      expect(result.reasons).toContain('deployer_check_failed');
+      // The MINT lookup (same fake, unconditional) also fails closed.
+      expect(result.reasons).toContain('mint_check_failed');
+    }
+  });
+
+  it('blocks a blacklisted mint even when every other check (and the deployer) passes — the fix for the USOH-incident blacklist gap', async () => {
+    const result = await runCandidatePipeline(
+      {
+        riskAnalyzer: fakeRiskAnalyzer(safeFlags()),
+        jupiter: fakeSellableJupiter(),
+        prisma: fakePrisma({
+          mintBlacklist: { id: 'bl-2', type: 'MINT', value: CANDIDATE.mint, reason: 'incident' },
+        }),
+        logger: fakeLogger(),
+      },
+      CANDIDATE,
+    );
+
+    expect(result.passed).toBe(false);
+    if (!result.passed) expect(result.reasons).toContain('mint_blacklisted');
+  });
+
+  it('fails closed when the mint blacklist lookup itself errors', async () => {
+    const result = await runCandidatePipeline(
+      {
+        riskAnalyzer: fakeRiskAnalyzer(safeFlags()),
+        jupiter: fakeSellableJupiter(),
+        prisma: fakePrismaThatThrows(new Error('db down')),
+        logger: fakeLogger(),
+      },
+      CANDIDATE,
+    );
+
+    expect(result.passed).toBe(false);
+    if (!result.passed) expect(result.reasons).toContain('mint_check_failed');
   });
 
   it('fails closed (never a false pass) when riskAnalyzer.analyze throws', async () => {
@@ -250,7 +319,7 @@ describe('runCandidatePipeline', () => {
     if (!result.passed) expect(result.reasons).toContain('exit_price_impact_too_high');
   });
 
-  it('sends a notifyError alert including the mint when the critical gate blocks', async () => {
+  it('does not send an individual Telegram alert when the critical gate blocks (Section 8: aggregated summary only)', async () => {
     const notifyError = vi.fn().mockResolvedValue(undefined);
     await runCandidatePipeline(
       {
@@ -263,52 +332,21 @@ describe('runCandidatePipeline', () => {
       CANDIDATE,
     );
 
-    expect(notifyError).toHaveBeenCalledTimes(1);
-    expect(notifyError.mock.calls[0]![1]).toContain('MintABC');
+    expect(notifyError).not.toHaveBeenCalled();
   });
 
-  it('does not re-send a Telegram alert for the same mint + same rejection reasons on a repeat evaluation', async () => {
-    const notifyError = vi.fn().mockResolvedValue(undefined);
+  it('records every rejection into securityGateStats, even repeat evaluations of the same mint', async () => {
     const deps = {
       riskAnalyzer: fakeRiskAnalyzer(safeFlags({ isHoneypotSuspected: true })),
       jupiter: fakeSellableJupiter(),
       prisma: fakePrisma(),
       logger: fakeLogger(),
-      notifier: { notifyError } as never,
     };
 
     await runCandidatePipeline(deps, CANDIDATE);
     await runCandidatePipeline(deps, CANDIDATE);
     await runCandidatePipeline(deps, CANDIDATE);
 
-    expect(notifyError).toHaveBeenCalledTimes(1);
-  });
-
-  it('sends a fresh alert when the same mint later fails for a different reason (security state actually changed)', async () => {
-    const notifyError = vi.fn().mockResolvedValue(undefined);
-    const logger = fakeLogger();
-
-    await runCandidatePipeline(
-      {
-        riskAnalyzer: fakeRiskAnalyzer(safeFlags({ isHoneypotSuspected: true })),
-        jupiter: fakeSellableJupiter(),
-        prisma: fakePrisma(),
-        logger,
-        notifier: { notifyError } as never,
-      },
-      CANDIDATE,
-    );
-    await runCandidatePipeline(
-      {
-        riskAnalyzer: fakeRiskAnalyzer(safeFlags({ mintAuthorityRevoked: false })),
-        jupiter: fakeSellableJupiter(),
-        prisma: fakePrisma(),
-        logger,
-        notifier: { notifyError } as never,
-      },
-      CANDIDATE,
-    );
-
-    expect(notifyError).toHaveBeenCalledTimes(2);
+    expect(securityGateStats.snapshotAndReset().blockedReasonCounts['honeypot_suspected']).toBe(3);
   });
 });
