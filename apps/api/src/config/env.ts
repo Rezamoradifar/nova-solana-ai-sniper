@@ -41,6 +41,8 @@ export const apiEnvSchema = envSchema.pick({
   GEMINI_API_KEY: true,
   OPENROUTER_API_KEY: true,
   OPENROUTER_MODEL: true,
+  OLLAMA_HOST: true,
+  OLLAMA_MODEL: true,
   TELEGRAM_BOT_TOKEN: true,
   TELEGRAM_CHAT_ID: true,
   TWITTER_BEARER_TOKEN: true,
