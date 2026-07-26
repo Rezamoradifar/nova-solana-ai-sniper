@@ -137,8 +137,20 @@ export class PriceMonitor {
     if (this.ticking) return;
     this.ticking = true;
     try {
+      // NO_SELL_ROUTE fix (2026-07-26, Phase 6): a position marked
+      // sellUnsellable is archived from active monitoring — PositionManager
+      // has already given up on it after maxPermanentRouteRetries consecutive
+      // no-route failures and a human alert has already gone out (see
+      // PositionManager.recordPermanentSellFailure). Before this exclusion,
+      // such a position still cost a full tick's worth of work forever (a
+      // wallet-balance RPC read, a DexScreener price fetch, a liquidity probe,
+      // evaluateExit) even though the one thing that work could lead to — an
+      // actual sell attempt — was already unconditionally skipped deeper in
+      // checkAndMaybeClose. status stays OPEN (it still holds real tokens and
+      // must keep counting toward portfolio value / per-wallet position
+      // limits — see safety.ts), only the monitoring loop stops touching it.
       const openPositions = await this.deps.prisma.position.findMany({
-        where: { status: 'OPEN' },
+        where: { status: 'OPEN', sellUnsellable: false },
         include: { token: true, wallet: true },
       });
 

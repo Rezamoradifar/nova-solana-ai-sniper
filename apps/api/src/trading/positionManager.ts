@@ -516,7 +516,7 @@ export class PositionManager {
     );
     await this.notifier?.notifyError(
       'Position marked unsellable — no Jupiter route',
-      `Position ${positionId} (${symbolOrMint}) failed to sell ${updated.noRouteSellFailureCount} consecutive times because no Jupiter (or fallback) route exists for this mint [${classification.category}]. Stop-loss/take-profit/trailing-stop auto-sell is now permanently disabled for this position — manual intervention required.`,
+      `Position ${positionId} (${symbolOrMint}) failed to sell ${updated.noRouteSellFailureCount} consecutive times because no Jupiter (or fallback) route exists for this mint [${classification.category}]. Stop-loss/take-profit/trailing-stop auto-sell is now permanently disabled and this position is archived from active price monitoring — manual intervention required. This is a one-time alert; it will not repeat for this position.`,
     );
     eventBus.publish('position.updated', { positionId, status: 'OPEN' });
   }

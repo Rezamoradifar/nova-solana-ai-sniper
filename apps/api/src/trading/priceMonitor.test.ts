@@ -410,6 +410,19 @@ describe('PriceMonitor — concurrent position processing (2026-07-23 USOH incid
   });
 });
 
+describe('PriceMonitor — stop monitoring archived (sellUnsellable) positions (2026-07-26, Phase 6 NO_SELL_ROUTE fix)', () => {
+  it("tick's position query excludes sellUnsellable positions, so an archived position is never fetched, priced, or evaluated again", async () => {
+    const deps = buildDeps({}, []);
+    const monitor = new PriceMonitor(deps);
+
+    await monitor.tick();
+
+    expect(deps.prisma.position.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { status: 'OPEN', sellUnsellable: false } }),
+    );
+  });
+});
+
 describe('PriceMonitor — emergency liquidity-deterioration detection (2026-07-23, requirement #12)', () => {
   it('immediately alerts on a detected liquidity collapse (requirement #9)', async () => {
     const position = fakePosition({

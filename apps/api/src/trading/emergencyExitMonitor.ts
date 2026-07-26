@@ -53,8 +53,15 @@ export class EmergencyExitMonitor {
     if (this.ticking) return;
     this.ticking = true;
     try {
+      // NO_SELL_ROUTE fix (2026-07-26, Phase 6): same exclusion as
+      // priceMonitor.ts's tick — a sellUnsellable position is archived from
+      // active monitoring (PositionManager has already given up on it after
+      // maxPermanentRouteRetries consecutive no-route failures), so there's
+      // no point spending a fresh riskAnalyzer.analyze + Jupiter quote on it
+      // every tick when any resulting closePosition call would just be
+      // rejected by PositionManager's own sellUnsellable gate anyway.
       const positions = await this.deps.prisma.position.findMany({
-        where: { status: 'OPEN', institutionalModeEnabled: true },
+        where: { status: 'OPEN', institutionalModeEnabled: true, sellUnsellable: false },
         include: { token: true, wallet: true },
       });
 
