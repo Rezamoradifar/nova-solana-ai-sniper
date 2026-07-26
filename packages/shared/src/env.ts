@@ -340,6 +340,24 @@ export const envSchema = z.object({
   // calls are rate-limited/cost-sensitive in a way plain RPC/HTTP reads aren't.
   DISCOVERY_QUEUE_CONCURRENCY: z.coerce.number().int().positive().default(8),
   AI_QUEUE_CONCURRENCY: z.coerce.number().int().positive().default(3),
+
+  // Massive Scanner Scalability (Phase 2, 2026-07-26): ScannerConcurrencyGovernor
+  // periodically re-tunes discoveryQueue's concurrency between these bounds
+  // instead of leaving it fixed at DISCOVERY_QUEUE_CONCURRENCY for the
+  // process's whole lifetime — scaling up while backlogged and RPC/event-loop
+  // are healthy, scaling down the moment either isn't. See
+  // dynamicConcurrency.ts / scannerConcurrencyGovernor.ts. Only ever governs
+  // discoveryQueue, never aiQueue — AI-provider rate limits are a distinct,
+  // untracked constraint this signal set doesn't model.
+  SCANNER_CONCURRENCY_GOVERNOR_ENABLED: booleanFlag(true),
+  SCANNER_CONCURRENCY_GOVERNOR_INTERVAL_MS: z.coerce.number().min(1_000).default(10_000),
+  SCANNER_CONCURRENCY_MIN: z.coerce.number().int().positive().default(2),
+  SCANNER_CONCURRENCY_MAX: z.coerce.number().int().positive().default(24),
+  // Node event-loop-delay p95 (ms) above which the single process (see
+  // ecosystem.config.cjs: `exec_mode: 'fork'`, `instances: 1` — everything
+  // runs in one process) is judged to be falling behind regardless of queue
+  // backlog or RPC health, and concurrency is cut regardless of those signals.
+  SCANNER_EVENT_LOOP_LAG_CEILING_MS: z.coerce.number().positive().default(200),
   // FAST PATH thresholds (see riskAnalyzer.ts's isFastPathCandidate): a
   // candidate whose recent (m5, falling back to h1) buys AND volume both
   // clear these gets queued ahead of ordinary candidates for the AI call —
