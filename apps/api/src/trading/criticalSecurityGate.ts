@@ -98,6 +98,20 @@ export function evaluateCriticalSecurityGate(riskFlags: RiskFlags): CriticalSecu
     }
   }
 
+  // Bundled-wallet / holder-clustering (2026-07-23 USOH incident follow-up):
+  // holderClustering.ts's analyzeHolderClustering runs in riskAnalyzer.ts
+  // alongside the aggregate top10/count checks above, but looks at the SHAPE
+  // of the distribution (near-identical balances across many wallets) rather
+  // than just its aggregate concentration — exactly the signal that let the
+  // incident token clear both checks above while 18 of its top 20 holders
+  // held an almost identical ~0.25% each. Confirmed UNSAFE always blocks,
+  // same as every other criterion in this gate; UNKNOWN (holder data itself
+  // never resolved — see holderDataUnknown, which already blocks separately)
+  // is deliberately NOT re-flagged here to avoid duplicating that reason.
+  if (riskFlags.holderClusteringState === 'UNSAFE') {
+    reasons.push(...(riskFlags.holderClusteringReasons ?? ['bundled_wallet_cluster_detected']));
+  }
+
   return { allowed: reasons.length === 0, reasons };
 }
 
@@ -111,6 +125,7 @@ export interface SecurityStateBreakdown {
   dexscreenerValidation: SecurityCheckState;
   holderConcentration: SecurityCheckState;
   holderCount: SecurityCheckState;
+  holderClustering: SecurityCheckState;
 }
 
 /**
@@ -150,5 +165,6 @@ export function classifySecurityState(riskFlags: RiskFlags): SecurityStateBreakd
       : (riskFlags.holderCount ?? 0) < HARD_MIN_HOLDER_COUNT
         ? 'UNSAFE'
         : 'SAFE',
+    holderClustering: riskFlags.holderClusteringState ?? 'UNKNOWN',
   };
 }

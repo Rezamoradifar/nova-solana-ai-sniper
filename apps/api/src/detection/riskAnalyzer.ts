@@ -2,6 +2,16 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import type { RiskFlags, Logger } from '@nova/shared';
 import type { Dex } from '@prisma/client';
 import { getHolderConcentration, getMintAuthorityInfo } from './onchain.js';
+import {
+  analyzeHolderClustering,
+  DEFAULT_HOLDER_CLUSTERING_CONFIG,
+  type HolderClusteringConfig,
+} from './holderClustering.js';
+import {
+  isExtremePump,
+  DEFAULT_PUMP_PROTECTION_CONFIG,
+  type PumpProtectionConfig,
+} from './pumpProtection.js';
 import type { DexScreenerClient, DexScreenerPair } from '../solana/dexscreener.js';
 import type { JupiterClient } from '../solana/jupiter.js';
 import { SOL_MINT } from '../solana/jupiter.js';
@@ -19,6 +29,12 @@ export interface RiskAnalysisInput {
   /** Known venue + pool for this token, if already on file — enables the native-DEX liquidity reader as a fallback source. */
   dex?: Dex;
   poolAddress?: string;
+  /** Fee payer of the token's creation transaction, when known (see
+   * candidatePipeline.ts's CandidateInput) — threaded through to
+   * holderClustering.ts's analyzeHolderClustering so a detected bundle whose
+   * cluster includes the creator's own wallet is distinguishable in reasons.
+   * Optional; a missing value simply skips that one sub-check. */
+  deployerAddress?: string;
 }
 
 export type LiquiditySource =
@@ -180,6 +196,12 @@ export class RiskAnalyzer {
     private readonly logger: Logger,
     /** Optional: enables the native-DEX liquidity reader as a fallback source. */
     private readonly dexRegistry?: DexRegistry,
+    /** Bundled-wallet clustering thresholds (2026-07-23 USOH incident
+     * follow-up) — operator-tunable via env (see config/env.ts), defaults to
+     * the values calibrated against the incident's own holder data. */
+    private readonly holderClusteringConfig: HolderClusteringConfig = DEFAULT_HOLDER_CLUSTERING_CONFIG,
+    /** Extreme-pump protection threshold — same convention as above. */
+    private readonly pumpProtectionConfig: PumpProtectionConfig = DEFAULT_PUMP_PROTECTION_CONFIG,
   ) {}
 
   /**
@@ -280,7 +302,7 @@ export class RiskAnalyzer {
     let holderDataUnknown = mintAuthorityFetchFailed;
     const [holders, pair] = await Promise.all([
       mintAuthorityFetchFailed
-        ? Promise.resolve({ top10HolderPercent: 100, holderCount: 0 })
+        ? Promise.resolve({ top10HolderPercent: 100, holderCount: 0, holderBalances: [] })
         : getHolderConcentration(
             this.connection,
             input.mint,
@@ -295,6 +317,7 @@ export class RiskAnalyzer {
             return {
               top10HolderPercent: 100,
               holderCount: 0,
+              holderBalances: [],
             };
           }),
       this.dexScreener.getBestSolanaPair(input.mint).catch((err: unknown) => {
@@ -347,6 +370,24 @@ export class RiskAnalyzer {
 
     const recentActivity = resolveRecentActivity(pair);
 
+    // Bundled-wallet / holder-clustering detection (2026-07-23 audit): only
+    // evaluated when holder data itself genuinely resolved — if it didn't,
+    // holderDataUnknown above already blocks the buy for that reason, and
+    // clustering has nothing real to analyze (this.holders.holderBalances
+    // would be the empty fail-closed placeholder, not real data).
+    const clustering = holderDataUnknown
+      ? undefined
+      : analyzeHolderClustering(
+          holders.holderBalances,
+          mintAuthority.supply,
+          this.holderClusteringConfig,
+          {
+            creatorAddress: input.deployerAddress,
+          },
+        );
+
+    const extremePumpDetected = isExtremePump(pair?.priceChange?.h1, this.pumpProtectionConfig);
+
     return {
       mintAuthorityRevoked: mintAuthority.mintAuthorityRevoked,
       freezeAuthorityRevoked: mintAuthority.freezeAuthorityRevoked,
@@ -365,6 +406,19 @@ export class RiskAnalyzer {
       mintAuthorityDataUnknown: mintAuthorityFetchFailed || undefined,
       holderDataUnknown: holderDataUnknown || undefined,
       honeypotCheckUnknown: honeypotCheckUnknown || undefined,
+      pairCreatedAt: pair?.pairCreatedAt,
+      holderClusteringState: clustering?.state,
+      holderClusteringReasons:
+        clustering && clustering.reasons.length > 0 ? clustering.reasons : undefined,
+      largestClusterWalletCount: clustering?.largestClusterWalletCount,
+      largestClusterSupplyPercent: clustering?.largestClusterSupplyPercent,
+      extremePumpDetected: extremePumpDetected || undefined,
+      // Production bug fix (2026-07-23 USOH post-mortem): real on-chain
+      // decimals, not the Token schema's `@default(9)` fallback — see
+      // RiskFlags.decimals' own doc comment. Undefined (not the dummy 9
+      // fallback) when the mint-authority read itself failed, so a caller
+      // never mistakes a placeholder for real data.
+      decimals: mintAuthorityFetchFailed ? undefined : mintAuthority.decimals,
       ...recentActivity,
     };
   }

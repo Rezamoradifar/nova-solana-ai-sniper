@@ -81,6 +81,40 @@ export interface RiskFlags {
    * was unknown (mint authority and/or holder data), not because of a
    * genuinely resolved low-liquidity or high-concentration signal. */
   honeypotCheckUnknown?: boolean;
+
+  // Risk Tiers / bundled-wallet detection / extreme-pump protection
+  // (2026-07-23, USOH incident follow-up) — all optional/undefined-by-default
+  // so every existing caller/test that doesn't set them is unaffected.
+  /** DexScreener's own pair-creation timestamp (ms epoch) — the real on-chain
+   * age of the token/pool, used by riskTier.ts's resolveTokenAgeMs. Undefined
+   * when no DexScreener pair has resolved yet (fails closed to "just born" —
+   * see resolveTokenAgeMs). */
+  pairCreatedAt?: number;
+  /** From holderClustering.ts's analyzeHolderClustering — undefined only when
+   * holder data itself was never resolved (see holderDataUnknown above,
+   * which already blocks the buy for its own reason; clustering simply isn't
+   * evaluated in that case rather than duplicating the failure). */
+  holderClusteringState?: 'SAFE' | 'UNSAFE' | 'UNKNOWN';
+  holderClusteringReasons?: string[];
+  largestClusterWalletCount?: number;
+  largestClusterSupplyPercent?: number;
+  /** From pumpProtection.ts's isExtremePump — a signal only, never used alone
+   * to reject a token (see that module's doc comment). */
+  extremePumpDetected?: boolean;
+
+  /**
+   * Production bug fix (2026-07-23, USOH incident post-mortem): the real
+   * on-chain decimals of the mint, from the same getMintAuthorityInfo() read
+   * that already resolves mintAuthorityRevoked/freezeAuthorityRevoked/supply
+   * above — riskAnalyzer.ts simply never surfaced it before this fix. Every
+   * caller previously fell back to Token.decimals' Prisma schema
+   * `@default(9)`, which is WRONG for any non-standard mint (e.g. USOH's
+   * real decimals=6, a Token-2022 mint) — closePosition's realized-PnL math
+   * (`soldAmountToken / 10 ** token.decimals`) silently understated a real
+   * -96% loss as -0.007%, exactly 1000x off (10^9/10^6). Always defined when
+   * mintAuthorityDataUnknown is not set; undefined only on a failed read.
+   */
+  decimals?: number;
 }
 
 /**

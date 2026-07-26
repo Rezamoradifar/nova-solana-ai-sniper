@@ -94,7 +94,31 @@ describe('getHolderConcentration', () => {
       0n,
     );
 
-    expect(result).toEqual({ top10HolderPercent: 0, holderCount: 0 });
+    expect(result).toEqual({ top10HolderPercent: 0, holderCount: 0, holderBalances: [] });
+  });
+
+  it('also returns the raw balances of every real (non-excluded) holder, for holderClustering.ts to reuse', async () => {
+    const connection = {
+      getTokenLargestAccounts: vi.fn().mockResolvedValue({
+        value: [
+          fakeAccount(VAULT_A, '600'), // pool vault — should be excluded
+          fakeAccount(WHALE, '100'),
+          fakeAccount(HOLDER_1, '50'),
+        ],
+      }),
+    };
+
+    const result = await getHolderConcentration(
+      connection as never,
+      '8Jexwtd8Py1g2bkjhQXPXoSztf5WEBAHvdLb7gUmpump',
+      1000n,
+      [VAULT_A],
+    );
+
+    expect(result.holderBalances).toEqual([
+      { address: WHALE, amountRaw: 100n },
+      { address: HOLDER_1, amountRaw: 50n },
+    ]);
   });
 });
 

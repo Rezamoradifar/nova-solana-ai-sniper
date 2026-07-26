@@ -63,6 +63,12 @@ export async function getMintAuthorityInfo(
 export interface HolderConcentration {
   top10HolderPercent: number;
   holderCount: number;
+  /** Every real (non-excluded) holder from the same getTokenLargestAccounts
+   * read, raw balances — added for holderClustering.ts's bundled-wallet
+   * detection (2026-07-23) so it can reuse this call rather than issuing its
+   * own redundant RPC read. Always present (possibly empty), unlike the
+   * aggregate fields above which have historical 0/100 fail-closed defaults. */
+  holderBalances: Array<{ address: string; amountRaw: bigint }>;
 }
 
 /**
@@ -94,7 +100,7 @@ export async function getHolderConcentration(
 
   const totalSupply = Number(totalSupplyRaw);
   if (totalSupply === 0) {
-    return { top10HolderPercent: 0, holderCount: 0 };
+    return { top10HolderPercent: 0, holderCount: 0, holderBalances: [] };
   }
 
   const excluded = new Set(excludeAddresses);
@@ -105,6 +111,10 @@ export async function getHolderConcentration(
   return {
     top10HolderPercent: (top10 / totalSupply) * 100,
     holderCount: realHolders.filter((a) => Number(a.amount) > 0).length,
+    holderBalances: realHolders.map((a) => ({
+      address: a.address.toBase58(),
+      amountRaw: BigInt(a.amount),
+    })),
   };
 }
 

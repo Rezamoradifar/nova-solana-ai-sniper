@@ -215,7 +215,7 @@ describe('evaluateCriticalSecurityGate', () => {
 
 describe('classifySecurityState', () => {
   it('reports SAFE across the board for a clean, fully-resolved token', () => {
-    expect(classifySecurityState(safeFlags())).toEqual({
+    expect(classifySecurityState(safeFlags({ holderClusteringState: 'SAFE' }))).toEqual({
       mintAuthority: 'SAFE',
       freezeAuthority: 'SAFE',
       lpLock: 'SAFE',
@@ -223,6 +223,7 @@ describe('classifySecurityState', () => {
       dexscreenerValidation: 'SAFE',
       holderConcentration: 'SAFE',
       holderCount: 'SAFE',
+      holderClustering: 'SAFE',
     });
   });
 
@@ -246,6 +247,11 @@ describe('classifySecurityState', () => {
     expect(breakdown.honeypot).toBe('UNKNOWN');
   });
 
+  it('reports UNKNOWN holderClustering when riskAnalyzer never set it (holder data itself unresolved)', () => {
+    const breakdown = classifySecurityState(safeFlags({ holderClusteringState: undefined }));
+    expect(breakdown.holderClustering).toBe('UNKNOWN');
+  });
+
   it('reports UNSAFE for a genuinely confirmed-bad token, distinct from UNKNOWN', () => {
     const breakdown = classifySecurityState(
       safeFlags({ mintAuthorityRevoked: false, top10HolderPercent: 95, holderCount: 2 }),
@@ -253,5 +259,50 @@ describe('classifySecurityState', () => {
     expect(breakdown.mintAuthority).toBe('UNSAFE');
     expect(breakdown.holderConcentration).toBe('UNSAFE');
     expect(breakdown.holderCount).toBe('UNSAFE');
+  });
+});
+
+describe('evaluateCriticalSecurityGate — bundled-wallet clustering (2026-07-23 USOH incident follow-up)', () => {
+  it('blocks a confirmed bundled-wallet cluster even when every other check passes (regression: USOH — 100% clean gate, top10=2.5%, 19 holders)', () => {
+    const result = evaluateCriticalSecurityGate(
+      safeFlags({
+        top10HolderPercent: 2.5,
+        holderCount: 19,
+        holderClusteringState: 'UNSAFE',
+        holderClusteringReasons: ['bundled_wallet_cluster_detected'],
+      }),
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.reasons).toContain('bundled_wallet_cluster_detected');
+  });
+
+  it('surfaces every clustering-specific reason (e.g. creator-in-cluster), not just a generic one', () => {
+    const result = evaluateCriticalSecurityGate(
+      safeFlags({
+        holderClusteringState: 'UNSAFE',
+        holderClusteringReasons: ['bundled_wallet_cluster_detected', 'creator_wallet_in_cluster'],
+      }),
+    );
+    expect(result.reasons).toEqual(
+      expect.arrayContaining(['bundled_wallet_cluster_detected', 'creator_wallet_in_cluster']),
+    );
+  });
+
+  it('does not block on a SAFE clustering verdict', () => {
+    const result = evaluateCriticalSecurityGate(safeFlags({ holderClusteringState: 'SAFE' }));
+    expect(result.allowed).toBe(true);
+  });
+
+  it('does not add a redundant reason when clustering is UNKNOWN — holder_data_unknown already covers that failure mode', () => {
+    const result = evaluateCriticalSecurityGate(
+      safeFlags({
+        top10HolderPercent: 100,
+        holderCount: 0,
+        holderDataUnknown: true,
+        holderClusteringState: 'UNKNOWN',
+      }),
+    );
+    expect(result.reasons).toContain('holder_data_unknown');
+    expect(result.reasons).not.toContain('bundled_wallet_cluster_detected');
   });
 });
