@@ -775,7 +775,7 @@ describe('PositionManager live sell failure handling', () => {
       confirmTransaction: vi.fn().mockResolvedValue({ value: { err: { InstructionError: [] } } }),
     } as never;
     const dexScreener = { getBestSolanaPair: vi.fn() } as never;
-    const positionUpdate = vi.fn();
+    const positionUpdate = vi.fn().mockResolvedValue({ id: 'position-1', sellFailureCount: 1 });
     const tradeCreate = vi.fn().mockResolvedValue({ id: 'trade-failed-sell-1' });
     const prisma = {
       positionCloseClaim: {
@@ -825,8 +825,14 @@ describe('PositionManager live sell failure handling', () => {
       manager.closePosition('position-1', 'wallet-1', 'enc', 'key', { currentPriceUsd: 0.002 }),
     ).rejects.toThrow(/reverted on-chain/);
 
-    // Position must never be marked CLOSED for a sell that didn't actually happen.
-    expect(positionUpdate).not.toHaveBeenCalled();
+    // Position must never be marked CLOSED for a sell that didn't actually
+    // happen — position.update IS now called (2026-07-23 fix) to persist the
+    // sellFailureCount/lastSellFailureAt retry-tracking fields, but never with
+    // a status/closedAt change.
+    for (const call of positionUpdate.mock.calls) {
+      expect((call[0] as { data: Record<string, unknown> }).data).not.toHaveProperty('status');
+      expect((call[0] as { data: Record<string, unknown> }).data).not.toHaveProperty('closedAt');
+    }
     expect(tradeCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({ side: 'SELL', status: 'FAILED', walletId: 'wallet-1' }),
     });
@@ -1949,7 +1955,31 @@ describe('PositionManager SELL pre-broadcast retry (production bug fix 2026-07-1
             decimals: 9,
           },
         }),
-        update: vi.fn().mockResolvedValue({ id: 'position-retry', status: 'CLOSED' }),
+        // Stateful (2026-07-26 fix): tracks noRouteSellFailureCount/sellUnsellable
+        // across calls the way real Prisma increment+select would — a static
+        // mock (the pre-fix version of this helper) always reports
+        // noRouteSellFailureCount as undefined, which made
+        // recordPermanentSellFailure's "already past the threshold" guard
+        // always false and re-fired the unsellable-marking path on every
+        // single permanent failure instead of only once.
+        update: (() => {
+          let noRouteSellFailureCount = 0;
+          let sellUnsellable = false;
+          return vi.fn((args: { data: Record<string, unknown> }) => {
+            const inc = args.data.noRouteSellFailureCount as { increment?: number } | undefined;
+            if (inc?.increment) noRouteSellFailureCount += inc.increment;
+            if (typeof args.data.sellUnsellable === 'boolean') {
+              sellUnsellable = args.data.sellUnsellable;
+            }
+            return Promise.resolve({
+              id: 'position-retry',
+              status: 'CLOSED',
+              sellFailureCount: 1,
+              noRouteSellFailureCount,
+              sellUnsellable,
+            });
+          });
+        })(),
       },
       trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
       $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
@@ -2084,6 +2114,452 @@ describe('PositionManager SELL pre-broadcast retry (production bug fix 2026-07-1
 
     await expect(manager.openPosition(BASE_PARAMS)).rejects.toThrow(/could not find any route/);
     expect(prepareSwap).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PositionManager permanent (no-route) SELL failure handling (2026-07-26 fix — a position stuck with no Jupiter route retried forever, once per price tick, sellFailureCount reaching the thousands)', () => {
+  /** Stateful position.update mock: tracks noRouteSellFailureCount/sellUnsellable
+   *  across calls the same way Prisma's real increment + later select would. */
+  function statefulPositionUpdateMock(basePosition: Record<string, unknown>) {
+    let noRouteSellFailureCount = 0;
+    let sellUnsellable = false;
+    const update = vi.fn((args: { data: Record<string, unknown> }) => {
+      const data = args.data;
+      const inc = data.noRouteSellFailureCount as { increment?: number } | undefined;
+      if (inc?.increment) noRouteSellFailureCount += inc.increment;
+      if (typeof data.sellUnsellable === 'boolean') sellUnsellable = data.sellUnsellable;
+      return Promise.resolve({
+        ...basePosition,
+        noRouteSellFailureCount,
+        sellUnsellable,
+        sellFailureCount: 1,
+      });
+    });
+    return update;
+  }
+
+  function baseNoRoutePosition(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      status: 'OPEN',
+      id: 'position-noroute',
+      tokenId: 'token-1',
+      walletId: 'wallet-1',
+      entryPriceUsd: 0.001,
+      amountToken: 1000,
+      amountSolInvested: 0.01,
+      highWaterMarkUsd: 0.001,
+      trailingStopPercent: null,
+      realizedPnlUsd: null,
+      closedAt: null,
+      sellUnsellable: false,
+      unsellableReason: null,
+      createdAt: new Date('2026-07-10T00:00:00Z'),
+      token: {
+        mint: 'CkWryeENpbbz6Lj4LFQ1ya6U7bJoAbtBkAnSzaeaXCP5',
+        dex: 'PUMPFUN',
+        poolAddress: null,
+        symbol: 'FOO',
+        name: 'Foo',
+        decimals: 9,
+      },
+      ...overrides,
+    };
+  }
+
+  it('marks a position unsellable after SELL_MAX_PERMANENT_ROUTE_RETRIES (default 3) consecutive NO_ROUTES_FOUND failures, and logs the required message', async () => {
+    const prepareSwap = vi
+      .fn()
+      .mockRejectedValue(new Error('Jupiter quote failed: 400 {"errorCode":"NO_ROUTES_FOUND"}'));
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const connection = {
+      getParsedTokenAccountsByOwner: vi.fn().mockResolvedValue({
+        value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: '1000' } } } } } }],
+      }),
+      sendTransaction: vi.fn(),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const positionUpdate = statefulPositionUpdateMock(baseNoRoutePosition());
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(baseNoRoutePosition()),
+        update: positionUpdate,
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+    } as never;
+    const errorLog = vi.fn();
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: errorLog } as never;
+    const notifyError = vi.fn().mockResolvedValue(undefined);
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      logger,
+      fakeSafety(),
+      { notifyError } as never,
+      false, // live trading
+    );
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await expect(
+        manager.closePosition('position-noroute', 'wallet-1', 'enc', 'key', {
+          currentPriceUsd: 0.002,
+        }),
+      ).rejects.toThrow(/NO_ROUTES_FOUND/);
+    }
+
+    expect(prepareSwap).toHaveBeenCalledTimes(3);
+    expect(positionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          sellUnsellable: true,
+          unsellableAt: expect.any(Date),
+          unsellableReason: expect.any(String),
+        }),
+      }),
+    );
+    expect(errorLog).toHaveBeenCalledWith(
+      expect.anything(),
+      'Skipping position permanently because no Jupiter route exists.',
+    );
+    expect(notifyError).toHaveBeenCalledWith(
+      'Position marked unsellable — no Jupiter route',
+      expect.stringContaining('position-noroute'),
+    );
+  });
+
+  it('checkAndMaybeClose skips a position already marked sellUnsellable — no swap is ever attempted', async () => {
+    const prepareSwap = vi.fn();
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const connection = { sendTransaction: vi.fn() } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const prisma = {
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(
+          baseNoRoutePosition({
+            sellUnsellable: true,
+            unsellableReason: 'no swap route available from Jupiter (or native fallback)',
+            stopLossPercent: 10,
+            takeProfitPercent: 50,
+          }),
+        ),
+        update: vi.fn(),
+      },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+    );
+
+    const result = await manager.checkAndMaybeClose('position-noroute', 100, 'enc', 'key');
+
+    expect(result).toEqual({ closed: false });
+    expect(prepareSwap).not.toHaveBeenCalled();
+  });
+
+  it(
+    'a temporary failure (rpc_timeout) never increments the permanent-failure counter or marks the position unsellable, even after repeated attempts',
+    { timeout: 15000 },
+    async () => {
+      const prepareSwap = vi.fn().mockRejectedValue(new Error('429 Too Many Requests'));
+      const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+      const connection = {
+        getParsedTokenAccountsByOwner: vi.fn().mockResolvedValue({
+          value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: '1000' } } } } } }],
+        }),
+        sendTransaction: vi.fn(),
+      } as never;
+      const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+      const positionUpdate = statefulPositionUpdateMock(baseNoRoutePosition());
+      const prisma = {
+        positionCloseClaim: {
+          create: vi.fn().mockResolvedValue({}),
+          findUnique: vi.fn().mockResolvedValue(null),
+          deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        position: {
+          findUniqueOrThrow: vi.fn().mockResolvedValue(baseNoRoutePosition()),
+          update: positionUpdate,
+        },
+        trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      } as never;
+
+      const manager = new PositionManager(
+        prisma,
+        connection,
+        jupiter,
+        dexScreener,
+        fakeLogger(),
+        fakeSafety(),
+        undefined,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        0,
+      );
+
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        await expect(
+          manager.closePosition('position-noroute', 'wallet-1', 'enc', 'key', {
+            currentPriceUsd: 0.002,
+          }),
+        ).rejects.toThrow(/429/);
+      }
+
+      expect(prepareSwap).toHaveBeenCalled();
+      for (const call of positionUpdate.mock.calls) {
+        expect((call[0] as { data: Record<string, unknown> }).data).not.toHaveProperty(
+          'noRouteSellFailureCount',
+        );
+        expect((call[0] as { data: Record<string, unknown> }).data).not.toHaveProperty(
+          'sellUnsellable',
+        );
+      }
+    },
+  );
+});
+
+describe('PositionManager SELL broadcast-stage retry (2026-07-23 USOH incident production fix)', () => {
+  function basePosition(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      status: 'OPEN',
+      id: 'position-retry',
+      tokenId: 'token-1',
+      walletId: 'wallet-1',
+      entryPriceUsd: 0.001,
+      amountToken: 1000,
+      amountSolInvested: 0.01,
+      highWaterMarkUsd: 0.001,
+      trailingStopPercent: null,
+      realizedPnlUsd: null,
+      sellFailureCount: 0,
+      lastSellFailureAt: null,
+      closedAt: null,
+      createdAt: new Date('2026-07-10T00:00:00Z'),
+      token: {
+        mint: 'CkWryeENpbbz6Lj4LFQ1ya6U7bJoAbtBkAnSzaeaXCP5',
+        dex: 'PUMPFUN',
+        poolAddress: null,
+        symbol: 'FOO',
+        name: 'Foo',
+        decimals: 6,
+      },
+      ...overrides,
+    };
+  }
+
+  function fakePrisma(opts: { positionUpdate?: ReturnType<typeof vi.fn> } = {}) {
+    return {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(basePosition()),
+        update:
+          opts.positionUpdate ??
+          vi.fn().mockResolvedValue({ id: 'position-retry', sellFailureCount: 1 }),
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+      $transaction: vi.fn((ops: unknown[]) => Promise.all(ops)),
+    };
+  }
+
+  /** A wallet balance read that always reports enough tokens still held — the
+   * "nothing landed yet" case every retry-eligible scenario below assumes.
+   * getParsedTransaction (post-broadcast verification) deliberately rejects —
+   * same convention as the pre-broadcast retry describe block above: matching
+   * the real, randomly-generated keypair's pubkey in a fixture isn't worth the
+   * complexity, and verification is a separately-tested concern (see the
+   * unverified-swap-lock describe block). These tests only need to prove
+   * sendSwapWithBroadcastRetry's own retry-then-succeed/fail behavior. */
+  function fakeConnectionWithBalance(sendTransaction: ReturnType<typeof vi.fn>) {
+    return {
+      getParsedTokenAccountsByOwner: vi.fn().mockResolvedValue({
+        value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: '1000' } } } } } }],
+      }),
+      sendTransaction,
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+      getParsedTransaction: vi.fn().mockRejectedValue(new Error('429 Too Many Requests')),
+    };
+  }
+
+  it('retries a blockhash-expired failure AT THE BROADCAST STAGE (not just pre-broadcast) with a fresh quote, and succeeds — the exact USOH incident bug', async () => {
+    // prepareSwap succeeds every time (a fresh blockhash each call) — the
+    // failure is injected at sendTransaction, simulating broadcastTransaction
+    // itself throwing after a successful build, which is what the pre-2026-07-23
+    // code never retried at all.
+    const prepareSwap = vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const sendTransaction = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new Error(
+          'Simulation failed. Message: Transaction simulation failed: Blockhash not found.',
+        ),
+      )
+      .mockResolvedValueOnce('sig-succeeded-on-retry');
+    const connection = fakeConnectionWithBalance(sendTransaction);
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const prisma = fakePrisma();
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+      undefined,
+      undefined,
+      0,
+    );
+
+    // The swap itself (after one broadcast-stage retry) lands and broadcasts
+    // fine — what fails is the unrelated post-broadcast verification RPC
+    // call. What this proves is that exactly one retry happened and exactly
+    // two transactions were ever sent (not an unbounded/duplicate loop).
+    await expect(
+      manager.closePosition('position-retry', 'wallet-1', 'enc', 'key', {
+        currentPriceUsd: 0.0001,
+      }),
+    ).rejects.toThrow(/429 Too Many Requests/);
+    expect(prepareSwap).toHaveBeenCalledTimes(2);
+    expect(sendTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-verifies real wallet balance before each retry, and aborts (never resubmits) if it dropped — duplicate-sell prevention', async () => {
+    const prepareSwap = vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const sendTransaction = vi.fn().mockRejectedValue(new Error('Blockhash not found'));
+    const connection = {
+      // First call (pre-sell balance check): full amount still held.
+      // Second call (pre-retry recheck): balance has dropped to 0 — some
+      // other transaction must have actually landed.
+      getParsedTokenAccountsByOwner: vi
+        .fn()
+        .mockResolvedValueOnce({
+          value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: '1000' } } } } } }],
+        })
+        .mockResolvedValueOnce({ value: [] }),
+      sendTransaction,
+      confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
+    };
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const prisma = fakePrisma();
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+      undefined,
+      undefined,
+      0,
+    );
+
+    await expect(
+      manager.closePosition('position-retry', 'wallet-1', 'enc', 'key', {
+        currentPriceUsd: 0.0001,
+      }),
+    ).rejects.toThrow(/blockhash/i);
+
+    // Exactly one broadcast attempt — the balance-drop abort must prevent a
+    // second, potentially duplicate, sell attempt.
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not apply the broadcast-stage retry to a non-retryable category (route_unavailable) — fails on the first attempt, unchanged', async () => {
+    const prepareSwap = vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const sendTransaction = vi
+      .fn()
+      .mockRejectedValue(new Error('reverted on-chain: could not find any route'));
+    const connection = fakeConnectionWithBalance(sendTransaction);
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const prisma = fakePrisma();
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+      undefined,
+      undefined,
+      0,
+    );
+
+    await expect(
+      manager.closePosition('position-retry', 'wallet-1', 'enc', 'key', {
+        currentPriceUsd: 0.0001,
+      }),
+    ).rejects.toThrow(/reverted on-chain/);
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up after exhausting SELL_BROADCAST_RETRY_MAX_ATTEMPTS (3) and persists the failure count', async () => {
+    const prepareSwap = vi.fn().mockResolvedValue({ transaction: fakeSignedVersionedTx() });
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const sendTransaction = vi.fn().mockRejectedValue(new Error('Blockhash not found'));
+    const connection = fakeConnectionWithBalance(sendTransaction);
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    const positionUpdate = vi.fn().mockResolvedValue({ id: 'position-retry', sellFailureCount: 1 });
+    const prisma = fakePrisma({ positionUpdate });
+
+    const manager = new PositionManager(
+      prisma as never,
+      connection as never,
+      jupiter,
+      dexScreener,
+      fakeLogger(),
+      fakeSafety(),
+      undefined,
+      false,
+      undefined,
+      undefined,
+      0,
+    );
+
+    await expect(
+      manager.closePosition('position-retry', 'wallet-1', 'enc', 'key', {
+        currentPriceUsd: 0.0001,
+      }),
+    ).rejects.toThrow(/blockhash/i);
+
+    expect(sendTransaction).toHaveBeenCalledTimes(3); // SELL_BROADCAST_RETRY_MAX_ATTEMPTS
+    // The persisted retry-state fields must have been updated (survives a
+    // restart — see schema.prisma's Position.sellFailureCount doc comment).
+    expect(positionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'position-retry' },
+        data: expect.objectContaining({ sellFailureCount: { increment: 1 } }),
+      }),
+    );
   });
 });
 

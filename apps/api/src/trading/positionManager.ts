@@ -17,7 +17,11 @@ import { JitoClient } from '../solana/jito.js';
 import { broadcastTransaction as broadcastTransactionShared } from '../solana/broadcast.js';
 import { evaluateExit, resolveEffectiveStopLossPercent, type ExitReason } from './exitEngine.js';
 import { positionCloseLock } from './positionCloseLock.js';
-import { classifySellFailure, type SellFailureCategory } from './sellFailureClassifier.js';
+import {
+  classifySellFailure,
+  type SellFailureCategory,
+  type SellFailureClassification,
+} from './sellFailureClassifier.js';
 import { computeTrailingStopDisplay, defaultExitParams } from './adaptiveTrailingStop.js';
 import { eventBus } from '../lib/eventBus.js';
 import { latencyTracker } from '../lib/latencyTracker.js';
@@ -358,6 +362,15 @@ export class PositionManager {
      * behavior (plain evaluateExit, no partial-exit branch). */
     private readonly institutionalModeGloballyEnabled: boolean = false,
     private readonly partialExitsGloballyEnabled: boolean = false,
+    /**
+     * SELL_MAX_PERMANENT_ROUTE_RETRIES (2026-07-26): how many consecutive
+     * `permanent` (no-route) SELL failures — see sellFailureClassifier.ts —
+     * a position may accumulate before it's marked unsellable and stops
+     * being retried. Fixes a production bug where a position with no
+     * Jupiter route was retried forever, once per price tick, with its
+     * failure counter reaching the thousands.
+     */
+    private readonly maxPermanentRouteRetries: number = 3,
   ) {}
 
   /**
@@ -442,6 +455,59 @@ export class PositionManager {
   }
 
   /**
+   * Permanent (no-route) SELL failure tracking (2026-07-26 fix): called only
+   * when classifySellFailure marked the failure `permanent: true` — currently
+   * just `route_unavailable` (NO_ROUTES_FOUND / ROUTE_NOT_FOUND / a Jupiter
+   * failure whose message indicates no route exists — see
+   * sellFailureClassifier.ts). Unlike the generic sellFailureCount tracked
+   * alongside this, that counter never gated a retry; this one does. Once
+   * noRouteSellFailureCount reaches maxPermanentRouteRetries
+   * (SELL_MAX_PERMANENT_ROUTE_RETRIES, default 3), the position is marked
+   * sellUnsellable so checkAndMaybeClose/closePositionLocked/
+   * executePartialSellLocked all refuse to attempt another sell for it —
+   * fixing the production bug where a routeless position retried forever,
+   * once per price tick, with its failure count reaching the thousands.
+   */
+  private async recordPermanentSellFailure(
+    positionId: string,
+    mint: string,
+    symbolOrMint: string,
+    classification: SellFailureClassification,
+  ): Promise<void> {
+    const updated = await this.prisma.position.update({
+      where: { id: positionId },
+      data: { noRouteSellFailureCount: { increment: 1 } },
+      select: { noRouteSellFailureCount: true, sellUnsellable: true },
+    });
+    if (updated.sellUnsellable || updated.noRouteSellFailureCount < this.maxPermanentRouteRetries) {
+      return;
+    }
+    await this.prisma.position.update({
+      where: { id: positionId },
+      data: {
+        sellUnsellable: true,
+        unsellableAt: new Date(),
+        unsellableReason: classification.detail,
+      },
+    });
+    this.logger.error(
+      {
+        positionId,
+        mint,
+        attempts: updated.noRouteSellFailureCount,
+        category: classification.category,
+        detail: classification.detail,
+      },
+      'Skipping position permanently because no Jupiter route exists.',
+    );
+    await this.notifier?.notifyError(
+      'Position marked unsellable — no Jupiter route',
+      `Position ${positionId} (${symbolOrMint}) failed to sell ${updated.noRouteSellFailureCount} consecutive times because no Jupiter (or fallback) route exists for this mint [${classification.category}]. Stop-loss/take-profit/trailing-stop auto-sell is now permanently disabled for this position — manual intervention required.`,
+    );
+    eventBus.publish('position.updated', { positionId, status: 'OPEN' });
+  }
+
+  /**
    * Production Bug Fix (2026-07-14): SELL-only tuning, threaded through as an
    * options object so the BUY call site (openPosition) — which never passes
    * this — is byte-identical to its pre-fix behavior: single attempt, 'high'
@@ -456,6 +522,114 @@ export class PositionManager {
     timeoutMs: 8_000,
     priorityLevel: 'veryHigh',
   };
+
+  /**
+   * Broadcast-stage SELL retry (2026-07-23, USOH incident production fix).
+   *
+   * Root cause: sendSwap's own retry loop (maxAttempts above) only covers a
+   * failure at the pre-broadcast quote/build step (this.jupiter.prepareSwap)
+   * — broadcastTransaction is called exactly once, outside that loop, by
+   * deliberate 2026-07-14 design (see sendSwap's own doc comment) so an
+   * ambiguous confirmation-timeout can never trigger a second, potentially
+   * double-selling broadcast. But a blockhash that expires AT the broadcast
+   * stage (built fine, then the Jito-bundle attempt + fallback direct send in
+   * broadcast.ts took long enough that the blockhash was no longer valid by
+   * the time it was actually sent) was never retried at all — confirmed live
+   * 2026-07-23: two USOH positions retried their SELL every ~45-70s (one full
+   * price-monitor cycle apart) for over 10 minutes straight, each attempt
+   * dying the exact same way, because nothing inside sendSwap ever rebuilt
+   * with a fresh blockhash after a broadcast-stage failure.
+   *
+   * This wraps sendSwap in an outer loop that, ONLY for the categories
+   * classifySellFailure marks `retryablePreBroadcast: true` (blockhash_expired,
+   * rpc_timeout, jupiter_failure — see that module's own doc comment: each is
+   * a GUARANTEED-never-landed rejection, not merely a likely one), calls
+   * sendSwap again from scratch — a fresh prepareSwap call means a fresh quote
+   * AND a fresh blockhash, not a resend of the same stale transaction.
+   *
+   * Duplicate-sell safety (2026-07-23 requirement): before every retry, this
+   * re-verifies the wallet's real on-chain token balance still covers the
+   * amount being sold. classifySellFailure's guarantee already makes this
+   * belt-and-braces rather than load-bearing, but it costs one cheap RPC read
+   * and closes the gap completely — if the balance has dropped, some other
+   * transaction must have actually landed, and this aborts further retries
+   * immediately rather than risking a second sell of tokens already gone.
+   */
+  private static readonly SELL_BROADCAST_RETRY_MAX_ATTEMPTS = 3;
+  private static readonly SELL_BROADCAST_RETRY_DELAY_MS = 500;
+  private static readonly SELL_BROADCAST_RETRYABLE_CATEGORIES: readonly SellFailureCategory[] = [
+    'blockhash_expired',
+    'rpc_timeout',
+    'jupiter_failure',
+  ];
+
+  private async sendSwapWithBroadcastRetry(
+    keypair: Keypair,
+    swapParams: {
+      inputMint: string;
+      outputMint: string;
+      amountLamports: bigint;
+      slippageBps: number;
+    },
+    getFallbackTarget: () => Promise<{ dex: Dex; poolAddress: string | null } | undefined>,
+    options: SendSwapOptions,
+    duplicateGuard: { mint: string; expectedAtLeastRaw: bigint; positionId: string },
+  ): Promise<string> {
+    const maxAttempts = PositionManager.SELL_BROADCAST_RETRY_MAX_ATTEMPTS;
+    let lastErr: unknown;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.sendSwap(keypair, swapParams, getFallbackTarget, options);
+      } catch (err) {
+        lastErr = err;
+        const classification = classifySellFailure(err);
+        const isBroadcastRetryable = PositionManager.SELL_BROADCAST_RETRYABLE_CATEGORIES.includes(
+          classification.category,
+        );
+        if (!isBroadcastRetryable || attempt >= maxAttempts) throw err;
+
+        const realBalance = await getRealTokenBalance(
+          this.connection,
+          keypair.publicKey.toBase58(),
+          duplicateGuard.mint,
+        ).catch((balanceErr) => {
+          this.logger.warn(
+            { err: balanceErr, positionId: duplicateGuard.positionId },
+            'sendSwapWithBroadcastRetry: balance recheck failed — proceeding with retry anyway (classifier already guarantees this category never landed)',
+          );
+          return duplicateGuard.expectedAtLeastRaw; // treat as "still there" — don't block a legitimate retry on an unrelated RPC hiccup
+        });
+        if (realBalance < duplicateGuard.expectedAtLeastRaw) {
+          this.logger.error(
+            {
+              positionId: duplicateGuard.positionId,
+              mint: duplicateGuard.mint,
+              expected: duplicateGuard.expectedAtLeastRaw.toString(),
+              realBalance: realBalance.toString(),
+              category: classification.category,
+            },
+            'sendSwapWithBroadcastRetry: wallet balance dropped mid-retry — a prior attempt may have actually landed; aborting further retries to avoid a duplicate sell',
+          );
+          throw err;
+        }
+
+        this.logger.warn(
+          {
+            err,
+            positionId: duplicateGuard.positionId,
+            category: classification.category,
+            attempt,
+            maxAttempts,
+          },
+          'sendSwap: broadcast-stage failure is safely retryable (classifier guarantees it never landed) — rebuilding with a fresh quote/blockhash and retrying',
+        );
+        await sleep(PositionManager.SELL_BROADCAST_RETRY_DELAY_MS);
+      }
+    }
+    // Unreachable — the loop above always either returns or throws.
+    throw lastErr;
+  }
 
   /**
    * BUY Engine V2 (2026-07-14): BUY-side counterpart to SELL_SEND_SWAP_OPTIONS
@@ -1148,6 +1322,22 @@ export class PositionManager {
     });
     if (position.status !== 'OPEN') return { closed: false as const };
 
+    // Permanent (no-route) SELL failure gate (2026-07-26 fix) — see
+    // recordPermanentSellFailure's doc comment. Checked here, once per tick,
+    // before evaluateExit/the institutional branch even run, so a position
+    // with no Jupiter route stops costing a lock acquisition + swap attempt
+    // every tick instead of just being marked unsellable inside the deeper
+    // swap-execution path (kept there too, as defense-in-depth for callers
+    // that reach closePosition/executePartialSell directly, e.g.
+    // EmergencyExitMonitor or a manual sell).
+    if (position.sellUnsellable) {
+      this.logger.debug(
+        { positionId, mint: position.token.mint, reason: position.unsellableReason },
+        'Skipping position permanently because no Jupiter route exists.',
+      );
+      return { closed: false as const };
+    }
+
     const institutionalActive =
       position.institutionalModeEnabled && this.institutionalModeGloballyEnabled;
 
@@ -1414,6 +1604,18 @@ export class PositionManager {
       latencyTracker.finish(traceId, 'failure');
       return { sold: false as const };
     }
+    // Permanent (no-route) SELL failure gate — see recordPermanentSellFailure's
+    // doc comment / checkAndMaybeClose's matching gate above. Defense-in-depth
+    // here since executePartialSell can also be reached with the lock already
+    // held by a caller that skipped checkAndMaybeClose's own check.
+    if (position.sellUnsellable) {
+      this.logger.warn(
+        { positionId, tierIndex, mint: position.token.mint, reason: position.unsellableReason },
+        'Skipping position permanently because no Jupiter route exists.',
+      );
+      latencyTracker.finish(traceId, 'failure');
+      return { sold: false as const };
+    }
     const tierAlreadyTaken = await this.prisma.positionPartialExit.findFirst({
       where: { positionId, tierIndex },
       select: { id: true },
@@ -1458,7 +1660,7 @@ export class PositionManager {
 
       const sendSwapStartedAt = Date.now();
       try {
-        signature = await this.sendSwap(
+        signature = await this.sendSwapWithBroadcastRetry(
           keypair,
           {
             inputMint: position.token.mint,
@@ -1468,6 +1670,7 @@ export class PositionManager {
           },
           async () => ({ dex: position.token.dex, poolAddress: position.token.poolAddress }),
           { ...PositionManager.SELL_SEND_SWAP_OPTIONS, traceId },
+          { mint: position.token.mint, expectedAtLeastRaw: sellAmountRaw, positionId },
         );
       } catch (err) {
         const classification = classifySellFailure(err);
@@ -1492,6 +1695,14 @@ export class PositionManager {
           amountToken: Number(sellAmountRaw),
           err,
         });
+        if (classification.permanent) {
+          await this.recordPermanentSellFailure(
+            positionId,
+            position.token.mint,
+            position.token.symbol ?? position.token.mint,
+            classification,
+          );
+        }
         latencyTracker.finish(traceId, 'failure');
         throw tagSellFailure(err, classification.category);
       }
@@ -1706,6 +1917,18 @@ export class PositionManager {
       latencyTracker.finish(traceId, 'failure');
       return { closed: false as const, position, signature: null };
     }
+    // Permanent (no-route) SELL failure gate — see recordPermanentSellFailure's
+    // doc comment / checkAndMaybeClose's matching gate above. Defense-in-depth
+    // here for callers that reach closePosition directly (EmergencyExitMonitor,
+    // a manual sell) without going through checkAndMaybeClose's own check.
+    if (position.sellUnsellable) {
+      this.logger.warn(
+        { positionId, mint: position.token.mint, reason: position.unsellableReason },
+        'Skipping position permanently because no Jupiter route exists.',
+      );
+      latencyTracker.finish(traceId, 'failure');
+      return { closed: false as const, position, signature: null };
+    }
 
     // A position that already had one or more partial exits (institutional
     // mode's profit ladder — see partialExitEngine.ts) has fewer tokens left
@@ -1799,7 +2022,7 @@ export class PositionManager {
 
       const sendSwapStartedAt = Date.now();
       try {
-        signature = await this.sendSwap(
+        signature = await this.sendSwapWithBroadcastRetry(
           keypair,
           {
             inputMint: position.token.mint,
@@ -1809,6 +2032,7 @@ export class PositionManager {
           },
           async () => ({ dex: position.token.dex, poolAddress: position.token.poolAddress }),
           { ...PositionManager.SELL_SEND_SWAP_OPTIONS, traceId },
+          { mint: position.token.mint, expectedAtLeastRaw: sellAmountRaw, positionId },
         );
       } catch (err) {
         // Position deliberately stays OPEN here — nothing below this point runs,
@@ -1836,11 +2060,49 @@ export class PositionManager {
           amountToken: Number(sellAmountRaw),
           err,
         });
-        if (!this.sellFailureAlerted.has(positionId)) {
+        // Persisted retry-state fix (2026-07-23, USOH incident follow-up):
+        // an in-memory-only counter loses its history on every process
+        // restart, which would silently understate how many times a
+        // stop-loss has already failed to execute — see schema.prisma's
+        // Position.sellFailureCount doc comment. Never gates whether a retry
+        // happens (that's still purely the next price tick), only alerting.
+        const updatedPosition = await this.prisma.position.update({
+          where: { id: positionId },
+          data: { sellFailureCount: { increment: 1 }, lastSellFailureAt: new Date() },
+          select: { sellFailureCount: true },
+        });
+        const totalFailures = updatedPosition.sellFailureCount;
+        // Same TTL-deduped "don't spam the same ongoing failure" gate as
+        // before (regression 2026-07-21 audit) is still the primary rule —
+        // ONLY overridden at escalation milestones, where a persisted,
+        // restart-proof count crossing a threshold re-alerts even within the
+        // same hour, since "still failing after 10+ attempts" is materially
+        // more urgent than "failed once."
+        const isEscalationMilestone =
+          totalFailures === 10 ||
+          totalFailures === 25 ||
+          (totalFailures > 50 && totalFailures % 25 === 0);
+        const shouldAlert = !this.sellFailureAlerted.has(positionId) || isEscalationMilestone;
+        if (shouldAlert) {
           this.sellFailureAlerted.add(positionId);
+          const severity = totalFailures >= 10 ? 'CRITICAL — ' : '';
+          const retryOutlook = classification.permanent
+            ? `This failure has no route to retry successfully — it counts toward the ${this.maxPermanentRouteRetries}-attempt permanent-failure threshold before auto-sell is disabled for this position.`
+            : 'Will keep retrying on the next price tick.';
           await this.notifier?.notifyError(
             'SELL execution failed',
-            `Position ${positionId} (${position.token.symbol ?? position.token.mint}): stop-loss/take-profit/trailing-stop should sell but the swap failed [${classification.category}]: ${classification.detail}. Will keep retrying on the next price tick.`,
+            `${severity}Position ${positionId} (${position.token.symbol ?? position.token.mint}): stop-loss/take-profit/trailing-stop should sell but the swap failed [${classification.category}]: ${classification.detail}. This is failure #${totalFailures} for this position. ${retryOutlook}`,
+          );
+        }
+        // Permanent (no-route) failure gate (2026-07-26 fix) — unlike
+        // sellFailureCount above, this DOES eventually stop future retries.
+        // See recordPermanentSellFailure's doc comment.
+        if (classification.permanent) {
+          await this.recordPermanentSellFailure(
+            positionId,
+            position.token.mint,
+            position.token.symbol ?? position.token.mint,
+            classification,
           );
         }
         latencyTracker.finish(traceId, 'failure');

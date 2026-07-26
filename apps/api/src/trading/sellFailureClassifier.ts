@@ -41,6 +41,20 @@ export interface SellFailureClassification {
    * instead go through the existing unverifiedSwapLocks reconciliation path.
    */
   retryablePreBroadcast: boolean;
+  /**
+   * True only for failures that no amount of retrying on later price ticks
+   * can ever resolve — currently just `route_unavailable` (Jupiter, and any
+   * configured native-DEX fallback, both have no path to sell this mint at
+   * all). Distinct from `retryablePreBroadcast`, which is about the narrow
+   * same-tick broadcast-retry loop; this instead drives PositionManager's
+   * cross-tick "give up after N attempts and mark the position unsellable"
+   * behavior (see SELL_MAX_PERMANENT_ROUTE_RETRIES). Every other category
+   * stays `false` here even when it's also `retryablePreBroadcast: false` —
+   * e.g. a `slippage` or `simulation_failed` rejection can very plausibly
+   * succeed on the next tick once price/congestion settles, so those must
+   * keep retrying forever, same as before this field existed.
+   */
+  permanent: boolean;
   /** Short human-readable explanation, safe to put directly in a log line. */
   detail: string;
 }
@@ -77,6 +91,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     return {
       category: 'position_lock',
       retryablePreBroadcast: false,
+      permanent: false,
       detail: 'position close/partial-sell lock or unverified-swap reconciliation lock is active',
     };
   }
@@ -90,6 +105,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     return {
       category: 'token_account_issue',
       retryablePreBroadcast: false,
+      permanent: false,
       detail: 'wallet has no on-chain balance / token account for this mint',
     };
   }
@@ -105,6 +121,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     return {
       category: 'ata_issue',
       retryablePreBroadcast: false,
+      permanent: false,
       detail: 'associated token account resolution/creation failed',
     };
   }
@@ -122,6 +139,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     return {
       category: 'blockhash_expired',
       retryablePreBroadcast: true,
+      permanent: false,
       detail: 'transaction blockhash expired before it could be included in a block',
     };
   }
@@ -135,6 +153,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     return {
       category: 'slippage',
       retryablePreBroadcast: false,
+      permanent: false,
       detail: 'price moved past the configured slippage tolerance',
     };
   }
@@ -143,11 +162,23 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     msg.includes('no route') ||
     msg.includes('could not find any route') ||
     msg.includes('route not found') ||
-    msg.includes('unsupported transaction type')
+    msg.includes('unsupported transaction type') ||
+    // Jupiter's actual quote/swap-build error bodies carry these as a raw
+    // `errorCode` field (e.g. `{"errorCode":"NO_ROUTES_FOUND", ...}`), which
+    // survives into the thrown Error's message verbatim — the underscored
+    // form doesn't match the space-separated patterns above, so without this
+    // it silently fell through to the generic 'jupiter_failure' catch-all
+    // below and was treated as an ordinary retryable 5xx forever (the root
+    // cause of the "retries forever, never lands" production bug this
+    // categorization was added to fix).
+    msg.includes('no_routes_found') ||
+    msg.includes('route_not_found') ||
+    msg.includes('route_unavailable')
   ) {
     return {
       category: 'route_unavailable',
       retryablePreBroadcast: false,
+      permanent: true,
       detail: 'no swap route available from Jupiter (or native fallback) for this pair/size',
     };
   }
@@ -161,6 +192,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     return {
       category: 'liquidity',
       retryablePreBroadcast: false,
+      permanent: false,
       detail: 'insufficient on-chain liquidity to fill this size',
     };
   }
@@ -169,6 +201,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     return {
       category: 'simulation_failed',
       retryablePreBroadcast: false,
+      permanent: false,
       detail: 'pre-flight transaction simulation rejected the swap',
     };
   }
@@ -177,6 +210,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     return {
       category: 'priority_fee_too_low',
       retryablePreBroadcast: false,
+      permanent: false,
       detail: 'priority fee too low for the transaction to be included in time',
     };
   }
@@ -186,6 +220,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     return {
       category: 'other',
       retryablePreBroadcast: false,
+      permanent: false,
       detail: 'transaction landed on-chain but reverted',
     };
   }
@@ -199,6 +234,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     return {
       category: 'confirmation_timeout',
       retryablePreBroadcast: false,
+      permanent: false,
       detail:
         'transaction broadcast but confirmation could not be observed in time (ambiguous landing)',
     };
@@ -217,6 +253,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     return {
       category: 'rpc_timeout',
       retryablePreBroadcast: true,
+      permanent: false,
       detail: 'transient RPC/network failure before the transaction was broadcast',
     };
   }
@@ -232,6 +269,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
     return {
       category: 'jupiter_failure',
       retryablePreBroadcast: true,
+      permanent: false,
       detail: 'Jupiter quote/swap-build API returned an error',
     };
   }
@@ -239,6 +277,7 @@ export function classifySellFailure(err: unknown): SellFailureClassification {
   return {
     category: 'other',
     retryablePreBroadcast: false,
+    permanent: false,
     detail: msg || 'unclassified failure',
   };
 }

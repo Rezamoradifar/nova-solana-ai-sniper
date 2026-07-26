@@ -350,6 +350,45 @@ model Position {
   /// alert again" without needing a fresh elapsed-time calculation.
   lastAlertedMonitoringState  PositionMonitoringState?
 
+  // --- Persisted stop-loss/sell execution retry state (2026-07-23, USOH
+  // incident follow-up) — same restart-survival rationale as monitoringState
+  // above: an in-memory-only failure counter (what existed before this) reset
+  // to zero on every deploy, which would silently understate "how many times
+  // has this position's stop-loss failed to execute" across a restart and
+  // could delay the escalating alert this drives (see priceMonitor.ts).
+  // Neither field ever gates whether a retry is attempted — evaluateExit/
+  // evaluateHardLossCeiling are stateless and re-detect a breach every tick
+  // regardless — they only drive alert escalation and observability.
+  /// Total consecutive terminal SELL failures for this position's current
+  /// open lifetime (reset implicitly — a closed position's failures are moot).
+  sellFailureCount   Int      @default(0)
+  /// When the most recent terminal SELL failure was recorded.
+  lastSellFailureAt  DateTime?
+
+  // --- Permanent (no-route) SELL failure tracking (2026-07-26) — fixes a
+  // production bug where a position whose SELL failed because no Jupiter (or
+  // native-DEX-fallback) route exists for the mint was retried forever, once
+  // per price tick, with sellFailureCount alone climbing into the thousands
+  // (see sellFailureClassifier.ts's `permanent: true` classification). Unlike
+  // sellFailureCount above, noRouteSellFailureCount only increments on a
+  // `permanent` classification and DOES gate future retries: once it reaches
+  // SELL_MAX_PERMANENT_ROUTE_RETRIES, sellUnsellable flips true and
+  // PositionManager stops scheduling any further sell attempt for this
+  // position (stop-loss, take-profit, and trailing-stop alike) until a human
+  // clears it. Deliberately does not touch PositionStatus — the position is
+  // still OPEN and still holds real tokens, it just can't be auto-sold.
+  /// Consecutive permanent (no-route) SELL failures for this position's
+  /// current open lifetime.
+  noRouteSellFailureCount Int      @default(0)
+  /// True once noRouteSellFailureCount has crossed the configured threshold —
+  /// PositionManager refuses to attempt any further auto-sell while set.
+  sellUnsellable          Boolean  @default(false)
+  /// When sellUnsellable was set.
+  unsellableAt            DateTime?
+  /// The classifier's `detail` string for the failure that triggered
+  /// sellUnsellable — safe to surface directly in an alert/log line.
+  unsellableReason        String?
+
   partialExits      PositionPartialExit[]
   emergencyExitLogs EmergencyExitLog[]
 
@@ -812,6 +851,31 @@ model AuditLog {
   @@index([action])
   @@index([walletId])
   @@map("audit_logs")
+}
+
+/// Immutable, append-only record of every value changed by the 2026-07-23
+/// decimals-bug historical PnL reconciliation (see scripts/reconcilePnl.mjs).
+/// Never updated or deleted after insert — a correction that itself needs
+/// correcting gets a NEW row in a new batch, not an edit to this one. Deliberately
+/// generic (tableName/recordId/fieldName instead of typed FK columns) since this
+/// single script touches four different tables (tokens, positions,
+/// performance_fee_ledger, referral_rewards).
+model PnlReconciliationLog {
+  id         String   @id @default(cuid())
+  /// Groups every change made by one reconciliation run — lets a single
+  /// execution be reviewed or (in principle) reasoned about as a unit.
+  batchId    String
+  tableName  String
+  recordId   String
+  fieldName  String
+  oldValue   String
+  newValue   String
+  reason     String
+  createdAt  DateTime @default(now())
+
+  @@index([batchId])
+  @@index([tableName, recordId])
+  @@map("pnl_reconciliation_log")
 }
 
 enum LedgerEntryType {

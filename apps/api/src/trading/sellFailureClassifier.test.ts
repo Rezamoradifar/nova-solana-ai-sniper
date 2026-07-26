@@ -8,12 +8,37 @@ describe('classifySellFailure', () => {
     expect(result.retryablePreBroadcast).toBe(false);
   });
 
-  it('categorizes "no route found" as route_unavailable, non-retryable', () => {
+  it('categorizes "no route found" as route_unavailable, non-retryable, permanent', () => {
     const result = classifySellFailure(
       new Error('Jupiter quote failed: 400 could not find any route'),
     );
     expect(result.category).toBe('route_unavailable');
     expect(result.retryablePreBroadcast).toBe(false);
+    expect(result.permanent).toBe(true);
+  });
+
+  it('categorizes a raw Jupiter NO_ROUTES_FOUND error body as route_unavailable, permanent (regression: previously fell through to the generic jupiter_failure catch-all and retried forever)', () => {
+    const result = classifySellFailure(
+      new Error(
+        'Jupiter quote failed: 400 {"errorCode":"NO_ROUTES_FOUND","error":"No routes found"}',
+      ),
+    );
+    expect(result.category).toBe('route_unavailable');
+    expect(result.permanent).toBe(true);
+  });
+
+  it('categorizes a raw Jupiter ROUTE_NOT_FOUND error body as route_unavailable, permanent', () => {
+    const result = classifySellFailure(
+      new Error('Jupiter swap build failed: 400 {"errorCode":"ROUTE_NOT_FOUND"}'),
+    );
+    expect(result.category).toBe('route_unavailable');
+    expect(result.permanent).toBe(true);
+  });
+
+  it('categorizes a route_unavailable error code as route_unavailable, permanent', () => {
+    const result = classifySellFailure(new Error('swap failed: route_unavailable for this pair'));
+    expect(result.category).toBe('route_unavailable');
+    expect(result.permanent).toBe(true);
   });
 
   it('categorizes zero-liquidity pool errors as liquidity, non-retryable', () => {
@@ -91,10 +116,30 @@ describe('classifySellFailure', () => {
     expect(result.retryablePreBroadcast).toBe(false);
   });
 
-  it('categorizes a generic Jupiter 5xx as jupiter_failure, retryable', () => {
+  it('categorizes a generic Jupiter 5xx as jupiter_failure, retryable, not permanent', () => {
     const result = classifySellFailure(new Error('Jupiter swap build failed: 502 Bad Gateway'));
     expect(result.category).toBe('jupiter_failure');
     expect(result.retryablePreBroadcast).toBe(true);
+    expect(result.permanent).toBe(false);
+  });
+
+  it('categorizes a temporary RPC timeout as permanent: false, so it keeps retrying forever', () => {
+    const result = classifySellFailure(new Error('fetch failed: ETIMEDOUT'));
+    expect(result.permanent).toBe(false);
+  });
+
+  it('categorizes a blockhash-expired failure as permanent: false, so it keeps retrying forever', () => {
+    const result = classifySellFailure(
+      new Error('failed to send transaction: Blockhash not found'),
+    );
+    expect(result.permanent).toBe(false);
+  });
+
+  it('categorizes a simulation failure (e.g. from congestion) as permanent: false, so it keeps retrying forever', () => {
+    const result = classifySellFailure(
+      new Error('Swap simulation failed: {"InstructionError":[0,"Custom"]}'),
+    );
+    expect(result.permanent).toBe(false);
   });
 
   it('falls back to other, non-retryable for anything unrecognized', () => {

@@ -271,6 +271,59 @@ export const envSchema = z.object({
     .min(60000)
     .default(25 * 60 * 1000),
 
+  // Recurring-outage follow-up (2026-07-23): the silence alert above used to only
+  // ever trigger a same-provider resubscribe, which repeatedly failed to actually
+  // fix a dropping subscription — see PumpFunMonitor's multi-provider failover.
+  // After a resubscribe (same provider) is attempted, this is how long we wait for
+  // a fresh raw log event before concluding it didn't help and escalating to
+  // failoverToNextProvider instead of trying the same provider again.
+  PUMPFUN_WATCHDOG_VERIFY_WINDOW_MS: z.coerce.number().min(5_000).default(30_000),
+  // Bounded exponential backoff (with jitter) applied to a WS provider that just
+  // failed a subscription/verification — same shape as resilientConnection.ts's
+  // ordinary-RPC-call cooldown, kept separate since subscription failures are a
+  // different signal (silently dropped events, not a request-level error).
+  PUMPFUN_PROVIDER_COOLDOWN_BASE_MS: z.coerce.number().min(1_000).default(30_000),
+  PUMPFUN_PROVIDER_COOLDOWN_MAX_MS: z.coerce
+    .number()
+    .min(1_000)
+    .default(5 * 60 * 1000),
+  // How often, while running on a non-primary WS provider, PumpFunMonitor
+  // attempts to switch back to the primary and verify it's actually receiving
+  // events again — "periodically test whether the primary has recovered."
+  PUMPFUN_PRIMARY_RECOVERY_PROBE_INTERVAL_MS: z.coerce
+    .number()
+    .min(30_000)
+    .default(5 * 60 * 1000),
+
+  // Independent fallback discovery path (2026-07-23): polls getSignaturesForAddress
+  // on the pump.fun program directly, over plain RPC, never the WS subscription —
+  // see fallbackLaunchDiscovery.ts. The idle tick is cheap (one signature-list call,
+  // no per-signature parsing) and runs continuously just to prove this path's own
+  // RPC connectivity and keep its watermark from drifting far behind; the expensive
+  // per-signature active scan only ever runs while the WS source is unhealthy, or
+  // once, bounded, to reconcile a just-ended outage window.
+  FALLBACK_DISCOVERY_IDLE_INTERVAL_MS: z.coerce.number().min(10_000).default(60_000),
+  // Caps how far back an active scan will page, so a long outage still bounds RPC
+  // cost instead of parsing every signature back to the start of the outage
+  // unconditionally.
+  FALLBACK_DISCOVERY_MAX_LOOKBACK_MS: z.coerce
+    .number()
+    .min(60_000)
+    .default(2 * 60 * 60 * 1000),
+
+  // Scanner health state machine (HEALTHY/DEGRADED/RECOVERING/UNHEALTHY) — how
+  // often it re-evaluates PumpFunMonitor + FallbackLaunchDiscovery + the existing
+  // per-DEX SourceHealthMonitor to decide the overall detection health and whether
+  // NEW auto-buys must be safety-paused (see scannerHealth.ts).
+  SCANNER_HEALTH_CHECK_INTERVAL_MS: z.coerce.number().min(5_000).default(30_000),
+  // Default false: once a total detection outage (UNHEALTHY) safety-pauses NEW
+  // auto-buys, recovery back to HEALTHY does NOT automatically clear that pause —
+  // an admin must explicitly resume it (see the /resumeautobuy Telegram command),
+  // matching this task's "request admin approval" requirement. Flipping this to
+  // true is an explicit, auditable operator decision to allow automatic resume
+  // instead, same opt-in convention as ENTRY_FILTER_ENABLED etc.
+  SCANNER_AUTO_BUY_AUTO_RESUME_ENABLED: booleanFlag(false),
+
   // Two-stage discovery pipeline (2026-07-22): bounds how many candidates the
   // discovery queue (raw WS event -> parsed tx -> candidatePipeline.ts) and
   // the AI-provider-call queue run concurrently, so a burst of launches can
@@ -300,6 +353,14 @@ export const envSchema = z.object({
   CANDIDATE_RETRY_INTERVAL_MS: z.coerce.number().min(2000).default(10000),
   CANDIDATE_RETRY_MAX_ATTEMPTS: z.coerce.number().int().nonnegative().default(6),
 
+  // Section 8 follow-up (2026-07-23): how often securityGateSummaryReporter.ts
+  // turns candidatePipeline.ts's accumulated securityGateStats window into one
+  // Telegram report to the owner, replacing the old per-rejection alert this
+  // same audit removed. 15 minutes by default — frequent enough to catch a
+  // stuck scanner quickly, infrequent enough to not just be a different
+  // flavor of alert noise.
+  SECURITY_GATE_SUMMARY_INTERVAL_MS: z.coerce.number().min(60_000).default(900_000),
+
   // EmergencyExitMonitor — Institutional Mode's safety net: force-closes an
   // OPEN institutional-mode position on a detected liquidity-removal/rug
   // signal, independent of that position's own TP/SL/trailing-stop (see
@@ -309,6 +370,55 @@ export const envSchema = z.object({
   // than reusing PRICE_CHECK_INTERVAL_MS.
   EMERGENCY_EXIT_ENABLED: booleanFlag(false),
   EMERGENCY_EXIT_CHECK_INTERVAL_MS: z.coerce.number().min(15000).default(45000),
+
+  // Dynamic Risk Tiers / bundled-wallet detection / extreme-pump protection
+  // (2026-07-23, USOH incident follow-up — see apps/api/src/trading/riskTier.ts,
+  // apps/api/src/detection/holderClustering.ts, apps/api/src/detection/
+  // pumpProtection.ts). Unlike the staged-feature flags above, these default
+  // ON: they're a direct safety response to a live incident (a bundled-wallet
+  // token cleared every existing check), not an experimental opt-in. Every
+  // threshold here is a multiplier/percentage/duration, never a hardcoded
+  // absolute SOL amount — riskTier.ts's sizing always scales the user's own
+  // SnipeConfig.buyAmountSol.
+  RISK_TIER_ULTRA_EARLY_MAX_AGE_MS: z.coerce
+    .number()
+    .nonnegative()
+    .default(5 * 60 * 1000),
+  RISK_TIER_EARLY_MAX_AGE_MS: z.coerce
+    .number()
+    .nonnegative()
+    .default(15 * 60 * 1000),
+  // Basis points (10000 = 100%) of a config's own buyAmountSol. Established
+  // defaults to 10000 — an exact no-op, reproducing today's behavior for any
+  // token 15min+ old.
+  RISK_TIER_ULTRA_EARLY_SIZE_BPS: z.coerce.number().int().min(0).max(10_000).default(2500),
+  RISK_TIER_EARLY_SIZE_BPS: z.coerce.number().int().min(0).max(10_000).default(5000),
+  RISK_TIER_ESTABLISHED_SIZE_BPS: z.coerce.number().int().min(0).max(10_000).default(10_000),
+  // Bundled-wallet / holder-clustering detection thresholds — calibrated
+  // against the USOH incident's actual holder data (18 wallets each within
+  // ~0.05% of each other, ~4.45% of supply combined). A confirmed cluster
+  // above both thresholds blocks auto-buy unconditionally (see
+  // criticalSecurityGate.ts) — this is not a staged/opt-in feature either.
+  BUNDLE_CLUSTER_SIMILARITY_TOLERANCE_BPS: z.coerce.number().int().min(0).max(10_000).default(300),
+  BUNDLE_CLUSTER_MIN_WALLET_COUNT: z.coerce.number().int().positive().default(4),
+  BUNDLE_CLUSTER_MIN_SUPPLY_PERCENT: z.coerce.number().nonnegative().default(3),
+  // Extreme-pump protection: priceChangeH1 at/above this % escalates the risk
+  // tier one notch stricter (see riskTier.ts's escalateTierForPump) but never
+  // blocks a buy by itself — price appreciation alone is deliberately not
+  // used to classify a token as a scam (see pumpProtection.ts).
+  EXTREME_PUMP_H1_THRESHOLD_PERCENT: z.coerce.number().positive().default(500),
+
+  // Permanent-route-failure retry cap (2026-07-26): a SELL that fails because
+  // no Jupiter (or native-DEX-fallback) route exists for a mint — see
+  // sellFailureClassifier.ts's `permanent: true` classification — can never
+  // succeed by simply retrying on the next price tick, unlike every other
+  // SELL failure category. Before this, PositionManager retried such a
+  // position on every single price tick forever (confirmed in production:
+  // one position's sellFailureCount reached the thousands). After this many
+  // consecutive permanent (no-route) SELL failures for a position,
+  // PositionManager marks it unsellable and stops scheduling further sell
+  // attempts for it (see Position.sellUnsellable in schema.prisma).
+  SELL_MAX_PERMANENT_ROUTE_RETRIES: z.coerce.number().int().positive().default(3),
 
   // DepositMonitor — polls every active wallet's live SOL balance and records
   // an increase as a DEPOSIT ledger/audit event (see
