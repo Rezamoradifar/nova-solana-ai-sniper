@@ -13,6 +13,7 @@ import {
 } from '../solana/pumpfunBondingCurve.js';
 import { getTopHolder } from '../detection/onchain.js';
 import type { DexRegistry } from '../solana/dex/registry.js';
+import { NotImplementedNativeExecutor } from '../solana/dex/types.js';
 import { JitoClient } from '../solana/jito.js';
 import { broadcastTransaction as broadcastTransactionShared } from '../solana/broadcast.js';
 import { evaluateExit, resolveEffectiveStopLossPercent, type ExitReason } from './exitEngine.js';
@@ -753,8 +754,27 @@ export class PositionManager {
 
         const target = await getFallbackTarget();
         const executor = target ? this.dexRegistry?.getExecutor(target.dex) : undefined;
-        if (!executor || !target?.poolAddress)
+        // Production bug fix (2026-07-26): DexRegistry always registers SOME
+        // executor for every Dex — one with no override configured defaults
+        // to NotImplementedNativeExecutor (see registry.ts), which is truthy
+        // and so passed the `!executor` check below, but its buildSwap always
+        // rejects with a generic "not implemented yet" error whose message
+        // happens to contain the word "Jupiter." That error — not the
+        // original, correctly-classified jupiterErr (e.g. route_unavailable,
+        // permanent — see sellFailureClassifier.ts) — was what propagated out
+        // of this method and got (mis)classified by every caller as the
+        // ordinary retryable jupiter_failure category. Net effect, confirmed
+        // live: a SELL with no real route on a DEX with no real fallback
+        // executor (today: RAYDIUM/ORCA/METEORA, only PUMPSWAP has one) never
+        // reached SELL_MAX_PERMANENT_ROUTE_RETRIES and retried forever, once
+        // per price tick, every notifyError still saying "Will keep retrying
+        // on the next price tick." A stub executor has zero real fallback
+        // capability, so it's treated identically to no executor at all —
+        // this always throws the ORIGINAL classified error instead of ever
+        // invoking the stub.
+        if (!executor || !target?.poolAddress || executor instanceof NotImplementedNativeExecutor) {
           throw tagSellFailure(jupiterErr, classification.category);
+        }
 
         this.logger.warn(
           {

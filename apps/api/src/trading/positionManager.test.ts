@@ -15,6 +15,7 @@ import { PositionManager } from './positionManager.js';
 import { getTopHolder } from '../detection/onchain.js';
 import { unsealKeypair } from '@nova/shared';
 import { latencyTracker } from '../lib/latencyTracker.js';
+import { NotImplementedNativeExecutor } from '../solana/dex/types.js';
 
 beforeEach(() => {
   latencyTracker.reset();
@@ -2232,6 +2233,100 @@ describe('PositionManager permanent (no-route) SELL failure handling (2026-07-26
       'Position marked unsellable — no Jupiter route',
       expect.stringContaining('position-noroute'),
     );
+  });
+
+  it("regression (2026-07-26 production bug — live: position cmrpd44fn.../ORCA retried forever, notifyError kept saying \"Will keep retrying on the next price tick.\"): when the DEX registry's fallback executor is the NotImplementedNativeExecutor stub (today's real topology for RAYDIUM/ORCA/METEORA), the stub's own generic error must never mask the original route_unavailable classification — the position must still reach sellUnsellable after 3 attempts", async () => {
+    const prepareSwap = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          'Jupiter quote failed: 400 {"error":"No routes found","errorCode":"NO_ROUTES_FOUND"}',
+        ),
+      );
+    const jupiter = { prepareSwap, getQuote: vi.fn() } as never;
+    const connection = {
+      getParsedTokenAccountsByOwner: vi.fn().mockResolvedValue({
+        value: [{ account: { data: { parsed: { info: { tokenAmount: { amount: '1000' } } } } } }],
+      }),
+      sendTransaction: vi.fn(),
+    } as never;
+    const dexScreener = { getBestSolanaPair: vi.fn() } as never;
+    // The real production topology (worker.ts): only PUMPSWAP gets a real
+    // executor override — RAYDIUM/ORCA/METEORA all resolve to this exact
+    // stub class, same as DexRegistry's own default (see registry.ts).
+    const dexRegistry = {
+      getExecutor: vi.fn().mockReturnValue(new NotImplementedNativeExecutor('ORCA')),
+    } as never;
+    const positionUpdate = statefulPositionUpdateMock(
+      baseNoRoutePosition({
+        token: { ...baseNoRoutePosition().token, dex: 'ORCA', poolAddress: 'pool-orca-1' },
+      }),
+    );
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue(
+          baseNoRoutePosition({
+            token: { ...baseNoRoutePosition().token, dex: 'ORCA', poolAddress: 'pool-orca-1' },
+          }),
+        ),
+        update: positionUpdate,
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+    } as never;
+    const errorLog = vi.fn();
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: errorLog } as never;
+    const notifyError = vi.fn().mockResolvedValue(undefined);
+
+    const manager = new PositionManager(
+      prisma,
+      connection,
+      jupiter,
+      dexScreener,
+      logger,
+      fakeSafety(),
+      { notifyError } as never,
+      false, // live trading
+      dexRegistry,
+    );
+
+    let lastRejection: unknown;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await manager.closePosition('position-noroute', 'wallet-1', 'enc', 'key', {
+          currentPriceUsd: 0.002,
+        });
+      } catch (err) {
+        lastRejection = err;
+      }
+    }
+
+    // The bug: this used to be "No native ORCA executor is implemented yet
+    // — Jupiter is the only execution path for this DEX..." (the stub's own
+    // message), which classifySellFailure misread as the ordinary retryable
+    // jupiter_failure category. Fixed: the original, correctly-classified
+    // Jupiter error survives all the way to the caller.
+    expect((lastRejection as Error).message).toMatch(/NO_ROUTES_FOUND/);
+    expect((lastRejection as Error).message).not.toMatch(/No native ORCA executor/);
+
+    expect(positionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ sellUnsellable: true }),
+      }),
+    );
+    expect(errorLog).toHaveBeenCalledWith(
+      expect.anything(),
+      'Skipping position permanently because no Jupiter route exists.',
+    );
+    // The exact regression: every prior notifyError call must NOT have said
+    // this was going to keep retrying forever.
+    for (const call of notifyError.mock.calls) {
+      expect(call[1]).not.toContain('Will keep retrying on the next price tick.');
+    }
   });
 
   it('checkAndMaybeClose skips a position already marked sellUnsellable — no swap is ever attempted', async () => {
