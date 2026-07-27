@@ -9,6 +9,8 @@ import {
   formatAiHighScoreMessage,
   formatEmergencyExitMessage,
   formatReferralEarnedMessage,
+  formatMemberGrowthMessage,
+  formatMemberMilestoneMessage,
   AI_HIGH_SCORE_THRESHOLD,
   NotificationService,
 } from './notifications.js';
@@ -254,6 +256,46 @@ describe('formatReferralEarnedMessage', () => {
     });
     expect(text).toContain('RAGE\\_GUY');
     expect(text).not.toContain('`RAGE_GUY`');
+  });
+});
+
+describe('formatMemberGrowthMessage', () => {
+  const fixedNow = new Date('2026-07-27T22:10:00.000Z');
+
+  it('uses singular phrasing and "+1" for a single new user', () => {
+    const text = formatMemberGrowthMessage({ newCount: 1, totalMembers: 2541 }, fixedNow);
+    expect(text).toContain('New User Joined');
+    expect(text).toContain('A new user registered.');
+    expect(text).toContain('New Users: +1');
+    expect(text).toContain('Total Members: 2,541');
+    expect(text).toContain('Time: 2026-07-27 22:10 UTC');
+    expect(text).not.toContain('New Users Joined');
+  });
+
+  it('uses plural phrasing and the batched count for multiple new users', () => {
+    const text = formatMemberGrowthMessage({ newCount: 5, totalMembers: 2546 }, fixedNow);
+    expect(text).toContain('New Users Joined');
+    expect(text).toContain('5 new users registered.');
+    expect(text).toContain('New Users: +5');
+    expect(text).toContain('Total Members: 2,546');
+  });
+
+  it('defaults `now` to the current time when not passed', () => {
+    const text = formatMemberGrowthMessage({ newCount: 1, totalMembers: 1 });
+    expect(text).toMatch(/Time: \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
+  });
+});
+
+describe('formatMemberMilestoneMessage', () => {
+  it('renders the milestone and total with thousands separators', () => {
+    const text = formatMemberMilestoneMessage(
+      { milestone: 1000, totalMembers: 1002 },
+      new Date('2026-07-27T22:10:00.000Z'),
+    );
+    expect(text).toContain('Milestone Reached!');
+    expect(text).toContain('1,000 Members');
+    expect(text).toContain('Total Members: 1,002');
+    expect(text).toContain('Time: 2026-07-27 22:10 UTC');
   });
 });
 
@@ -529,6 +571,31 @@ describe('NotificationService — operational alerts stay owner-only', () => {
     const text = sendMessage.mock.calls[0]![1] as string;
     expect(text).toContain('to\\_the\\_moon');
     expect(text).not.toContain('to_the_moon');
+  });
+
+  it('notifyMemberGrowth never queries active users or fans out', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = { user: { findMany: vi.fn() } } as unknown as PrismaClient;
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyMemberGrowth({ newCount: 3, totalMembers: 2543 });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith('OWNER_CHAT', expect.any(String), expect.anything());
+    expect(prisma.user.findMany as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    expect(sendMessage.mock.calls[0]![1] as string).toContain('New Users: +3');
+  });
+
+  it('notifyMemberMilestone never queries active users or fans out', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = { user: { findMany: vi.fn() } } as unknown as PrismaClient;
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyMemberMilestone({ milestone: 500, totalMembers: 500 });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(prisma.user.findMany as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    expect(sendMessage.mock.calls[0]![1] as string).toContain('500 Members');
   });
 });
 

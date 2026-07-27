@@ -36,6 +36,7 @@ import {
 import { FallbackLaunchDiscovery } from './detection/fallbackLaunchDiscovery.js';
 import { ScannerHealthCoordinator } from './detection/scannerHealth.js';
 import { SecurityGateSummaryReporter } from './notify/securityGateSummaryReporter.js';
+import { MemberGrowthReporter } from './notify/memberGrowthReporter.js';
 import { securityGateStats } from './detection/securityGateStats.js';
 import { JupiterClient } from './solana/jupiter.js';
 import { DexScreenerClient } from './solana/dexscreener.js';
@@ -1466,6 +1467,10 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   const securityGateSummaryReporter = new SecurityGateSummaryReporter(notifier, app.log as never);
   securityGateSummaryReporter.start(app.config.SECURITY_GATE_SUMMARY_INTERVAL_MS);
 
+  // Telegram Member Counter (2026-07-27) — see memberGrowthReporter.ts's doc comment.
+  const memberGrowthReporter = new MemberGrowthReporter(app.prisma, notifier, app.log as never);
+  memberGrowthReporter.start(app.config.MEMBER_GROWTH_REPORT_INTERVAL_MS);
+
   // Fee payer of a parsed transaction — always the first account key by
   // Solana convention. Best-effort creator/deployer identity (same
   // "documented limitation, not a guarantee" caveat as positionManager.ts's
@@ -1675,6 +1680,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     fallbackLaunchDiscovery.stop();
     scannerHealthCoordinator.stop();
     securityGateSummaryReporter.stop();
+    memberGrowthReporter.stop();
     twitterMonitor?.stop();
     telegramTrendMonitor?.stop();
     priceMonitor.stop();

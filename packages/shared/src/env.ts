@@ -392,6 +392,16 @@ export const envSchema = z.object({
   // flavor of alert noise.
   SECURITY_GATE_SUMMARY_INTERVAL_MS: z.coerce.number().min(60_000).default(900_000),
 
+  // Telegram Member Counter (2026-07-27): how often memberGrowthReporter.ts polls
+  // the total registered-bot-user count and turns any increase since the last poll
+  // into one batched "+N members" owner notification, plus any newly-crossed
+  // milestone (see MEMBER_MILESTONES) — same periodic-snapshot convention as
+  // SECURITY_GATE_SUMMARY_INTERVAL_MS above, chosen so several joins inside one
+  // window collapse into a single message instead of one per join. 5 minutes by
+  // default — frequent enough that "New Users Joined" still feels timely, without
+  // polling the User table on every single registration.
+  MEMBER_GROWTH_REPORT_INTERVAL_MS: z.coerce.number().min(60_000).default(300_000),
+
   // EmergencyExitMonitor — Institutional Mode's safety net: force-closes an
   // OPEN institutional-mode position on a detected liquidity-removal/rug
   // signal, independent of that position's own TP/SL/trailing-stop (see

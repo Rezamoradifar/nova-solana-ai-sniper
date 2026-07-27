@@ -9,7 +9,7 @@ import {
 } from './cards/render.js';
 import { buildBuyCaption, buildShareCaption } from './cards/captions.js';
 import { buildBuyCardKeyboard, buildSellCardKeyboard } from './cards/keyboards.js';
-import { escapeMd } from './ui/format.js';
+import { escapeMd, fmtDate } from './ui/format.js';
 import { resolveLocale, t, type Locale } from './i18n/index.js';
 
 export interface TradeNotification {
@@ -204,6 +204,55 @@ export function formatSecurityGateSummaryMessage(report: SecurityGateSummaryRepo
     `${consensusLine}${latencyLine}${retryLine}\n\n` +
     `${reasonLines.length > 0 ? `Reasons:\n${reasonLines}` : ''}`
   ).trim();
+}
+
+/**
+ * Telegram Member Counter (2026-07-27): sent by memberGrowthReporter.ts
+ * (apps/api) on a fixed poll interval — `newCount` is the increase since the
+ * last poll, already batched (see the reporter's doc comment), never one
+ * message per individual join.
+ */
+export interface MemberGrowthNotification {
+  newCount: number;
+  totalMembers: number;
+}
+
+/** Fired once per threshold in MEMBER_MILESTONES (memberGrowthReporter.ts),
+ * never re-fired for the same milestone across restarts (persisted via
+ * BotMemberStats.lastMilestone). */
+export interface MemberMilestoneNotification {
+  milestone: number;
+  totalMembers: number;
+}
+
+/** Pure so it's independently unit-tested, same convention as every other
+ * format*Message function in this file. Not localized — owner-only ops
+ * report, same reasoning as formatSecurityGateSummaryMessage. */
+export function formatMemberGrowthMessage(
+  data: MemberGrowthNotification,
+  now: Date = new Date(),
+): string {
+  const isSingle = data.newCount === 1;
+  return (
+    `🎉 *New ${isSingle ? 'User' : 'Users'} Joined*\n\n` +
+    `👋 ${isSingle ? 'A new user registered.' : `${data.newCount} new users registered.`}\n\n` +
+    `➕ New Users: +${data.newCount}\n` +
+    `👥 Total Members: ${data.totalMembers.toLocaleString('en-US')}\n\n` +
+    `🕐 Time: ${fmtDate(now)} UTC`
+  );
+}
+
+/** Pure so it's independently unit-tested, same convention as formatMemberGrowthMessage. */
+export function formatMemberMilestoneMessage(
+  data: MemberMilestoneNotification,
+  now: Date = new Date(),
+): string {
+  return (
+    `🏆 *Milestone Reached!*\n\n` +
+    `🎉 The bot just crossed *${data.milestone.toLocaleString('en-US')} Members*!\n\n` +
+    `👥 Total Members: ${data.totalMembers.toLocaleString('en-US')}\n\n` +
+    `🕐 Time: ${fmtDate(now)} UTC`
+  );
 }
 
 /** `https://dexscreener.com/solana/{mint}` — the one chart-link format used everywhere. */
@@ -597,6 +646,17 @@ export class NotificationService {
    * securityGateSummaryReporter.ts, which calls this on a fixed interval. */
   async notifySecurityGateSummary(report: SecurityGateSummaryReport): Promise<void> {
     await this.sendToOwner(formatSecurityGateSummaryMessage(report));
+  }
+
+  /** Owner-only, same convention as notifySecurityGateSummary. See
+   * memberGrowthReporter.ts, which polls and calls this on a fixed interval. */
+  async notifyMemberGrowth(data: MemberGrowthNotification): Promise<void> {
+    await this.sendToOwner(formatMemberGrowthMessage(data));
+  }
+
+  /** Owner-only, same convention as notifyMemberGrowth. */
+  async notifyMemberMilestone(data: MemberMilestoneNotification): Promise<void> {
+    await this.sendToOwner(formatMemberMilestoneMessage(data));
   }
 
   async notifySocialMention(text: string, tweetId: string): Promise<void> {

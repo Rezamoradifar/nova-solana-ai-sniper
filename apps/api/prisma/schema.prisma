@@ -1282,6 +1282,20 @@ model PlatformBalance {
   @@map("platform_balance")
 }
 
+/// Singleton row (fixed id), same pattern as OwnerBalance/PlatformBalance —
+/// persists what memberGrowthReporter.ts (apps/api) has already notified the
+/// owner about, so a process restart never re-sends a "+N members" burst for
+/// growth already reported, and never re-fires a milestone (see
+/// MEMBER_MILESTONES) already crossed.
+model BotMemberStats {
+  id                String   @id @default("bot_member_stats")
+  lastNotifiedCount Int      @default(0)
+  lastMilestone     Int      @default(0)
+  updatedAt         DateTime @updatedAt
+
+  @@map("bot_member_stats")
+}
+
 // =====================================================================
 // Withdrawal Engine (additive, downstream of the Profit Distribution
 // Engine above — see apps/api/src/business/withdrawalEngine.ts). Draws

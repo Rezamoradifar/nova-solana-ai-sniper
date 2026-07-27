@@ -10,6 +10,7 @@ import {
   setScannerAutoBuyPauseState,
   type Logger,
 } from '@nova/shared';
+import { fmtHoldingTimeShort } from '../ui/format.js';
 
 /** Restricts every command registered after this middleware to known admin Telegram IDs. */
 function requireAdmin(adminIds: Set<string>) {
@@ -44,14 +45,69 @@ export function registerAdminCommands(
     );
   });
 
+  // Telegram Member Counter (2026-07-27) — dashboard companion to the
+  // background memberGrowthReporter.ts alerts. "Members" == User rows with a
+  // telegramId (registered bot users), consistent with that reporter's own
+  // count so the two never drift apart.
   bot.command('stats', admin, async (ctx) => {
-    const closedPositions = await prisma.position.findMany({ where: { status: 'CLOSED' } });
-    const totalPnl = closedPositions.reduce((sum, p) => sum + (p.realizedPnlUsd ?? 0), 0);
-    const wins = closedPositions.filter((p) => (p.realizedPnlUsd ?? 0) > 0).length;
-    const winRate = closedPositions.length ? (wins / closedPositions.length) * 100 : 0;
+    const now = new Date();
+    const startOfDay = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+    const startOfWeek = new Date(
+      startOfDay.getTime() - startOfDay.getUTCDay() * 24 * 60 * 60 * 1000,
+    );
+    const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    const [
+      totalMembers,
+      newToday,
+      newThisWeek,
+      newThisMonth,
+      totalTrades,
+      volumeAgg,
+      activeWalletGroups,
+    ] = await Promise.all([
+      prisma.user.count({ where: { telegramId: { not: null } } }),
+      prisma.user.count({ where: { telegramId: { not: null }, createdAt: { gte: startOfDay } } }),
+      prisma.user.count({ where: { telegramId: { not: null }, createdAt: { gte: startOfWeek } } }),
+      prisma.user.count({
+        where: { telegramId: { not: null }, createdAt: { gte: startOfMonth } },
+      }),
+      prisma.trade.count({ where: { status: 'CONFIRMED' } }),
+      prisma.trade.aggregate({ where: { status: 'CONFIRMED' }, _sum: { amountSol: true } }),
+      prisma.trade.groupBy({ by: ['walletId'], where: { createdAt: { gte: since24h } } }),
+    ]);
+
+    // Trade->Wallet->User, not a direct userId column on Trade — a second
+    // narrow query on the (few) wallets active in the window, rather than
+    // pulling every recent trade row just to dedupe by user.
+    const activeWalletIds = activeWalletGroups.map((g) => g.walletId);
+    const activeUsers24h = activeWalletIds.length
+      ? (
+          await prisma.wallet.findMany({
+            where: { id: { in: activeWalletIds } },
+            select: { userId: true },
+            distinct: ['userId'],
+          })
+        ).length
+      : 0;
+
+    const growthRate = totalMembers > 0 ? (newThisWeek / totalMembers) * 100 : 0;
+    const totalVolumeSol = volumeAgg._sum.amountSol ?? 0;
+
     await ctx.reply(
-      `📈 *Trading stats*\nClosed positions: ${closedPositions.length}\n` +
-        `Win rate: ${winRate.toFixed(1)}%\nTotal realized PnL: $${totalPnl.toFixed(2)}`,
+      `📊 *Bot Stats*\n\n` +
+        `👥 Total Members: ${totalMembers.toLocaleString('en-US')}\n` +
+        `🆕 New Today: ${newToday.toLocaleString('en-US')}\n` +
+        `🆕 New This Week: ${newThisWeek.toLocaleString('en-US')}\n` +
+        `🆕 New This Month: ${newThisMonth.toLocaleString('en-US')}\n` +
+        `📈 Growth Rate (7d): ${growthRate.toFixed(1)}%\n` +
+        `🟢 Active Users (24h): ${activeUsers24h.toLocaleString('en-US')}\n` +
+        `💰 Total Trades: ${totalTrades.toLocaleString('en-US')}\n` +
+        `💵 Total Volume: ${totalVolumeSol.toLocaleString('en-US', { maximumFractionDigits: 2 })} SOL\n` +
+        `⏱ Server Uptime: ${fmtHoldingTimeShort(process.uptime() * 1000)}`,
       { parse_mode: 'Markdown' },
     );
   });
