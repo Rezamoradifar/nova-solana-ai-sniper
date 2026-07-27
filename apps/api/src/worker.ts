@@ -75,7 +75,6 @@ import { ShadowModePriceSampler } from './trading/shadowModePriceSampler.js';
 import {
   hasAnyAiProvider,
   resolveAiProvider,
-  resolveGeminiProvider,
   resolveOpenRouterProvider,
   resolveOllamaProvider,
   scoreToken,
@@ -438,30 +437,33 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   const monitor = new PumpFunMonitor(pumpFunWsProviders, app.log as never);
   app.decorate('pumpFunMonitor', monitor);
 
-  // Multi-LLM consensus (2026-07-22): bypasses resolveAiProvider's single-pick
-  // priority chain entirely — consensus mode needs Gemini AND OpenRouter
-  // specifically, not "whichever one that function would prefer." See
-  // packages/ai/src/consensus.ts and this file's processAiCall below.
-  const geminiProvider = resolveGeminiProvider({ geminiApiKey: app.config.GEMINI_API_KEY });
+  // Multi-LLM consensus (2026-07-27 redesign: Gemini removed entirely from
+  // scoring/consensus/voting — see packages/ai/src/consensus.ts's module-level
+  // comment). Consensus mode now needs only OpenRouter; Ollama is an optional
+  // second voter. Gemini's provider code (resolveGeminiProvider, GeminiProvider
+  // in packages/ai/src/provider.ts) is kept in the codebase for possible future
+  // optional use but is deliberately never constructed or called here — no
+  // GEMINI_API_KEY read, no Gemini API call, no wait on a Gemini response,
+  // anywhere in this trading path.
   const openRouterProvider = resolveOpenRouterProvider({
     openrouterApiKey: app.config.OPENROUTER_API_KEY,
     openrouterModel: app.config.OPENROUTER_MODEL,
   });
-  const consensusModeActive = Boolean(geminiProvider && openRouterProvider);
+  const consensusModeActive = Boolean(openRouterProvider);
 
-  // Self-hosted Ollama (2026-07-26): optional third consensus vote — see
+  // Self-hosted Ollama (2026-07-26): optional second consensus vote — see
   // packages/ai/src/consensus.ts's `ollama` parameter. Only ever consulted
-  // when consensus mode itself is active (Gemini + OpenRouter both
-  // configured) — it supplements that gate, it doesn't replace it or run
-  // standalone. A boot-time health probe (GET /api/tags, 5s budget) verifies
-  // both that the host answers AND that the configured model is actually
-  // loaded there — logged clearly so "is Ollama really wired in" is
-  // answerable from the boot log alone, not just from config presence. A
-  // failed probe does NOT disable the provider for the process lifetime
-  // (Ollama might come up seconds later) — it only affects this boot's log
-  // line; every real call still goes through scoreToken's own fail-closed
-  // handling per-request, and consensus.ts's `ollamaParticipated` already
-  // makes a per-request Ollama failure fail OPEN (never blocks a BUY).
+  // when consensus mode itself is active (OpenRouter configured) — it
+  // supplements that gate, it doesn't replace it or run standalone. A
+  // boot-time health probe (GET /api/tags, 5s budget) verifies both that the
+  // host answers AND that the configured model is actually loaded there —
+  // logged clearly so "is Ollama really wired in" is answerable from the boot
+  // log alone, not just from config presence. A failed probe does NOT disable
+  // the provider for the process lifetime (Ollama might come up seconds
+  // later) — it only affects this boot's log line; every real call still
+  // goes through scoreToken's own fail-closed handling per-request, and
+  // consensus.ts's `ollamaParticipated` already makes a per-request Ollama
+  // failure fail OPEN (never blocks a BUY, never delays one).
   const ollamaProvider = resolveOllamaProvider({
     ollamaHost: app.config.OLLAMA_HOST,
     ollamaModel: app.config.OLLAMA_MODEL,
@@ -502,50 +504,56 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     }
   } else if (ollamaProvider && !consensusModeActive) {
     app.log.warn(
-      'OLLAMA_HOST/OLLAMA_MODEL configured but Multi-LLM Consensus is INACTIVE (requires Gemini + OpenRouter) — Ollama has nothing to vote alongside, so it is not used',
+      'OLLAMA_HOST/OLLAMA_MODEL configured but Multi-LLM Consensus is INACTIVE (requires OpenRouter) — Ollama has nothing to vote alongside, so it is not used',
     );
   }
 
   // Single-provider fallback (today's pre-existing behavior) — used only when
-  // consensus mode isn't available (e.g. an Anthropic/OpenAI key is set, or
-  // only one of Gemini/OpenRouter is configured).
+  // consensus mode isn't available (OPENROUTER_API_KEY not configured) and an
+  // Anthropic/OpenAI key is set instead. Gemini is deliberately excluded from
+  // this priority chain during trading (2026-07-27) — GEMINI_API_KEY is never
+  // read here, regardless of whether it's set in the environment, so it can
+  // never be silently picked as the BUY-pipeline's AI scorer.
   const aiEnabled = hasAnyAiProvider({
     anthropicApiKey: app.config.ANTHROPIC_API_KEY,
     openaiApiKey: app.config.OPENAI_API_KEY,
-    geminiApiKey: app.config.GEMINI_API_KEY,
   });
   const aiProvider =
     aiEnabled && !consensusModeActive
       ? resolveAiProvider({
           anthropicApiKey: app.config.ANTHROPIC_API_KEY,
           openaiApiKey: app.config.OPENAI_API_KEY,
-          geminiApiKey: app.config.GEMINI_API_KEY,
         })
       : undefined;
 
   // Status lines only — never the key itself, only presence/model name.
-  app.log.info(geminiProvider ? 'Gemini: ACTIVE' : 'Gemini: NOT CONFIGURED');
+  // Gemini is always reported DISABLED here regardless of GEMINI_API_KEY —
+  // it is fully removed from the BUY decision pipeline (2026-07-27); its
+  // provider code remains in packages/ai for possible future optional use
+  // but is never constructed or called from this worker.
+  app.log.info('AI Providers:');
   if (openRouterProvider) {
-    app.log.info({ model: app.config.OPENROUTER_MODEL }, 'OpenRouter: ACTIVE');
+    app.log.info({ model: app.config.OPENROUTER_MODEL }, 'AI Providers: OpenRouter: ACTIVE');
   } else {
-    app.log.info('OpenRouter: NOT CONFIGURED');
+    app.log.info('AI Providers: OpenRouter: INACTIVE');
   }
   if (ollamaProvider) {
     app.log.info(
       { host: app.config.OLLAMA_HOST, model: app.config.OLLAMA_MODEL },
-      'Ollama: ACTIVE',
+      'AI Providers: Ollama: ACTIVE',
     );
   } else {
-    app.log.info('Ollama: NOT CONFIGURED');
+    app.log.info('AI Providers: Ollama: INACTIVE');
   }
+  app.log.info('AI Providers: Gemini: DISABLED');
   if (consensusModeActive) {
-    app.log.info('Multi-LLM Consensus: ACTIVE');
+    app.log.info('Multi-LLM Consensus: ACTIVE (OpenRouter + optional Ollama)');
   } else {
-    app.log.warn('Multi-LLM Consensus: INACTIVE (requires both Gemini and OpenRouter configured)');
+    app.log.warn('Multi-LLM Consensus: INACTIVE (requires OpenRouter configured)');
   }
   if (!aiEnabled && !consensusModeActive) {
     app.log.warn(
-      'No ANTHROPIC_API_KEY/OPENAI_API_KEY/GEMINI_API_KEY set — AI scoring disabled, rule-based only',
+      'No ANTHROPIC_API_KEY/OPENAI_API_KEY/OPENROUTER_API_KEY set — AI scoring disabled, rule-based only',
     );
   } else if (aiProvider) {
     // Provider name only — never the key itself.
@@ -785,9 +793,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     let aiScoringEndAt: number | undefined;
     // Only set in consensus mode — used for the consensus gate below, after
     // the Opportunity Score is known.
-    let geminiResult: AiScore | undefined;
     let openRouterResult: AiScore | undefined;
-    // Only set when ollamaProvider is configured — best-effort third vote,
+    // Only set when ollamaProvider is configured — best-effort second vote,
     // see evaluateMultiLlmConsensus's `ollama` param.
     let ollamaResult: AiScore | undefined;
 
@@ -822,19 +829,18 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     };
 
     if (consensusModeActive) {
-      // Multi-LLM consensus (2026-07-22): genuinely parallel — neither call
-      // waits on the other. A hard failure on either side is handled purely
-      // by scoreToken's own existing fail-closed contract (score 0, decision
-      // SKIP, flagged) — see evaluateMultiLlmConsensus, which is what
-      // actually enforces "either fails -> SKIP" once the Opportunity Score
-      // is known below.
+      // Multi-LLM consensus (2026-07-27 redesign: Gemini removed entirely —
+      // see consensus.ts's module-level comment): OpenRouter and Ollama are
+      // called genuinely in parallel, neither waits on the other, and neither
+      // is a single point of failure — a hard failure or timeout on one
+      // never blocks the pipeline or delays a BUY; the remaining provider's
+      // result alone can still drive a decision (see evaluateMultiLlmConsensus).
       aiScoringStartAt = Date.now();
       // Ollama (2026-07-26): fired in the same Promise.all so it never adds
-      // its own latency on top of Gemini/OpenRouter, but wrapped separately
-      // so "request sent"/"response received" are logged specifically for
-      // it, regardless of what Gemini/OpenRouter are doing. undefined (not
-      // awaited at all) when unconfigured — a missing OLLAMA_HOST costs
-      // nothing here.
+      // its own latency on top of OpenRouter, but wrapped separately so
+      // "request sent"/"response received" are logged specifically for it,
+      // regardless of what OpenRouter is doing. undefined (not awaited at
+      // all) when unconfigured — a missing OLLAMA_HOST costs nothing here.
       const ollamaCall = ollamaProvider
         ? (async () => {
             app.log.info(
@@ -845,7 +851,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
             if (result.flags.includes('ai_call_error') || result.flags.includes('ai_parse_error')) {
               app.log.warn(
                 { mint, flags: result.flags },
-                'Ollama: request failed — excluded from consensus this round (fails open, never blocks a BUY)',
+                'Ollama: request failed — excluded from consensus this round (fails open, never blocks or delays a BUY)',
               );
             } else {
               app.log.info(
@@ -856,26 +862,39 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
             return result;
           })()
         : undefined;
-      [geminiResult, openRouterResult, ollamaResult] = await Promise.all([
-        scoreToken(geminiProvider!, tokenInfo, riskFlags),
+      [openRouterResult, ollamaResult] = await Promise.all([
         scoreToken(openRouterProvider!, tokenInfo, riskFlags),
         ollamaCall,
       ]);
       aiScoringEndAt = Date.now();
+      const openrouterParticipatedInScore =
+        !openRouterResult.flags.includes('ai_call_error') &&
+        !openRouterResult.flags.includes('ai_parse_error');
       const ollamaParticipatedInScore =
         ollamaResult !== undefined &&
         !ollamaResult.flags.includes('ai_call_error') &&
         !ollamaResult.flags.includes('ai_parse_error');
-      // Conservative combination — same Math.min convention already used for
-      // ruleScore vs. a single AI score elsewhere in this codebase.
-      aiScoreValue = ollamaParticipatedInScore
-        ? Math.min(geminiResult.score, openRouterResult.score, ollamaResult!.score)
-        : Math.min(geminiResult.score, openRouterResult.score);
-      usedRealAi = true;
+      // Conservative combination when both participate — same Math.min
+      // convention already used for ruleScore vs. a single AI score elsewhere
+      // in this codebase. When only one participates, its score alone drives
+      // this (never blocked by the other's unavailability). Only when BOTH
+      // hard-fail is there no usable AI signal at all, which fails closed to
+      // 0 rather than silently falling back to the rule-based score.
+      if (openrouterParticipatedInScore && ollamaParticipatedInScore) {
+        aiScoreValue = Math.min(openRouterResult.score, ollamaResult!.score);
+        usedRealAi = true;
+      } else if (openrouterParticipatedInScore) {
+        aiScoreValue = openRouterResult.score;
+        usedRealAi = true;
+      } else if (ollamaParticipatedInScore) {
+        aiScoreValue = ollamaResult!.score;
+        usedRealAi = true;
+      } else {
+        aiScoreValue = 0;
+      }
       app.log.info(
         {
           mint,
-          gemini: { score: geminiResult.score, decision: geminiResult.decision },
           openrouter: { score: openRouterResult.score, decision: openRouterResult.decision },
           ...(ollamaResult && {
             ollama: { score: ollamaResult.score, decision: ollamaResult.decision },
@@ -888,7 +907,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
         data: {
           aiScore: aiScoreValue,
           aiSummary:
-            `gemini: ${geminiResult.summary} | openrouter: ${openRouterResult.summary}` +
+            `openrouter: ${openRouterResult.summary}` +
             (ollamaResult ? ` | ollama: ${ollamaResult.summary}` : ''),
         },
       });
@@ -976,19 +995,22 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       );
     }
 
-    // Weighted Multi-LLM consensus gate (2026-07-26 redesign, replacing the
-    // prior "Gemini AND OpenRouter both BUY with score >=80" unanimous gate)
-    // — evaluated once per token, strictly before AutoTrader, exactly like
-    // candidatePipeline.ts's own gates upstream of this function. Never
-    // loosens anything: critical security checks (candidatePipeline.ts —
-    // honeypot/holder-concentration/bundled-wallet/mint-freeze-authority/
-    // LP-lock) already ran, unconditionally, before this candidate ever
-    // reached the AI stage at all, and this gate is strictly downstream of
-    // (never a replacement for) them. Does NOT gate on Opportunity Score
-    // (2026-07-22 audit — see evaluateMultiLlmConsensus's own doc comment):
-    // that's autoTrader.ts's opt-in job, per config, downstream.
-    if (consensusModeActive && geminiResult && openRouterResult) {
-      const consensus = evaluateMultiLlmConsensus(geminiResult, openRouterResult, ollamaResult);
+    // Weighted Multi-LLM consensus gate (2026-07-27 redesign: Gemini removed
+    // entirely from scoring/consensus/voting — see consensus.ts's
+    // module-level comment) — evaluated once per token, strictly before
+    // AutoTrader, exactly like candidatePipeline.ts's own gates upstream of
+    // this function. Never loosens anything: critical security checks
+    // (candidatePipeline.ts — honeypot/holder-concentration/bundled-wallet/
+    // mint-freeze-authority/LP-lock) already ran, unconditionally, before
+    // this candidate ever reached the AI stage at all, and this gate is
+    // strictly downstream of (never a replacement for) them. Does NOT gate on
+    // Opportunity Score (2026-07-22 audit — see evaluateMultiLlmConsensus's
+    // own doc comment): that's autoTrader.ts's opt-in job, per config,
+    // downstream. Neither OpenRouter nor Ollama being temporarily unavailable
+    // blocks or delays this — see evaluateMultiLlmConsensus's fail-open
+    // single-voter degrade.
+    if (consensusModeActive && openRouterResult) {
+      const consensus = evaluateMultiLlmConsensus(openRouterResult, ollamaResult);
       // Evidence line (2026-07-26): every model's individual vote (score,
       // decision, weight actually applied, whether it participated) plus the
       // final weighted decision — logged unconditionally, on every token,
