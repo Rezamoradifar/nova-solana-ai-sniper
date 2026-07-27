@@ -437,14 +437,15 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   const monitor = new PumpFunMonitor(pumpFunWsProviders, app.log as never);
   app.decorate('pumpFunMonitor', monitor);
 
-  // Multi-LLM consensus (2026-07-27 redesign: Gemini removed entirely from
-  // scoring/consensus/voting — see packages/ai/src/consensus.ts's module-level
-  // comment). Consensus mode now needs only OpenRouter; Ollama is an optional
-  // second voter. Gemini's provider code (resolveGeminiProvider, GeminiProvider
-  // in packages/ai/src/provider.ts) is kept in the codebase for possible future
-  // optional use but is deliberately never constructed or called here — no
-  // GEMINI_API_KEY read, no Gemini API call, no wait on a Gemini response,
-  // anywhere in this trading path.
+  // Multi-LLM consensus (2026-07-27: Gemini fully removed from the trading
+  // pipeline — see packages/ai/src/consensus.ts's module-level comment).
+  // Consensus mode needs only OpenRouter; Ollama is an optional second voter.
+  // apps/api's own config schema (config/env.ts) doesn't even pick
+  // GEMINI_API_KEY anymore — there is nothing Gemini-related left to read,
+  // call, or wait on anywhere in this file. Gemini's provider code still
+  // lives in packages/ai/src/provider.ts because apps/marketing-engine (a
+  // separate, independent app) uses it directly for its own content/image
+  // generation — that is not part of this trading path.
   const openRouterProvider = resolveOpenRouterProvider({
     openrouterApiKey: app.config.OPENROUTER_API_KEY,
     openrouterModel: app.config.OPENROUTER_MODEL,
@@ -510,10 +511,10 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
 
   // Single-provider fallback (today's pre-existing behavior) — used only when
   // consensus mode isn't available (OPENROUTER_API_KEY not configured) and an
-  // Anthropic/OpenAI key is set instead. Gemini is deliberately excluded from
-  // this priority chain during trading (2026-07-27) — GEMINI_API_KEY is never
-  // read here, regardless of whether it's set in the environment, so it can
-  // never be silently picked as the BUY-pipeline's AI scorer.
+  // Anthropic/OpenAI key is set instead. resolveAiProvider/hasAnyAiProvider no
+  // longer consider Gemini at all (see provider.ts) — there is no key or
+  // priority-chain branch left that could pick it as the BUY-pipeline's AI
+  // scorer.
   const aiEnabled = hasAnyAiProvider({
     anthropicApiKey: app.config.ANTHROPIC_API_KEY,
     openaiApiKey: app.config.OPENAI_API_KEY,
@@ -527,10 +528,9 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       : undefined;
 
   // Status lines only — never the key itself, only presence/model name.
-  // Gemini is always reported DISABLED here regardless of GEMINI_API_KEY —
-  // it is fully removed from the BUY decision pipeline (2026-07-27); its
-  // provider code remains in packages/ai for possible future optional use
-  // but is never constructed or called from this worker.
+  // Gemini is unconditionally DISABLED here — it has no config, no provider
+  // instance, and no call site anywhere in this worker (2026-07-27 full
+  // removal from the trading pipeline).
   app.log.info('AI Providers:');
   if (openRouterProvider) {
     app.log.info({ model: app.config.OPENROUTER_MODEL }, 'AI Providers: OpenRouter: ACTIVE');

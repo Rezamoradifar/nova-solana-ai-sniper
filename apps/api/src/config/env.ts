@@ -38,7 +38,6 @@ export const apiEnvSchema = envSchema.pick({
   JITO_AUTH_KEYPAIR: true,
   ANTHROPIC_API_KEY: true,
   OPENAI_API_KEY: true,
-  GEMINI_API_KEY: true,
   OPENROUTER_API_KEY: true,
   OPENROUTER_MODEL: true,
   OLLAMA_HOST: true,

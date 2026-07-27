@@ -276,25 +276,31 @@ export interface AiProviderKeys {
   openrouterModel?: string;
 }
 
-/** Prefers Claude, then GPT, then Gemini when more than one key is present; falls back to whichever one exists. */
+/** Prefers Claude, then GPT, when more than one key is present; falls back to
+ * whichever one exists. Not used by the trading pipeline (apps/api) — see
+ * worker.ts, which deliberately never passes geminiApiKey here and gets its
+ * scoring exclusively from OpenRouter/Ollama via evaluateMultiLlmConsensus
+ * instead. Gemini is intentionally excluded from this priority chain (unlike
+ * resolveGeminiProvider below, which apps/marketing-engine still uses
+ * directly for its own, non-trading content/image generation). */
 export function resolveAiProvider(keys: AiProviderKeys): AiProvider {
   if (keys.anthropicApiKey) return new AnthropicProvider(keys.anthropicApiKey);
   if (keys.openaiApiKey) return new OpenAiProvider(keys.openaiApiKey);
-  if (keys.geminiApiKey) return new GeminiProvider(keys.geminiApiKey);
   throw new Error(
-    'No AI provider configured: set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY in the environment.',
+    'No AI provider configured: set ANTHROPIC_API_KEY or OPENAI_API_KEY in the environment.',
   );
 }
 
 export function hasAnyAiProvider(keys: AiProviderKeys): boolean {
-  return Boolean(keys.anthropicApiKey || keys.openaiApiKey || keys.geminiApiKey);
+  return Boolean(keys.anthropicApiKey || keys.openaiApiKey);
 }
 
 /**
- * Multi-LLM consensus (2026-07-22): unlike resolveAiProvider's single-pick-by-
- * preference above, the trading pipeline's consensus feature needs Gemini and
- * OpenRouter specifically, regardless of whether an Anthropic/OpenAI key also
- * happens to be configured — these two bypass the priority chain entirely.
+ * Used directly by apps/marketing-engine (content + image generation) —
+ * bypasses resolveAiProvider's priority chain entirely, since that chain no
+ * longer considers Gemini at all. NOT used anywhere in the trading pipeline
+ * (apps/api) — see worker.ts and packages/ai/src/consensus.ts, whose
+ * multi-LLM consensus gate is OpenRouter + Ollama only.
  */
 export function resolveGeminiProvider(
   keys: Pick<AiProviderKeys, 'geminiApiKey'>,

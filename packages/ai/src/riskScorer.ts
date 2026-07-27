@@ -4,17 +4,18 @@ import type { AiDecision, AiRiskLevel, AiScore, RiskFlags, TokenInfo } from '@no
 /**
  * 2026-07-22 audit (multi-LLM consensus calibration): this prompt previously
  * said only "score 0-100, higher = safer," with no shared definition of what
- * any given number means. Two different models filled that gap with two
- * different internal scales — live data showed Gemini 2.5 Flash and the
- * configured OpenRouter model (nvidia/nemotron-3-ultra-550b-a55b:free)
- * correlate directionally (Pearson r≈0.49 on live samples) but differ by
- * roughly 2x in absolute mean score for the same factual input, with
- * OpenRouter's model specifically penalizing "very young token, still-low
- * holder count/volume" far more heavily — a real judgment difference, not a
- * bug, but one an explicit rubric can at least make consistent instead of
- * each model inventing its own scale. The explicit anchors and the
- * "newness is expected, don't penalize it on its own" clarification below
- * are the fix; no threshold or consensus policy changed alongside this.
+ * any given number means. The two models scored at the time filled that gap
+ * with two different internal scales — live data showed they correlate
+ * directionally (Pearson r≈0.49 on live samples) but differ by roughly 2x in
+ * absolute mean score for the same factual input, with one model
+ * specifically penalizing "very young token, still-low holder count/volume"
+ * far more heavily — a real judgment difference, not a bug, but one an
+ * explicit rubric can at least make consistent instead of each model
+ * inventing its own scale. The explicit anchors and the "newness is
+ * expected, don't penalize it on its own" clarification below are the fix;
+ * no threshold or consensus policy changed alongside this. (2026-07-27:
+ * the consensus/voting pipeline itself is now OpenRouter + Ollama only — see
+ * consensus.ts — but this prompt's calibration remains provider-agnostic.)
  */
 const SYSTEM_PROMPT = `You are a Solana meme-coin risk analyst embedded in an automated trading system.
 You will be given ONLY factual on-chain/market data already collected by the application. Never invent,

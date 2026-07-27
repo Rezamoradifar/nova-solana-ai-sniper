@@ -43,24 +43,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('resolveAiProvider preference order', () => {
-  it('prefers anthropic when all three keys are present', () => {
-    const provider = resolveAiProvider({
-      anthropicApiKey: 'a',
-      openaiApiKey: 'o',
-      geminiApiKey: 'g',
-    });
+describe('resolveAiProvider preference order (Gemini excluded — trading pipeline only, see worker.ts)', () => {
+  it('prefers anthropic when both keys are present', () => {
+    const provider = resolveAiProvider({ anthropicApiKey: 'a', openaiApiKey: 'o' });
     expect(provider.name).toBe('anthropic');
   });
 
-  it('prefers openai over gemini when anthropic is absent', () => {
-    const provider = resolveAiProvider({ openaiApiKey: 'o', geminiApiKey: 'g' });
+  it('falls back to openai when anthropic is absent', () => {
+    const provider = resolveAiProvider({ openaiApiKey: 'o' });
     expect(provider.name).toBe('openai');
   });
 
-  it('falls back to gemini when it is the only key configured', () => {
-    const provider = resolveAiProvider({ geminiApiKey: 'g' });
-    expect(provider.name).toBe('gemini');
+  it('never falls back to gemini, even when only a gemini key is configured', () => {
+    expect(() => resolveAiProvider({ geminiApiKey: 'g' })).toThrow(/No AI provider configured/);
   });
 
   it('throws when no provider key is configured', () => {
@@ -68,9 +63,14 @@ describe('resolveAiProvider preference order', () => {
   });
 });
 
-describe('hasAnyAiProvider', () => {
-  it('is true when only a gemini key is present', () => {
-    expect(hasAnyAiProvider({ geminiApiKey: 'g' })).toBe(true);
+describe('hasAnyAiProvider (Gemini excluded — trading pipeline only)', () => {
+  it('is false when only a gemini key is present', () => {
+    expect(hasAnyAiProvider({ geminiApiKey: 'g' })).toBe(false);
+  });
+
+  it('is true when an anthropic or openai key is present', () => {
+    expect(hasAnyAiProvider({ anthropicApiKey: 'a' })).toBe(true);
+    expect(hasAnyAiProvider({ openaiApiKey: 'o' })).toBe(true);
   });
 
   it('is false when no key is present', () => {
@@ -85,7 +85,7 @@ describe('GeminiProvider.generateText', () => {
 
   it('returns response.text on a normal successful call', async () => {
     geminiGenerateContent.mockResolvedValue({ text: '{"score":1}' });
-    const provider = resolveAiProvider({ geminiApiKey: 'g' });
+    const provider = resolveGeminiProvider({ geminiApiKey: 'g' })!;
     const result = await provider.generateText('prompt');
     expect(result).toBe('{"score":1}');
     expect(geminiGenerateContent).toHaveBeenCalledTimes(1);
@@ -93,7 +93,7 @@ describe('GeminiProvider.generateText', () => {
 
   it('returns an empty string rather than throwing when response.text is undefined', async () => {
     geminiGenerateContent.mockResolvedValue({ text: undefined });
-    const provider = resolveAiProvider({ geminiApiKey: 'g' });
+    const provider = resolveGeminiProvider({ geminiApiKey: 'g' })!;
     await expect(provider.generateText('prompt')).resolves.toBe('');
   });
 
@@ -101,7 +101,7 @@ describe('GeminiProvider.generateText', () => {
     geminiGenerateContent
       .mockRejectedValueOnce(new FakeApiError('rate limited', 429))
       .mockResolvedValueOnce({ text: 'ok' });
-    const provider = resolveAiProvider({ geminiApiKey: 'g' });
+    const provider = resolveGeminiProvider({ geminiApiKey: 'g' })!;
     const result = await provider.generateText('prompt');
     expect(result).toBe('ok');
     expect(geminiGenerateContent).toHaveBeenCalledTimes(2);
@@ -109,28 +109,28 @@ describe('GeminiProvider.generateText', () => {
 
   it('retries once on a 500 and gives up if it persists', async () => {
     geminiGenerateContent.mockRejectedValue(new FakeApiError('server error', 500));
-    const provider = resolveAiProvider({ geminiApiKey: 'g' });
+    const provider = resolveGeminiProvider({ geminiApiKey: 'g' })!;
     await expect(provider.generateText('prompt')).rejects.toThrow('server error');
     expect(geminiGenerateContent).toHaveBeenCalledTimes(2);
   });
 
   it('does not retry on a 400 (bad request / invalid key) — it will never succeed on retry', async () => {
     geminiGenerateContent.mockRejectedValue(new FakeApiError('invalid API key', 400));
-    const provider = resolveAiProvider({ geminiApiKey: 'g' });
+    const provider = resolveGeminiProvider({ geminiApiKey: 'g' })!;
     await expect(provider.generateText('prompt')).rejects.toThrow('invalid API key');
     expect(geminiGenerateContent).toHaveBeenCalledTimes(1);
   });
 
   it('never logs or throws the raw API key itself', async () => {
     geminiGenerateContent.mockResolvedValue({ text: 'ok' });
-    const provider = resolveAiProvider({ geminiApiKey: 'super-secret-key' });
+    const provider = resolveGeminiProvider({ geminiApiKey: 'super-secret-key' })!;
     await provider.generateText('prompt');
     const callArgs = JSON.stringify(geminiGenerateContent.mock.calls);
     expect(callArgs).not.toContain('super-secret-key');
   });
 });
 
-describe('resolveGeminiProvider / resolveOpenRouterProvider (multi-LLM consensus)', () => {
+describe('resolveGeminiProvider (apps/marketing-engine only — not used by the trading pipeline) / resolveOpenRouterProvider / resolveOllamaProvider (trading multi-LLM consensus)', () => {
   it('resolveGeminiProvider returns undefined when no key is configured', () => {
     expect(resolveGeminiProvider({})).toBeUndefined();
   });

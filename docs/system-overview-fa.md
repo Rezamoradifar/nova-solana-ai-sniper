@@ -16,7 +16,7 @@ Nova Solana AI Sniper یک پلتفرم مونوریپو (monorepo) برای م�
 
 ```
 packages/shared   → اعتبارسنجی env، لاگر امن، تایپ‌های مشترک
-packages/ai       → لایهٔ انتزاعی مدل‌های AI (Claude/OpenAI/Gemini/OpenRouter) + امتیازدهی ریسک
+packages/ai       → لایهٔ انتزاعی مدل‌های AI (Claude/OpenAI/OpenRouter/Ollama برای معامله؛ Gemini فقط برای apps/marketing-engine) + امتیازدهی ریسک
 
 apps/api              → بک‌اند اصلی (Fastify) — قلب سیستم
 apps/telegram-bot     → ربات تلگرام (اعلان‌ها، دستورات ادمین، بازاریابی)

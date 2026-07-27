@@ -147,11 +147,15 @@ export const envSchema = z.object({
   // AI providers
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
-  // Never logged — see packages/ai/src/provider.ts's GeminiProvider and
-  // riskScorer.ts's structured logging, neither of which include the key itself.
+  // Used ONLY by apps/marketing-engine (content + optional image generation
+  // via GeminiImageProvider) — not part of the trading pipeline at all
+  // (2026-07-27: Gemini fully removed from apps/api/consensus scoring; its
+  // own config schema doesn't even pick this var). Never logged.
   GEMINI_API_KEY: z.string().optional(),
-  // Multi-LLM consensus (2026-07-22): Gemini + OpenRouter run in parallel and
-  // both must independently recommend BUY before AutoTrader ever runs (see
+  // Multi-LLM consensus (2026-07-27 redesign — OpenRouter + Ollama only,
+  // Gemini removed entirely): OpenRouter and Ollama run in parallel and the
+  // gate requires their (renormalized, fail-open-on-single-outage) weighted
+  // vote to clear the bar before AutoTrader ever runs (see
   // packages/ai/src/consensus.ts, apps/api/src/worker.ts's processAiCall).
   // Never logged — same convention as every other key above.
   OPENROUTER_API_KEY: z.string().optional(),
@@ -164,12 +168,13 @@ export const envSchema = z.object({
   // fail-closed handling turns that into a SKIP — never a silent switch to a
   // different, unvetted model. Override via this var, not by editing code.
   OPENROUTER_MODEL: z.string().default('nvidia/nemotron-3-ultra-550b-a55b:free'),
-  // Self-hosted Ollama (2026-07-26): third, best-effort consensus vote — see
-  // packages/ai/src/consensus.ts's `ollama` parameter and provider.ts's
-  // resolveOllamaProvider. Both optional, same undefined-means-not-configured
-  // convention as OPENROUTER_API_KEY/OPENROUTER_MODEL above; unlike a Gemini/
-  // OpenRouter outage, an unreachable/misbehaving Ollama host never blocks a
-  // BUY on its own (see consensus.ts's ollamaParticipated).
+  // Self-hosted Ollama (2026-07-26): second, best-effort consensus vote
+  // alongside OpenRouter — see packages/ai/src/consensus.ts's `ollama`
+  // parameter and provider.ts's resolveOllamaProvider. Both optional, same
+  // undefined-means-not-configured convention as OPENROUTER_API_KEY/
+  // OPENROUTER_MODEL above; an unreachable/misbehaving Ollama (or OpenRouter)
+  // host never blocks or delays a BUY on its own (see consensus.ts's
+  // fail-open single-voter degrade).
   OLLAMA_HOST: z.string().url().optional(),
   OLLAMA_MODEL: z.string().optional(),
 
