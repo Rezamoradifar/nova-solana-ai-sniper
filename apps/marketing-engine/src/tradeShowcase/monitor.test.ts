@@ -10,6 +10,7 @@ function fakeDeps(overrides: Record<string, unknown> = {}) {
   const positionFindMany = vi.fn().mockResolvedValue([]);
   const summaryFindUnique = vi.fn().mockResolvedValue(null);
   const summaryCreate = vi.fn().mockResolvedValue(undefined);
+  const userFindMany = vi.fn().mockResolvedValue([]);
 
   return {
     deps: {
@@ -20,6 +21,7 @@ function fakeDeps(overrides: Record<string, unknown> = {}) {
           findMany: vi.fn().mockResolvedValue([]),
         },
         tradeShowcaseDailySummary: { findUnique: summaryFindUnique, create: summaryCreate },
+        user: { findMany: userFindMany },
       },
       bot: { api: { sendMessage } },
       chatId: '@testchannel',
@@ -33,6 +35,7 @@ function fakeDeps(overrides: Record<string, unknown> = {}) {
     positionFindMany,
     summaryFindUnique,
     summaryCreate,
+    userFindMany,
   };
 }
 
@@ -80,6 +83,113 @@ describe('TradeShowcaseMonitor — daily summary deployment cutoff', () => {
     expect(summaryCalls).toHaveLength(1);
     expect(summaryCreate).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
+  });
+});
+
+describe('TradeShowcaseMonitor — real bot trade DM broadcast', () => {
+  function fakeEligiblePosition() {
+    return {
+      id: 'pos1',
+      walletId: 'wallet1',
+      tokenId: 'token1',
+      status: 'CLOSED',
+      isPaperTrade: false,
+      showcasePostedAt: null,
+      closedAt: new Date('2026-07-27T10:30:00Z'),
+      createdAt: new Date('2026-07-27T10:00:00Z'),
+      amountSolInvested: 1,
+      entryPriceUsd: 0.001,
+      realizedPnlUsd: 25,
+      riskScoreAtEntry: 92,
+      token: {
+        mint: 'MintAbc123',
+        name: 'Example Token',
+        symbol: 'EXT',
+        dex: 'RAYDIUM',
+        isHoneypotSuspected: false,
+      },
+    };
+  }
+
+  it('DMs every subscribed telegramId the identical message, in addition to the channel post', async () => {
+    const { deps, sendMessage, userFindMany } = fakeDeps();
+    (deps as never as { prisma: Record<string, unknown> }).prisma = {
+      ...(deps as never as { prisma: Record<string, unknown> }).prisma,
+      position: {
+        findMany: vi.fn().mockResolvedValue([fakeEligiblePosition()]),
+        update: vi.fn().mockResolvedValue(undefined),
+      },
+      trade: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({
+            createdAt: new Date('2026-07-27T10:00:00Z'),
+            txSignature: 'buySig',
+          }),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            createdAt: new Date('2026-07-27T10:30:00Z'),
+            amountSol: 1.25,
+            priceUsd: 0.00125,
+            txSignature: 'sellSig',
+          },
+        ]),
+      },
+    };
+    userFindMany.mockResolvedValue([{ telegramId: 'chat1' }, { telegramId: 'chat2' }]);
+
+    const monitor = new TradeShowcaseMonitor(deps);
+    await monitor.tick();
+
+    const channelCalls = sendMessage.mock.calls.filter(
+      (call) => call[0] === '@testchannel' && (call[1] as string).includes('REAL BOT TRADE'),
+    );
+    const dmCalls = sendMessage.mock.calls.filter((call) =>
+      ['chat1', 'chat2'].includes(call[0] as string),
+    );
+    expect(channelCalls).toHaveLength(1);
+    expect(dmCalls).toHaveLength(2);
+    // Identical message text to every recipient, channel included.
+    expect(dmCalls[0]![1]).toBe(channelCalls[0]![1]);
+    expect(dmCalls[1]![1]).toBe(channelCalls[0]![1]);
+  });
+
+  it('still posts to the channel and marks the trade showcased even if a DM send fails', async () => {
+    const { deps, sendMessage, userFindMany } = fakeDeps();
+    const positionUpdate = vi.fn().mockResolvedValue(undefined);
+    (deps as never as { prisma: Record<string, unknown> }).prisma = {
+      ...(deps as never as { prisma: Record<string, unknown> }).prisma,
+      position: {
+        findMany: vi.fn().mockResolvedValue([fakeEligiblePosition()]),
+        update: positionUpdate,
+      },
+      trade: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({
+            createdAt: new Date('2026-07-27T10:00:00Z'),
+            txSignature: 'buySig',
+          }),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            createdAt: new Date('2026-07-27T10:30:00Z'),
+            amountSol: 1.25,
+            priceUsd: 0.00125,
+            txSignature: 'sellSig',
+          },
+        ]),
+      },
+    };
+    userFindMany.mockResolvedValue([{ telegramId: 'brokenChat' }]);
+    sendMessage.mockImplementation((chatId: string) => {
+      if (chatId === 'brokenChat') return Promise.reject(new Error('blocked'));
+      return Promise.resolve({ message_id: 1 });
+    });
+
+    const monitor = new TradeShowcaseMonitor(deps);
+    await monitor.tick();
+
+    expect(positionUpdate).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'pos1' } }));
   });
 });
 

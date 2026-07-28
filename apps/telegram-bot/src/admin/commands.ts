@@ -10,7 +10,7 @@ import {
   setScannerAutoBuyPauseState,
   type Logger,
 } from '@nova/shared';
-import { fmtHoldingTimeShort } from '../ui/format.js';
+import { fmtDate, fmtHoldingTimeShort, usd } from '../ui/format.js';
 
 /** Restricts every command registered after this middleware to known admin Telegram IDs. */
 function requireAdmin(adminIds: Set<string>) {
@@ -291,6 +291,43 @@ export function registerAdminCommands(
     });
     logger.warn({ adminId: ctx.from?.id, enabled }, 'admin toggled the referral program');
     await ctx.reply(`🔗 Referral program ${enabled ? 'ENABLED' : 'DISABLED'}.`);
+  });
+
+  // Verifies end-to-end delivery of the Real Bot Trade DM broadcast
+  // (2026-07-28, see marketing-engine/tradeShowcase/monitor.ts's
+  // dmSubscribedUsers) without waiting for a real trade to close — same
+  // premium layout + live DexScreener chart-preview link, clearly labeled
+  // SAMPLE so it can never be mistaken for a real trade.
+  bot.command('testtrade', admin, async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const sampleMint = 'So11111111111111111111111111111111111111112';
+    const now = new Date();
+    const buyAt = new Date(now.getTime() - 15 * 60_000);
+    const chartUrl = `https://dexscreener.com/solana/${sampleMint}`;
+    const text =
+      `🤖 *REAL BOT TRADE* _(SAMPLE — /testtrade)_\n\n` +
+      `🟢 *TESTCOIN*\n\n` +
+      `Name: Test Token\n` +
+      `Token: \`${sampleMint}\` ([Solscan](https://solscan.io/token/${sampleMint}))\n` +
+      `DEX: PUMPFUN\n` +
+      `Buy: ${fmtDate(buyAt)} UTC\n` +
+      `Sell: ${fmtDate(now)} UTC (held ${fmtHoldingTimeShort(now.getTime() - buyAt.getTime())})\n` +
+      `ROI: *+42.0%*\n` +
+      `PnL: *${usd(12.34)}*\n` +
+      `AI Score: *87/100*\n` +
+      `[View chart on DexScreener](${chartUrl})\n\n` +
+      `🔷 *Nova Solana AI Sniper*`;
+
+    try {
+      await ctx.api.sendMessage(chatId, text, {
+        parse_mode: 'Markdown',
+        link_preview_options: { url: chartUrl },
+      });
+      logger.info({ adminId: ctx.from?.id, chatId }, 'admin sent /testtrade sample notification');
+    } catch (err) {
+      logger.error({ err, chatId }, 'failed to send /testtrade sample notification');
+      await ctx.reply('❌ Failed to send test trade notification — see logs.');
+    }
   });
 
   bot.command('businessreport', admin, async (ctx) => {

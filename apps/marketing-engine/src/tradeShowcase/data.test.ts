@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchShowcaseEligibleTrades, markTradeShowcased } from './data.js';
+import {
+  fetchShowcaseEligibleTrades,
+  fetchSubscribedTelegramIds,
+  markTradeShowcased,
+} from './data.js';
 
 const DEPLOYED_AT = new Date('2020-01-01T00:00:00Z'); // permissive fixed cutoff for tests not exercising it
 
@@ -148,6 +152,20 @@ describe('fetchShowcaseEligibleTrades — real ROI/PnL computation', () => {
     });
     const result = await fetchShowcaseEligibleTrades(prisma, 10, DEPLOYED_AT);
     expect(result).toEqual([]);
+  });
+});
+
+describe('fetchSubscribedTelegramIds', () => {
+  it('returns every telegramId, regardless of SnipeConfig activity', async () => {
+    const findMany = vi.fn().mockResolvedValue([{ telegramId: 'chat1' }, { telegramId: 'chat2' }]);
+    const prisma = { user: { findMany } } as never;
+
+    const ids = await fetchSubscribedTelegramIds(prisma);
+
+    expect(ids).toEqual(['chat1', 'chat2']);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { telegramId: { not: null } } }),
+    );
   });
 });
 

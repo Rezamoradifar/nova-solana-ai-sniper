@@ -6,6 +6,7 @@ import { sendBrandedMessage } from '../telegramSend.js';
 import {
   fetchShowcaseEligibleTrades,
   fetchClosedTradesForDay,
+  fetchSubscribedTelegramIds,
   markTradeShowcased,
 } from './data.js';
 import {
@@ -56,6 +57,11 @@ function utcDateLabel(d: Date): string {
  * apps/api/src/detection/migrationMonitor.ts — a `ticking` guard so a slow
  * tick (Telegram send latency) can never overlap with the next timer fire.
  *
+ * Real Bot Trade DM broadcast (2026-07-28): every per-trade post (not the
+ * daily summary) is also DM'd identically to every user who has ever started
+ * the bot — see dmSubscribedUsers below. The channel post is never removed
+ * or replaced by this; both go out for every eligible trade.
+ *
  * Read-only against trading data other than its own two dedup markers
  * (Position.showcasePostedAt, TradeShowcaseDailySummary) — lives in
  * apps/marketing-engine specifically so it has no code path that can affect
@@ -101,10 +107,12 @@ export class TradeShowcaseMonitor {
       try {
         const enrichment = await this.deps.marketData.fetchEnrichment(trade.mint);
         const text = formatTradeShowcaseMessage(trade, enrichment);
-        await sendBrandedMessage(this.deps.bot, this.deps.chatId, text, {
+        const sendOpts = {
           logoUrl: enrichment?.logoUrl,
           linkPreviewUrl: dexscreenerChartUrl(trade.mint),
-        });
+        };
+        await sendBrandedMessage(this.deps.bot, this.deps.chatId, text, sendOpts);
+        await this.dmSubscribedUsers(trade.positionId, text, sendOpts);
         await markTradeShowcased(this.deps.prisma, trade.positionId);
         this.deps.logger.info(
           { positionId: trade.positionId, mint: trade.mint, roiPercent: trade.roiPercent },
@@ -120,6 +128,38 @@ export class TradeShowcaseMonitor {
       }
       await sleep(SEND_SPACING_MS);
     }
+  }
+
+  /**
+   * Real Bot Trade DM broadcast (2026-07-28): every user who has ever
+   * started the bot (User.telegramId set) gets the identical message —
+   * same premium layout, same DexScreener chart preview — direct in their
+   * own chat, in addition to (never instead of) the public channel post
+   * above. Independent of SnipeConfig activity: this is a broadcast to
+   * every registered user, not the narrower "active sniper" fan-out
+   * NotificationService already does for the BUY/SELL card images.
+   * Best-effort per recipient (logged, not thrown) so one blocked chat, or
+   * a Telegram outage, never stops the channel post or the dedup marker
+   * above from going through.
+   */
+  private async dmSubscribedUsers(
+    positionId: string,
+    text: string,
+    opts: { logoUrl?: string; linkPreviewUrl?: string },
+  ): Promise<void> {
+    const chatIds = await fetchSubscribedTelegramIds(this.deps.prisma);
+    await Promise.all(
+      chatIds.map(async (chatId) => {
+        try {
+          await sendBrandedMessage(this.deps.bot, chatId, text, opts);
+        } catch (err) {
+          this.deps.logger.error(
+            { err, positionId, chatId },
+            'trade showcase: failed to DM subscribed user',
+          );
+        }
+      }),
+    );
   }
 
   private async postDailySummaryIfDue(): Promise<void> {

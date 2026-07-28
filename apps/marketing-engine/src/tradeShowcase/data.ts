@@ -141,6 +141,19 @@ export async function fetchShowcaseEligibleTrades(
   return resolved.filter((t): t is ShowcaseTrade => t !== undefined);
 }
 
+/** Every user who has ever started the bot (telegramId set) — the DM
+ * audience for the real-trade broadcast (2026-07-28): every completed real
+ * bot trade is sent directly to each of these chats, in addition to the
+ * public channel post, independent of whether the user has an active
+ * sniper config. */
+export async function fetchSubscribedTelegramIds(prisma: PrismaClient): Promise<string[]> {
+  const users = await prisma.user.findMany({
+    where: { telegramId: { not: null } },
+    select: { telegramId: true },
+  });
+  return users.map((u) => u.telegramId!);
+}
+
 /** Marks a trade as posted — the per-trade dedup guard (Position.showcasePostedAt). */
 export async function markTradeShowcased(prisma: PrismaClient, positionId: string): Promise<void> {
   await prisma.position.update({
