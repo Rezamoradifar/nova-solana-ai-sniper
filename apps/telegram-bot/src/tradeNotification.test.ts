@@ -9,6 +9,7 @@ import {
   solscanTxUrl,
   type TradeNotificationData,
 } from './tradeNotification.js';
+import * as priceChart from './priceChart.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -31,6 +32,8 @@ function trade(overrides: Partial<TradeNotificationData> = {}): TradeNotificatio
     liquidityUsd: 12_000,
     marketCapUsd: 80_000,
     volume24hUsd: 45_000,
+    entryPriceUsd: 0.001,
+    exitPriceUsd: 0.0015,
     ...overrides,
   };
 }
@@ -150,25 +153,50 @@ describe('fetchDexScreenerChartImage', () => {
 });
 
 describe('resolveTradePhoto', () => {
-  it('falls back to the token logo when no chart image is found', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: true, text: async () => '<html></html>' }) // no og:image
-      .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new Uint8Array([9]).buffer }); // logo download
-    vi.stubGlobal('fetch', fetchMock);
+  it('falls back to a self-rendered real-data price chart when no official chart image is found', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, text: async () => '<html></html>' }), // no og:image
+    );
+    const chartSpy = vi
+      .spyOn(priceChart, 'resolveRealPriceChartPhoto')
+      .mockResolvedValue({ buffer: Buffer.from([9]) });
 
-    const result = await resolveTradePhoto('MintAbc', 'https://cdn.example/logo.png');
+    const result = await resolveTradePhoto(trade());
 
     expect(result?.buffer).toEqual(Buffer.from([9]));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://cdn.example/logo.png', expect.anything());
+    expect(chartSpy).toHaveBeenCalledWith(trade());
   });
 
-  it('returns undefined when neither a chart image nor a logo URL is available', async () => {
+  it('never falls back to a token logo — returns undefined when neither real chart source is available', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({ ok: true, text: async () => '<html></html>' }),
     );
-    expect(await resolveTradePhoto('MintAbc', undefined)).toBeUndefined();
+    vi.spyOn(priceChart, 'resolveRealPriceChartPhoto').mockResolvedValue(undefined);
+
+    expect(await resolveTradePhoto(trade())).toBeUndefined();
+  });
+
+  it('uses the official DexScreener chart image without touching the real-data chart when the scrape succeeds', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () =>
+          '<html><head><meta property="og:image" content="https://cdn.example/chart.png"></head></html>',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    const chartSpy = vi.spyOn(priceChart, 'resolveRealPriceChartPhoto');
+
+    const result = await resolveTradePhoto(trade());
+
+    expect(result?.buffer).toEqual(Buffer.from([1, 2, 3]));
+    expect(chartSpy).not.toHaveBeenCalled();
   });
 });
 

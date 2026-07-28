@@ -42,6 +42,8 @@ function toTradeNotificationData(
     liquidityUsd: enrichment?.liquidityUsd,
     marketCapUsd: enrichment?.marketCapUsd,
     volume24hUsd: enrichment?.volume24hUsd,
+    entryPriceUsd: trade.entryPriceUsd,
+    exitPriceUsd: trade.exitPriceUsd,
   };
 }
 
@@ -138,10 +140,11 @@ export class TradeShowcaseMonitor {
         const notification = toTradeNotificationData(trade, enrichment);
         const caption = formatTradePhotoCaption(notification);
         // Fetched once per trade (real DexScreener chart preview, falling
-        // back to the token logo — see resolveTradePhoto's own doc comment)
-        // and reused for the channel post and every subscribed user's DM,
-        // never re-downloaded per recipient.
-        const photo = await resolveTradePhoto(trade.mint, enrichment?.logoUrl);
+        // back to a self-rendered real-data price chart — never the token
+        // logo, see resolveTradePhoto's own doc comment) and reused for the
+        // channel post and every subscribed user's DM, never re-downloaded
+        // per recipient.
+        const photo = await resolveTradePhoto(notification);
         await sendTradeNotificationPhoto(this.deps.bot, this.deps.chatId, caption, photo);
         await this.dmSubscribedUsers(trade.positionId, caption, photo);
         await markTradeShowcased(this.deps.prisma, trade.positionId);

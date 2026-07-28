@@ -1,5 +1,6 @@
 import { InputFile, type Bot } from 'grammy';
 import { escapeMd, fmtDate, fmtHoldingTimeShort, pnlEmoji, shortKey, usd } from './ui/format.js';
+import { resolveRealPriceChartPhoto } from './priceChart.js';
 
 /**
  * Real Bot Trade notification (2026-07-28) — the one shared shape/builder for
@@ -29,6 +30,11 @@ export interface TradeNotificationData {
   liquidityUsd: number | undefined;
   marketCapUsd: number | undefined;
   volume24hUsd: number | undefined;
+  /** The real fill price at each leg — needed to plot the Buy/Sell markers on
+   * the real-data price chart (see resolveTradePhoto below). Not otherwise
+   * used in the caption text (ROI/PnL already cover that). */
+  entryPriceUsd: number;
+  exitPriceUsd: number | undefined;
 }
 
 export function solscanTxUrl(signature: string): string {
@@ -141,9 +147,11 @@ const OG_IMAGE_PATTERN_REVERSED =
  * instead of relying on a link preview. Undocumented and scrape-based —
  * DexScreener changing its page markup, or an anti-bot block, both degrade
  * to undefined (never throws), same as any other best-effort enrichment
- * lookup in this codebase — so a scrape failure always falls back to the
- * token-logo tier in resolveTradePhoto below, never blocks the underlying
- * real trade notification.
+ * lookup in this codebase. In practice this always returns undefined from
+ * this server today (Cloudflare blocks the page outright — see
+ * resolveTradePhoto's own doc comment), so the real-data chart in
+ * priceChart.ts is what actually renders every notification's photo; this
+ * scrape is kept as the preferred tier in case that ever changes.
  */
 export async function fetchDexScreenerChartImage(
   mint: string,
@@ -165,29 +173,33 @@ export async function fetchDexScreenerChartImage(
 }
 
 /**
- * Resolves the single best photo for one trade notification — the real
- * DexScreener chart preview first, the token logo second (no headless-browser
- * chart-rendering fallback: a real per-trade page screenshot would need a
- * bundled-Chromium dependency this codebase deliberately doesn't carry, see
- * this feature's own design discussion), undefined if neither is available.
- * Called once per trade and the result reused for the channel post and every
- * subscribed user's DM — never re-fetched per recipient.
+ * Resolves the single best *price chart* photo for one trade notification —
+ * never the token logo (2026-07-28 fix: the DexScreener og:image scrape below
+ * is permanently blocked by Cloudflare from this server, confirmed with both
+ * a plain fetch and a full headless-Chromium screenshot attempt, so it was
+ * silently failing on every real trade and falling through to the token logo
+ * — see priceChart.ts's own doc comment for the full investigation). Tier 1
+ * is still the official DexScreener chart-preview image, kept in case this
+ * server's IP is ever unblocked; tier 2 is a real-data chart we render
+ * ourselves from GeckoTerminal OHLCV with the actual Buy/Sell fill points
+ * marked. Undefined only if both real-data sources fail — the caller then
+ * sends a text-only message, never a logo. Called once per trade and the
+ * result reused for the channel post and every subscribed user's DM — never
+ * re-fetched per recipient.
  */
 export async function resolveTradePhoto(
-  mint: string,
-  logoUrl: string | undefined,
+  trade: TradeNotificationData,
 ): Promise<ResolvedTradePhoto | undefined> {
-  const chart = await fetchDexScreenerChartImage(mint);
-  if (chart) return chart;
-  if (logoUrl) return downloadImage(logoUrl);
-  return undefined;
+  const officialChart = await fetchDexScreenerChartImage(trade.mint);
+  if (officialChart) return officialChart;
+  return resolveRealPriceChartPhoto(trade);
 }
 
 /**
  * The one send path for a Real Bot Trade notification — always sendPhoto
- * when a real photo (chart or logo) was resolved, sendMessage with the same
- * caption text only in the rare case neither image source was available
- * (never a fabricated placeholder image).
+ * when a real price-chart photo was resolved, sendMessage with the same
+ * caption text only in the rare case neither chart source was available
+ * (never a fabricated placeholder image, and never the token logo).
  */
 export async function sendTradeNotificationPhoto(
   bot: Bot,
