@@ -1,6 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TradeShowcaseMonitor } from './monitor.js';
 
+const formatTradePhotoCaptionMock = vi.fn().mockReturnValue('CAPTION TEXT');
+const resolveTradePhotoMock = vi.fn().mockResolvedValue(undefined);
+const sendTradeNotificationPhotoMock = vi.fn().mockResolvedValue({ message_id: 1 });
+
+vi.mock('@nova/telegram-bot', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@nova/telegram-bot')>();
+  return {
+    ...actual,
+    formatTradePhotoCaption: (...args: unknown[]) => formatTradePhotoCaptionMock(...args),
+    resolveTradePhoto: (...args: unknown[]) => resolveTradePhotoMock(...args),
+    sendTradeNotificationPhoto: (...args: unknown[]) => sendTradeNotificationPhotoMock(...args),
+  };
+});
+
 function fakeLogger() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
 }
@@ -86,7 +100,7 @@ describe('TradeShowcaseMonitor — daily summary deployment cutoff', () => {
   });
 });
 
-describe('TradeShowcaseMonitor — real bot trade DM broadcast', () => {
+describe('TradeShowcaseMonitor — real bot trade sendPhoto + DM broadcast', () => {
   function fakeEligiblePosition() {
     return {
       id: 'pos1',
@@ -111,8 +125,7 @@ describe('TradeShowcaseMonitor — real bot trade DM broadcast', () => {
     };
   }
 
-  it('DMs every subscribed telegramId the identical message, in addition to the channel post', async () => {
-    const { deps, sendMessage, userFindMany } = fakeDeps();
+  function withEligibleTrade(deps: ReturnType<typeof fakeDeps>['deps']) {
     (deps as never as { prisma: Record<string, unknown> }).prisma = {
       ...(deps as never as { prisma: Record<string, unknown> }).prisma,
       position: {
@@ -136,55 +149,52 @@ describe('TradeShowcaseMonitor — real bot trade DM broadcast', () => {
         ]),
       },
     };
+    return deps;
+  }
+
+  it('resolves one photo per trade and sends the identical caption+photo to the channel and every subscribed telegramId', async () => {
+    resolveTradePhotoMock.mockClear();
+    sendTradeNotificationPhotoMock.mockClear();
+    const resolvedPhoto = { buffer: Buffer.from([1, 2, 3]) };
+    resolveTradePhotoMock.mockResolvedValue(resolvedPhoto);
+
+    const { deps, userFindMany } = fakeDeps();
+    withEligibleTrade(deps);
     userFindMany.mockResolvedValue([{ telegramId: 'chat1' }, { telegramId: 'chat2' }]);
 
     const monitor = new TradeShowcaseMonitor(deps);
     await monitor.tick();
 
-    const channelCalls = sendMessage.mock.calls.filter(
-      (call) => call[0] === '@testchannel' && (call[1] as string).includes('REAL BOT TRADE'),
-    );
-    const dmCalls = sendMessage.mock.calls.filter((call) =>
-      ['chat1', 'chat2'].includes(call[0] as string),
-    );
-    expect(channelCalls).toHaveLength(1);
-    expect(dmCalls).toHaveLength(2);
-    // Identical message text to every recipient, channel included.
-    expect(dmCalls[0]![1]).toBe(channelCalls[0]![1]);
-    expect(dmCalls[1]![1]).toBe(channelCalls[0]![1]);
+    // Fetched exactly once per trade, not once per recipient.
+    expect(resolveTradePhotoMock).toHaveBeenCalledTimes(1);
+
+    const recipients = sendTradeNotificationPhotoMock.mock.calls.map((call) => call[1]);
+    expect(recipients).toEqual(expect.arrayContaining(['@testchannel', 'chat1', 'chat2']));
+    expect(sendTradeNotificationPhotoMock).toHaveBeenCalledTimes(3);
+    for (const call of sendTradeNotificationPhotoMock.mock.calls) {
+      expect(call[2]).toBe('CAPTION TEXT');
+      expect(call[3]).toBe(resolvedPhoto);
+    }
   });
 
   it('still posts to the channel and marks the trade showcased even if a DM send fails', async () => {
-    const { deps, sendMessage, userFindMany } = fakeDeps();
+    sendTradeNotificationPhotoMock.mockReset();
+    sendTradeNotificationPhotoMock.mockImplementation((_bot, chatId) => {
+      if (chatId === 'brokenChat') return Promise.reject(new Error('blocked'));
+      return Promise.resolve({ message_id: 1 });
+    });
+
+    const { deps, userFindMany } = fakeDeps();
     const positionUpdate = vi.fn().mockResolvedValue(undefined);
+    withEligibleTrade(deps);
     (deps as never as { prisma: Record<string, unknown> }).prisma = {
       ...(deps as never as { prisma: Record<string, unknown> }).prisma,
       position: {
         findMany: vi.fn().mockResolvedValue([fakeEligiblePosition()]),
         update: positionUpdate,
       },
-      trade: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({
-            createdAt: new Date('2026-07-27T10:00:00Z'),
-            txSignature: 'buySig',
-          }),
-        findMany: vi.fn().mockResolvedValue([
-          {
-            createdAt: new Date('2026-07-27T10:30:00Z'),
-            amountSol: 1.25,
-            priceUsd: 0.00125,
-            txSignature: 'sellSig',
-          },
-        ]),
-      },
     };
     userFindMany.mockResolvedValue([{ telegramId: 'brokenChat' }]);
-    sendMessage.mockImplementation((chatId: string) => {
-      if (chatId === 'brokenChat') return Promise.reject(new Error('blocked'));
-      return Promise.resolve({ message_id: 1 });
-    });
 
     const monitor = new TradeShowcaseMonitor(deps);
     await monitor.tick();

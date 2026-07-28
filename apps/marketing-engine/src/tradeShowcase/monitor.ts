@@ -1,20 +1,49 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
-import type { Bot } from '@nova/telegram-bot';
-import type { MarketDataClient } from '../marketData.js';
+import {
+  formatTradePhotoCaption,
+  resolveTradePhoto,
+  sendTradeNotificationPhoto,
+  type ResolvedTradePhoto,
+  type TradeNotificationData,
+  type Bot,
+} from '@nova/telegram-bot';
+import type { MarketDataClient, DexScreenerEnrichment } from '../marketData.js';
 import { sendBrandedMessage } from '../telegramSend.js';
 import {
   fetchShowcaseEligibleTrades,
   fetchClosedTradesForDay,
   fetchSubscribedTelegramIds,
   markTradeShowcased,
+  type ShowcaseTrade,
 } from './data.js';
-import {
-  formatTradeShowcaseMessage,
-  formatDailySummaryMessage,
-  computeDailySummaryStats,
-  dexscreenerChartUrl,
-} from './format.js';
+import { formatDailySummaryMessage, computeDailySummaryStats } from './format.js';
+
+/** Maps this module's Prisma-backed trade/enrichment shapes onto the
+ * generic, Prisma-free TradeNotificationData shape the shared
+ * apps/telegram-bot notification builder expects — see that module's own
+ * doc comment for why the builder lives there instead of here. */
+function toTradeNotificationData(
+  trade: ShowcaseTrade,
+  enrichment: DexScreenerEnrichment | undefined,
+): TradeNotificationData {
+  return {
+    mint: trade.mint,
+    tokenName: trade.tokenName,
+    tokenSymbol: trade.tokenSymbol,
+    dex: trade.dex,
+    buyAt: trade.buyAt,
+    sellAt: trade.sellAt,
+    roiPercent: trade.roiPercent,
+    pnlUsd: trade.pnlUsd,
+    aiScore: trade.aiScore,
+    buySignature: trade.buySignature,
+    sellSignature: trade.sellSignature,
+    liquidityUsd: enrichment?.liquidityUsd,
+    marketCapUsd: enrichment?.marketCapUsd,
+    volume24hUsd: enrichment?.volume24hUsd,
+  };
+}
 
 export interface TradeShowcaseMonitorDeps {
   prisma: PrismaClient;
@@ -106,13 +135,15 @@ export class TradeShowcaseMonitor {
     for (const trade of trades) {
       try {
         const enrichment = await this.deps.marketData.fetchEnrichment(trade.mint);
-        const text = formatTradeShowcaseMessage(trade, enrichment);
-        const sendOpts = {
-          logoUrl: enrichment?.logoUrl,
-          linkPreviewUrl: dexscreenerChartUrl(trade.mint),
-        };
-        await sendBrandedMessage(this.deps.bot, this.deps.chatId, text, sendOpts);
-        await this.dmSubscribedUsers(trade.positionId, text, sendOpts);
+        const notification = toTradeNotificationData(trade, enrichment);
+        const caption = formatTradePhotoCaption(notification);
+        // Fetched once per trade (real DexScreener chart preview, falling
+        // back to the token logo — see resolveTradePhoto's own doc comment)
+        // and reused for the channel post and every subscribed user's DM,
+        // never re-downloaded per recipient.
+        const photo = await resolveTradePhoto(trade.mint, enrichment?.logoUrl);
+        await sendTradeNotificationPhoto(this.deps.bot, this.deps.chatId, caption, photo);
+        await this.dmSubscribedUsers(trade.positionId, caption, photo);
         await markTradeShowcased(this.deps.prisma, trade.positionId);
         this.deps.logger.info(
           { positionId: trade.positionId, mint: trade.mint, roiPercent: trade.roiPercent },
@@ -132,11 +163,11 @@ export class TradeShowcaseMonitor {
 
   /**
    * Real Bot Trade DM broadcast (2026-07-28): every user who has ever
-   * started the bot (User.telegramId set) gets the identical message —
-   * same premium layout, same DexScreener chart preview — direct in their
-   * own chat, in addition to (never instead of) the public channel post
-   * above. Independent of SnipeConfig activity: this is a broadcast to
-   * every registered user, not the narrower "active sniper" fan-out
+   * started the bot (User.telegramId set) gets the identical sendPhoto
+   * notification — same photo, same caption — direct in their own chat, in
+   * addition to (never instead of) the public channel post above.
+   * Independent of SnipeConfig activity: this is a broadcast to every
+   * registered user, not the narrower "active sniper" fan-out
    * NotificationService already does for the BUY/SELL card images.
    * Best-effort per recipient (logged, not thrown) so one blocked chat, or
    * a Telegram outage, never stops the channel post or the dedup marker
@@ -144,14 +175,14 @@ export class TradeShowcaseMonitor {
    */
   private async dmSubscribedUsers(
     positionId: string,
-    text: string,
-    opts: { logoUrl?: string; linkPreviewUrl?: string },
+    caption: string,
+    photo: ResolvedTradePhoto | undefined,
   ): Promise<void> {
     const chatIds = await fetchSubscribedTelegramIds(this.deps.prisma);
     await Promise.all(
       chatIds.map(async (chatId) => {
         try {
-          await sendBrandedMessage(this.deps.bot, chatId, text, opts);
+          await sendTradeNotificationPhoto(this.deps.bot, chatId, caption, photo);
         } catch (err) {
           this.deps.logger.error(
             { err, positionId, chatId },
