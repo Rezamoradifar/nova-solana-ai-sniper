@@ -160,9 +160,13 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // delays startup or the caller; see JupiterClient.warmConnection's doc
   // comment.
   void jupiter.warmConnection();
-  const dexRegistry = new DexRegistry(connection, dexScreener, app.log as never, {
-    PUMPSWAP: new PumpSwapExecutor(),
-  });
+  const dexRegistry = new DexRegistry(
+    connection,
+    dexScreener,
+    app.log as never,
+    { PUMPSWAP: new PumpSwapExecutor() },
+    app.config.DEX_MONITOR_IDLE_MS,
+  );
   // No-ops (undefined) when unset, same convention as every other optional
   // integration in this codebase — sends just go direct, never blocked on Jito.
   const jito = app.config.JITO_BLOCK_ENGINE_URL
@@ -434,6 +438,15 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // already track as PUMPFUN is a migration signal, handled the same way as the
   // pump.fun-side hint.
   const classifier = new TokenEventClassifier(app.log as never);
+  // Not wrapped in the generic MonitorWatchdog (see monitorWatchdog.ts, used
+  // for the simpler per-DEX monitors below via dexRegistry) — PumpFunMonitor
+  // already has its own purpose-built resilience: multi-provider failover,
+  // launchSilenceThresholdMs/watchdogVerifyWindowMs silence detection, and
+  // exponential provider-cooldown backoff (see this class's own doc
+  // comment). Wrapping it again would drop the `options` argument its own
+  // start() takes (MonitorWatchdog only forwards a bare onEvent callback)
+  // and would shadow recordValidCreate()/getHealth(), both called directly
+  // on this instance elsewhere in this file and in scannerHealth.ts.
   const monitor = new PumpFunMonitor(pumpFunWsProviders, app.log as never);
   app.decorate('pumpFunMonitor', monitor);
 

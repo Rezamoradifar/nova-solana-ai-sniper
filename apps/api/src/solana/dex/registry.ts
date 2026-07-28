@@ -35,6 +35,7 @@ import {
   type NativeDexExecutor,
   type NativeDexName,
 } from './types.js';
+import { MonitorWatchdog } from '../monitorWatchdog.js';
 
 type NativeDex = NativeDexName;
 
@@ -82,12 +83,23 @@ export class DexRegistry {
     private readonly dexScreener: DexScreenerClient,
     logger: Logger,
     executorOverrides: Partial<Record<NativeDex, NativeDexExecutor>> = {},
+    // Wraps each per-DEX onLogs monitor with a liveness watchdog (see
+    // monitorWatchdog.ts) so a silently-dropped websocket force-restarts instead of
+    // flatlining detection for that DEX forever. Undefined (the default, used by
+    // most tests) leaves monitors unwrapped — the watchdog's own interval timer
+    // would otherwise outlive short-lived test instances.
+    watchdogIdleMs?: number,
   ) {
+    const wrap = (dex: NativeDex, monitor: DexMonitor): DexMonitor =>
+      watchdogIdleMs === undefined
+        ? monitor
+        : new MonitorWatchdog(monitor, logger, { label: dex, idleThresholdMs: watchdogIdleMs });
+
     this.monitors = new Map<NativeDex, DexMonitor>([
-      ['PUMPSWAP', new PumpSwapMonitor(connection, logger)],
-      ['RAYDIUM', new RaydiumCpmmMonitor(connection, logger)],
-      ['ORCA', new OrcaWhirlpoolMonitor(connection, logger)],
-      ['METEORA', new MeteoraDlmmMonitor(connection, logger)],
+      ['PUMPSWAP', wrap('PUMPSWAP', new PumpSwapMonitor(connection, logger))],
+      ['RAYDIUM', wrap('RAYDIUM', new RaydiumCpmmMonitor(connection, logger))],
+      ['ORCA', wrap('ORCA', new OrcaWhirlpoolMonitor(connection, logger))],
+      ['METEORA', wrap('METEORA', new MeteoraDlmmMonitor(connection, logger))],
     ]);
     this.liquidityReaders = new Map<NativeDex, LiquidityReader>([
       ['PUMPSWAP', getPumpSwapLiquidity],
