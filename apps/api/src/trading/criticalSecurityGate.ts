@@ -22,6 +22,20 @@ import type { RiskFlags } from '@nova/shared';
  * -> AI analysis -> Opportunity Score -> BUY or SKIP. AI score and Opportunity
  * Score are evaluated downstream of both this gate and the sellability check
  * and can never override either — see autoTrader.ts's evaluateAndMaybeBuy.
+ *
+ * 2026-07-27 "unblock buys" audit — bounded exception, PUMPFUN only: for a
+ * candidate still inside PUMPFUN_GRACE_PERIOD_MS of its own detection (see
+ * CriticalSecurityGateOptions.pumpfunGracePeriodActive, decided upstream in
+ * candidatePipeline.ts, never here), the DexScreener-listing requirement and
+ * the minimum-holder-count floor are skipped — both are structurally
+ * unpassable in a token's first couple of minutes regardless of legitimacy.
+ * This does NOT reopen "pump.fun as a direct path to a BUY": mint/freeze
+ * authority, LP lock, honeypot heuristic, holder CONCENTRATION, bundled-wallet
+ * clustering, blacklist, sellabilityCheck.ts's real sell simulation, the
+ * Multi-LLM consensus gate, and every per-user AutoTrader gate downstream all
+ * still run, unconditionally, exactly as before. Every other dex/source is
+ * completely unaffected — see pumpfunGracePeriodActive's own doc comment for
+ * why only genuine on-chain pump.fun detection can ever set it.
  */
 
 /** Calibrated against real incident data (2026-07-21 audit): blocks Larry (93%),
@@ -40,6 +54,24 @@ export interface CriticalSecurityGateResult {
   reasons: string[];
 }
 
+export interface CriticalSecurityGateOptions {
+  /**
+   * 2026-07-27 "unblock buys" audit: true only for a PUMPFUN candidate still
+   * inside its post-launch grace window (see PUMPFUN_GRACE_PERIOD_MS in
+   * packages/shared/src/env.ts; computed and passed in by
+   * candidatePipeline.ts, never decided here). Relaxes ONLY the two checks
+   * that are structurally unpassable this early — DexScreener-listing
+   * validation and the minimum-holder-count floor — because a token seconds
+   * old cannot have either yet, real or not. Every other criterion (mint/
+   * freeze authority, LP lock, honeypot heuristic, holder CONCENTRATION —
+   * top10HolderPercent, bundled-wallet clustering, and the caller's own
+   * blacklist/sellability checks) is untouched and still enforced
+   * unconditionally. Non-PUMPFUN candidates and any candidate whose age
+   * can't be established never get this — see candidatePipeline.ts.
+   */
+  pumpfunGracePeriodActive?: boolean;
+}
+
 /**
  * Pure so it's independently unit-tested — same convention as
  * exitEngine.ts's evaluateExit and entryFilter.ts's evaluateEntry. Every
@@ -56,7 +88,11 @@ export interface CriticalSecurityGateResult {
  * bad." A caller that only checks `allowed` sees identical behavior either
  * way.
  */
-export function evaluateCriticalSecurityGate(riskFlags: RiskFlags): CriticalSecurityGateResult {
+export function evaluateCriticalSecurityGate(
+  riskFlags: RiskFlags,
+  options?: CriticalSecurityGateOptions,
+): CriticalSecurityGateResult {
+  const pumpfunGracePeriodActive = options?.pumpfunGracePeriodActive ?? false;
   const reasons: string[] = [];
 
   if (!riskFlags.mintAuthorityRevoked) {
@@ -75,20 +111,40 @@ export function evaluateCriticalSecurityGate(riskFlags: RiskFlags): CriticalSecu
   if (riskFlags.isHoneypotSuspected) {
     reasons.push(riskFlags.honeypotCheckUnknown ? 'honeypot_check_unknown' : 'honeypot_suspected');
   }
-  // DexScreener Validation (2026-07-22 policy): a pre-migration pump.fun bonding-curve
-  // token has no DexScreener listing at all, so resolveLiquidity's own fallback chain
+  // DexScreener Validation (2026-07-22 policy, narrowed 2026-07-27 "bot buys
+  // nothing" audit): a pre-migration pump.fun bonding-curve token has no
+  // DexScreener listing at all, so resolveLiquidity's own fallback chain
   // (native DEX read -> bonding-curve estimate -> Jupiter price-impact estimate) is what
   // let pump.fun launches reach a BUY on self-reported/estimated numbers alone — exactly
-  // the "pump.fun directly triggers a buy" gap this closes. Requiring the source to be
-  // exactly 'dexscreener' (not just "some source resolved") means a token can only be
-  // bought once an independent, aggregated market actually lists it — pump.fun itself is
-  // discovery-only from here on. This subsumes the old unavailable-only check: every
-  // non-dexscreener source (including 'unavailable') now fails the same way.
-  if (riskFlags.liquiditySource !== 'dexscreener') {
+  // the "pump.fun directly triggers a buy" gap this closes. 'native_dex' is deliberately
+  // still accepted here, unlike 'pumpfun_bonding_curve'/'jupiter_estimate'/'unavailable':
+  // it's a direct on-chain reserve read of a real, already-migrated AMM pool (Raydium/
+  // Orca/Meteora/PumpSwap) whose address this codebase already resolved — not a
+  // self-reported/estimated number — so it carries the same "real venue, real liquidity"
+  // guarantee DexScreener does, just without waiting on DexScreener's own indexing lag
+  // (live production data: this lag alone was blocking 100% of migrated candidates whose
+  // liquidity resolved via native_dex moments before DexScreener caught up). Only
+  // 'pumpfun_bonding_curve' (pre-migration, self-reported), 'jupiter_estimate' (a price-
+  // impact approximation, not a real reserve read), and 'unavailable' still fail here.
+  // Pump.fun grace period (2026-07-27): a pre-migration launch's only
+  // possible liquidity reading is 'pumpfun_bonding_curve' (or, absent even
+  // that, 'jupiter_estimate') — DexScreener simply hasn't indexed it yet, not
+  // a red flag. 'unavailable' (no liquidity signal resolved at all — even the
+  // bonding-curve/estimate fallbacks failed) still blocks even during the
+  // grace period; that's a genuine data-unknown case, not a "too young" one.
+  const liquiditySourceOk = pumpfunGracePeriodActive
+    ? riskFlags.liquiditySource !== 'unavailable'
+    : riskFlags.liquiditySource === 'dexscreener' || riskFlags.liquiditySource === 'native_dex';
+  if (!liquiditySourceOk) {
     reasons.push('dexscreener_validation_failed');
   }
   const holderConcentrationCritical = riskFlags.top10HolderPercent >= HARD_MAX_TOP10_HOLDER_PERCENT;
-  const holderCountCritical = (riskFlags.holderCount ?? 0) < HARD_MIN_HOLDER_COUNT;
+  // Grace period relaxes the COUNT floor only — a token seconds old cannot
+  // have 5 holders yet regardless of legitimacy. Concentration (the % held by
+  // the top 10) stays fully enforced: it's the real fraud signal, not merely
+  // an artifact of elapsed time.
+  const holderCountCritical =
+    !pumpfunGracePeriodActive && (riskFlags.holderCount ?? 0) < HARD_MIN_HOLDER_COUNT;
   if (holderConcentrationCritical || holderCountCritical) {
     if (riskFlags.holderDataUnknown) {
       reasons.push('holder_data_unknown');
@@ -154,7 +210,10 @@ export function classifySecurityState(riskFlags: RiskFlags): SecurityStateBreakd
         : 'UNSAFE',
     lpLock: riskFlags.lpBurnedOrLocked ? 'SAFE' : 'UNSAFE',
     honeypot: honeypotUnknown ? 'UNKNOWN' : riskFlags.isHoneypotSuspected ? 'UNSAFE' : 'SAFE',
-    dexscreenerValidation: riskFlags.liquiditySource === 'dexscreener' ? 'SAFE' : 'UNSAFE',
+    dexscreenerValidation:
+      riskFlags.liquiditySource === 'dexscreener' || riskFlags.liquiditySource === 'native_dex'
+        ? 'SAFE'
+        : 'UNSAFE',
     holderConcentration: holderUnknown
       ? 'UNKNOWN'
       : riskFlags.top10HolderPercent >= HARD_MAX_TOP10_HOLDER_PERCENT

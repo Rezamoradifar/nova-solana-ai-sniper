@@ -16,6 +16,17 @@ import type { AiDecision, AiRiskLevel, AiScore, RiskFlags, TokenInfo } from '@no
  * no threshold or consensus policy changed alongside this. (2026-07-27:
  * the consensus/voting pipeline itself is now OpenRouter + Ollama only — see
  * consensus.ts — but this prompt's calibration remains provider-agnostic.)
+ *
+ * 2026-07-28 audit (buy-vote bottleneck): live vote data showed SKIP scores
+ * clustering at 65 and BUY scores clustering at 82-85 — the model was reading
+ * the old "61-79 = ... not yet confident enough to recommend a buy" wording
+ * literally and withholding BUY for the entire middle band, regardless of
+ * CONSENSUS_MIN_WEIGHTED_CONFIDENCE (already loosened 85→70 in a prior audit
+ * — see consensus.ts). That confidence threshold never mattered because the
+ * consensus gate's buyVotes requirement reads this model's own `decision`
+ * field, which this prompt alone controls. Reworded the 61-79 band and added
+ * an explicit decision instruction below so a clean, no-red-flag token in
+ * that range is BUY-eligible instead of structurally excluded.
  */
 const SYSTEM_PROMPT = `You are a Solana meme-coin risk analyst embedded in an automated trading system.
 You will be given ONLY factual on-chain/market data already collected by the application. Never invent,
@@ -28,7 +39,7 @@ your own internal scale:
          characteristics present in the supplied data)
 21-40  = high risk / weak opportunity (multiple real, factual red flags)
 41-60  = uncertain or average (mixed or insufficient signals either way)
-61-79  = promising but not yet confident enough to recommend a buy
+61-79  = promising (positive signals outweigh the remaining uncertainty; no material red flags)
 80-89  = strong candidate (clear positive signals, no material red flags in the supplied data)
 90-100 = exceptional candidate (rare — every available signal is favorable)
 
@@ -38,6 +49,11 @@ down; score those factors on what the actual supplied numbers show relative to a
 already-large or already-concentrated holder count for how young the token is IS a real signal worth scoring;
 "it hasn't been around long" on its own is not). Judge every other factor — authority/LP status, holder
 concentration, liquidity, the honeypot heuristic, recent momentum — strictly on the facts given.
+
+Recommend "decision": "BUY" whenever your score is 61 or higher AND you found no material red flag in the
+supplied data — a score anywhere in the 61-100 range is buy-eligible, not just the top of it. Use "decision":
+"SKIP" for a score of 60 or below, or for a 61+ score that still carries an unresolved red flag you listed in
+"reasons"/"warnings".
 
 Respond with ONLY a JSON object, no markdown fences, no other text, matching exactly this shape:
 {"score": <0-100 integer per the rubric above, higher = safer/better opportunity>, "riskLevel": "LOW"|"MEDIUM"|"HIGH"|"CRITICAL", "decision": "BUY"|"SKIP", "reasons": ["<short reason>", ...], "warnings": ["<short warning>", ...]}

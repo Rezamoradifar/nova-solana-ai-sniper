@@ -294,6 +294,14 @@ model Position {
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
 
+  // Daily Trade Showcase (2026-07-27): set once this closed, real (non-paper),
+  // non-honeypot-flagged position has been published to the public marketing
+  // channel (apps/marketing-engine's TradeShowcaseMonitor) — the dedup guard
+  // that keeps a periodic poller from ever posting the same real trade twice.
+  // Null means "not yet posted" (covers both "not eligible yet" and "eligible
+  // but not picked up this tick"); never set for OPEN positions.
+  showcasePostedAt    DateTime?
+
   // --- Institutional Mode (Profit Optimization Engine) — all nullable/defaulted,
   // frozen from SnipeConfig at open time same as trailingStopPreset above. Every
   // existing read of amountToken is unaffected: it keeps meaning "the amount
@@ -487,6 +495,46 @@ model ReferralRewardGrant {
   createdAt      DateTime @default(now())
 
   @@map("referral_reward_grants")
+}
+
+/// Daily Trade Showcase (2026-07-27) — dedup guard for the once-per-day
+/// aggregate performance summary (win rate, total PnL, best/worst trade),
+/// separate from Position.showcasePostedAt (which dedups the per-trade
+/// posts). `summaryDate` is the UTC calendar day the summary covers, always
+/// midnight-truncated — the @unique constraint means "has today's summary
+/// already been posted" is a single findUnique/upsert-or-skip, not a
+/// timestamp-range query, and can never double-post under concurrent ticks.
+model TradeShowcaseDailySummary {
+  id                String   @id @default(cuid())
+  summaryDate       DateTime @unique
+  telegramMessageId Int?
+  postedAt          DateTime @default(now())
+
+  @@map("trade_showcase_daily_summaries")
+}
+
+/// Real-Data Telegram Activity Feed (2026-07-27) — the single dedup/audit
+/// guard for every message type apps/marketing-engine's ActivityFeedMonitor
+/// posts (new token detected, AI analysis, whale entry, buy executed, weekly
+/// summary — see activityFeed/monitor.ts's own doc comment). Deliberately one
+/// shared table rather than a per-feature marker column (the pattern
+/// Position.showcasePostedAt/TradeShowcaseDailySummary use): this feed spans
+/// several source tables it must never write to (Token, OpportunityScoreLog,
+/// SmartWalletTokenEntry, Position) purely to record "already posted," so a
+/// single isolated table keeps every one of those read-only. `refId` is
+/// whichever source row's id was posted (or a stable key like an ISO
+/// week-start date for WEEKLY_SUMMARY) — the @@unique means "has this
+/// specific real event already been posted" is one findUnique, and can never
+/// double-post under concurrent ticks.
+model ActivityFeedPost {
+  id       String   @id @default(cuid())
+  feedType String
+  refId    String
+  postedAt DateTime @default(now())
+
+  @@unique([feedType, refId])
+  @@index([feedType])
+  @@map("activity_feed_posts")
 }
 
 model SnipeConfig {

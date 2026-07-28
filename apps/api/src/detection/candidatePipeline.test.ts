@@ -92,16 +92,16 @@ describe('isRetryableRejection', () => {
     );
   });
 
-  it('is retryable for age-dependent reasons (2026-07-23 follow-up audit: real but too-young-to-resolve readings)', () => {
-    expect(isRetryableRejection(['honeypot_suspected'])).toBe(true);
-    expect(isRetryableRejection(['lp_not_locked_or_burned'])).toBe(true);
-    expect(isRetryableRejection(['holder_concentration_critical'])).toBe(true);
-    expect(isRetryableRejection(['holder_count_critical'])).toBe(true);
-    // Mixed: one transient + one age-dependent reason is still fully retryable.
+  it("is NOT retryable for age-dependent reasons (2026-07-27 audit: a short retry window can never resolve them — a 22h production sample already proved 0% success; they get a real second look via worker.ts's token.migrated re-entry point instead, not a busy-retry loop)", () => {
+    expect(isRetryableRejection(['honeypot_suspected'])).toBe(false);
+    expect(isRetryableRejection(['lp_not_locked_or_burned'])).toBe(false);
+    expect(isRetryableRejection(['holder_concentration_critical'])).toBe(false);
+    expect(isRetryableRejection(['holder_count_critical'])).toBe(false);
+    // Mixed: one transient + one age-dependent reason is no longer retryable either —
+    // the age-dependent reason alone is enough to make the whole rejection final.
     expect(isRetryableRejection(['dexscreener_validation_failed', 'honeypot_suspected'])).toBe(
-      true,
+      false,
     );
-    // Mixed: one age-dependent + one confirmed-bad (structural) reason still rejects for good.
     expect(isRetryableRejection(['honeypot_suspected', 'deployer_blacklisted'])).toBe(false);
   });
 
@@ -348,5 +348,111 @@ describe('runCandidatePipeline', () => {
     await runCandidatePipeline(deps, CANDIDATE);
 
     expect(securityGateStats.snapshotAndReset().blockedReasonCounts['honeypot_suspected']).toBe(3);
+  });
+});
+
+describe('runCandidatePipeline — pumpfunGracePeriodActive wiring (2026-07-27 "unblock buys" audit)', () => {
+  const PUMPFUN_CANDIDATE = { mint: 'MintPump', dex: 'PUMPFUN' as const };
+  const youngRiskFlags = safeFlags({ liquiditySource: 'pumpfun_bonding_curve', holderCount: 1 });
+
+  it('passes a young, otherwise-clean PUMPFUN candidate within the grace period despite no DexScreener listing / too few holders', async () => {
+    const result = await runCandidatePipeline(
+      {
+        riskAnalyzer: fakeRiskAnalyzer(youngRiskFlags),
+        jupiter: fakeSellableJupiter(),
+        prisma: fakePrisma(),
+        logger: fakeLogger(),
+        pumpfunGracePeriodMs: 150_000,
+      },
+      { ...PUMPFUN_CANDIDATE, tokenDetectedAt: Date.now() - 10_000 },
+    );
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('rejects the same candidate once the grace period has elapsed', async () => {
+    const result = await runCandidatePipeline(
+      {
+        riskAnalyzer: fakeRiskAnalyzer(youngRiskFlags),
+        jupiter: fakeSellableJupiter(),
+        prisma: fakePrisma(),
+        logger: fakeLogger(),
+        pumpfunGracePeriodMs: 150_000,
+      },
+      { ...PUMPFUN_CANDIDATE, tokenDetectedAt: Date.now() - 200_000 },
+    );
+
+    expect(result.passed).toBe(false);
+    if (!result.passed) {
+      expect(result.reasons).toEqual(
+        expect.arrayContaining(['dexscreener_validation_failed', 'holder_count_critical']),
+      );
+    }
+  });
+
+  it('never activates without a tokenDetectedAt, even for a PUMPFUN candidate with pumpfunGracePeriodMs configured', async () => {
+    const result = await runCandidatePipeline(
+      {
+        riskAnalyzer: fakeRiskAnalyzer(youngRiskFlags),
+        jupiter: fakeSellableJupiter(),
+        prisma: fakePrisma(),
+        logger: fakeLogger(),
+        pumpfunGracePeriodMs: 150_000,
+      },
+      PUMPFUN_CANDIDATE,
+    );
+
+    expect(result.passed).toBe(false);
+  });
+
+  it('never activates without deps.pumpfunGracePeriodMs configured, even with a fresh tokenDetectedAt (matches every existing test/caller in this file, which omits it)', async () => {
+    const result = await runCandidatePipeline(
+      {
+        riskAnalyzer: fakeRiskAnalyzer(youngRiskFlags),
+        jupiter: fakeSellableJupiter(),
+        prisma: fakePrisma(),
+        logger: fakeLogger(),
+      },
+      { ...PUMPFUN_CANDIDATE, tokenDetectedAt: Date.now() },
+    );
+
+    expect(result.passed).toBe(false);
+  });
+
+  it('never activates for a non-PUMPFUN dex, even with a fresh tokenDetectedAt and pumpfunGracePeriodMs configured — every other chain/source is unaffected', async () => {
+    const result = await runCandidatePipeline(
+      {
+        riskAnalyzer: fakeRiskAnalyzer(youngRiskFlags),
+        jupiter: fakeSellableJupiter(),
+        prisma: fakePrisma(),
+        logger: fakeLogger(),
+        pumpfunGracePeriodMs: 150_000,
+      },
+      { mint: 'MintRay', dex: 'RAYDIUM' as const, tokenDetectedAt: Date.now() },
+    );
+
+    expect(result.passed).toBe(false);
+  });
+
+  it('still blocks a young PUMPFUN candidate within the grace period on a genuinely bad signal (mint authority not revoked)', async () => {
+    const result = await runCandidatePipeline(
+      {
+        riskAnalyzer: fakeRiskAnalyzer(
+          safeFlags({
+            liquiditySource: 'pumpfun_bonding_curve',
+            holderCount: 1,
+            mintAuthorityRevoked: false,
+          }),
+        ),
+        jupiter: fakeSellableJupiter(),
+        prisma: fakePrisma(),
+        logger: fakeLogger(),
+        pumpfunGracePeriodMs: 150_000,
+      },
+      { ...PUMPFUN_CANDIDATE, tokenDetectedAt: Date.now() },
+    );
+
+    expect(result.passed).toBe(false);
+    if (!result.passed) expect(result.reasons).toContain('mint_authority_not_revoked');
   });
 });

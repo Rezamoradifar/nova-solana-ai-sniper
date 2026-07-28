@@ -9,6 +9,9 @@ import {
 import { createBot } from '@nova/telegram-bot';
 import { loadMarketingEnv } from './config/env.js';
 import { startDailyScheduler } from './runner.js';
+import { MarketDataClient } from './marketData.js';
+import { TradeShowcaseMonitor } from './tradeShowcase/monitor.js';
+import { ActivityFeedMonitor } from './activityFeed/monitor.js';
 
 const logger = createLogger('marketing-engine');
 
@@ -45,6 +48,11 @@ async function main() {
   const prisma = new PrismaClient();
   const bot = createBot(env.TELEGRAM_BOT_TOKEN, logger);
   const imageProvider = resolveGeminiImageProvider({ geminiApiKey: env.GEMINI_API_KEY });
+  // Shared public-market enrichment (logo/liquidity/market cap/volume/chain)
+  // for both the trade showcase and activity feed — see marketData.ts's own
+  // isolation doc comment for why this is a standalone client rather than a
+  // cross-import of apps/api's live-trading DexScreener client.
+  const marketData = new MarketDataClient(env.DEXSCREENER_API_BASE);
 
   const stop = startDailyScheduler({
     prisma,
@@ -63,9 +71,73 @@ async function main() {
 
   logger.info('marketing-engine scheduler started');
 
+  // Daily Trade Showcase (2026-07-27) — separate opt-in feature flag: this
+  // posts real trade data (mint addresses, tx signatures, PnL) automatically,
+  // so it stays off by default even when the rest of marketing-engine is
+  // configured and running. See TRADE_SHOWCASE_ENABLED's own env.ts doc
+  // comment.
+  let tradeShowcase: TradeShowcaseMonitor | undefined;
+  if (env.TRADE_SHOWCASE_ENABLED) {
+    tradeShowcase = new TradeShowcaseMonitor({
+      prisma,
+      bot,
+      chatId: broadcastChatId,
+      logger,
+      maxPostsPerTick: env.TRADE_SHOWCASE_MAX_POSTS_PER_TICK,
+      deployedAt: env.TRADE_SHOWCASE_DEPLOYED_AT,
+      marketData,
+    });
+    tradeShowcase.start(env.TRADE_SHOWCASE_POLL_INTERVAL_MS);
+    logger.info(
+      {
+        intervalMs: env.TRADE_SHOWCASE_POLL_INTERVAL_MS,
+        deployedAt: env.TRADE_SHOWCASE_DEPLOYED_AT.toISOString(),
+      },
+      'trade showcase monitor started',
+    );
+  } else {
+    logger.info('TRADE_SHOWCASE_ENABLED not set — daily trade showcase is disabled');
+  }
+
+  // Real-Data Telegram Activity Feed (2026-07-27) — separate opt-in feature
+  // flag, same rationale as TRADE_SHOWCASE_ENABLED above: this posts real
+  // token/trade/wallet data automatically, so it stays off by default. Only
+  // ever posts real, unposted events (see activityFeed/monitor.ts's own doc
+  // comment) — never simulated content, so there is no separate "demo mode"
+  // toggle to configure.
+  let activityFeed: ActivityFeedMonitor | undefined;
+  if (env.ACTIVITY_FEED_ENABLED) {
+    activityFeed = new ActivityFeedMonitor({
+      prisma,
+      bot,
+      chatId: broadcastChatId,
+      logger,
+      minIntervalMinutes: env.ACTIVITY_FEED_MIN_INTERVAL_MINUTES,
+      maxIntervalMinutes: env.ACTIVITY_FEED_MAX_INTERVAL_MINUTES,
+      maxPostsPerDay: env.ACTIVITY_FEED_MAX_POSTS_PER_DAY,
+      deployedAt: env.ACTIVITY_FEED_DEPLOYED_AT,
+      marketData,
+      trendingMinH1ChangePercent: env.ACTIVITY_FEED_TRENDING_MIN_H1_CHANGE_PERCENT,
+    });
+    activityFeed.start();
+    logger.info(
+      {
+        minIntervalMinutes: env.ACTIVITY_FEED_MIN_INTERVAL_MINUTES,
+        maxIntervalMinutes: env.ACTIVITY_FEED_MAX_INTERVAL_MINUTES,
+        maxPostsPerDay: env.ACTIVITY_FEED_MAX_POSTS_PER_DAY,
+        deployedAt: env.ACTIVITY_FEED_DEPLOYED_AT.toISOString(),
+      },
+      'activity feed monitor started',
+    );
+  } else {
+    logger.info('ACTIVITY_FEED_ENABLED not set — real-data activity feed is disabled');
+  }
+
   const shutdown = () => {
     logger.info('shutting down marketing-engine');
     stop();
+    tradeShowcase?.stop();
+    activityFeed?.stop();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

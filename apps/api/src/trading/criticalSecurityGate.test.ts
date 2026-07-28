@@ -65,9 +65,10 @@ describe('evaluateCriticalSecurityGate', () => {
     expect(result.reasons).toContain('dexscreener_validation_failed');
   });
 
-  it('blocks a native-DEX on-chain reserve read — only an independent DexScreener listing counts as validated', () => {
+  it('allows a native-DEX on-chain reserve read — a direct read of a real, already-migrated AMM pool, not a self-reported estimate (2026-07-27 audit: DexScreener indexing lag was blocking every migrated candidate whose liquidity resolved via native_dex moments before DexScreener caught up)', () => {
     const result = evaluateCriticalSecurityGate(safeFlags({ liquiditySource: 'native_dex' }));
-    expect(result.reasons).toContain('dexscreener_validation_failed');
+    expect(result.reasons).not.toContain('dexscreener_validation_failed');
+    expect(result.allowed).toBe(true);
   });
 
   it('blocks a Jupiter price-impact estimate — the least confident fallback source', () => {
@@ -304,5 +305,114 @@ describe('evaluateCriticalSecurityGate — bundled-wallet clustering (2026-07-23
     );
     expect(result.reasons).toContain('holder_data_unknown');
     expect(result.reasons).not.toContain('bundled_wallet_cluster_detected');
+  });
+});
+
+describe('evaluateCriticalSecurityGate — pumpfunGracePeriodActive (2026-07-27 "unblock buys" audit)', () => {
+  it('with the option omitted/false, behaves identically to before (no regression)', () => {
+    const withoutOption = evaluateCriticalSecurityGate(
+      safeFlags({ liquiditySource: 'pumpfun_bonding_curve', holderCount: 1 }),
+    );
+    const withFalse = evaluateCriticalSecurityGate(
+      safeFlags({ liquiditySource: 'pumpfun_bonding_curve', holderCount: 1 }),
+      { pumpfunGracePeriodActive: false },
+    );
+    expect(withoutOption).toEqual(withFalse);
+    expect(withoutOption.reasons).toEqual(
+      expect.arrayContaining(['dexscreener_validation_failed', 'holder_count_critical']),
+    );
+  });
+
+  it('during the grace period, allows a pre-migration bonding-curve token with almost no holders yet, everything else clean', () => {
+    const result = evaluateCriticalSecurityGate(
+      safeFlags({
+        liquiditySource: 'pumpfun_bonding_curve',
+        holderCount: 1,
+        top10HolderPercent: 20,
+      }),
+      { pumpfunGracePeriodActive: true },
+    );
+    expect(result).toEqual({ allowed: true, reasons: [] });
+  });
+
+  it('during the grace period, a Jupiter price-impact estimate is also accepted (no DexScreener/native-DEX read exists yet either)', () => {
+    const result = evaluateCriticalSecurityGate(
+      safeFlags({ liquiditySource: 'jupiter_estimate', holderCount: 0 }),
+      { pumpfunGracePeriodActive: true },
+    );
+    expect(result.reasons).not.toContain('dexscreener_validation_failed');
+  });
+
+  it('during the grace period, "unavailable" liquidity still blocks — a genuine no-signal-at-all case, not merely "too young"', () => {
+    const result = evaluateCriticalSecurityGate(safeFlags({ liquiditySource: 'unavailable' }), {
+      pumpfunGracePeriodActive: true,
+    });
+    expect(result.reasons).toContain('dexscreener_validation_failed');
+  });
+
+  it('during the grace period, holder CONCENTRATION is still fully enforced — only the count floor is relaxed', () => {
+    const result = evaluateCriticalSecurityGate(
+      safeFlags({
+        liquiditySource: 'pumpfun_bonding_curve',
+        holderCount: 1,
+        top10HolderPercent: 95,
+      }),
+      { pumpfunGracePeriodActive: true },
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.reasons).toContain('holder_concentration_critical');
+    expect(result.reasons).not.toContain('holder_count_critical');
+  });
+
+  it('during the grace period, every other check is still fully enforced (mint/freeze authority, LP lock, honeypot)', () => {
+    const result = evaluateCriticalSecurityGate(
+      safeFlags({
+        liquiditySource: 'pumpfun_bonding_curve',
+        holderCount: 0,
+        mintAuthorityRevoked: false,
+        lpBurnedOrLocked: false,
+        isHoneypotSuspected: true,
+      }),
+      { pumpfunGracePeriodActive: true },
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.reasons).toEqual(
+      expect.arrayContaining([
+        'mint_authority_not_revoked',
+        'lp_not_locked_or_burned',
+        'honeypot_suspected',
+      ]),
+    );
+    expect(result.reasons).not.toContain('dexscreener_validation_failed');
+    expect(result.reasons).not.toContain('holder_count_critical');
+  });
+
+  it('during the grace period, a confirmed bundled-wallet cluster still blocks unconditionally', () => {
+    const result = evaluateCriticalSecurityGate(
+      safeFlags({
+        liquiditySource: 'pumpfun_bonding_curve',
+        holderCount: 1,
+        holderClusteringState: 'UNSAFE',
+        holderClusteringReasons: ['bundled_wallet_cluster_detected'],
+      }),
+      { pumpfunGracePeriodActive: true },
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.reasons).toContain('bundled_wallet_cluster_detected');
+  });
+
+  it('holder_data_unknown still takes priority over holder_count_critical during the grace period (holder data itself never resolved, not merely "not enough time yet")', () => {
+    const result = evaluateCriticalSecurityGate(
+      safeFlags({
+        liquiditySource: 'pumpfun_bonding_curve',
+        top10HolderPercent: 100,
+        holderCount: 0,
+        holderDataUnknown: true,
+      }),
+      { pumpfunGracePeriodActive: true },
+    );
+    expect(result.allowed).toBe(false);
+    expect(result.reasons).toContain('holder_data_unknown');
+    expect(result.reasons).not.toContain('holder_count_critical');
   });
 });

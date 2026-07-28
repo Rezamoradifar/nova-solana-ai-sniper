@@ -454,6 +454,29 @@ export function formatReferralEarnedMessage(
   );
 }
 
+// A keep-alive HTTP connection to Telegram can go quietly dead (network blip,
+// middlebox drops packets without an RST/FIN) without either side's socket
+// ever erroring — grammy's fetch-based client has no timeout of its own, so a
+// call on a socket in that state hangs forever. Since every send below sits
+// directly in front of AutoTrader.evaluateAndMaybeBuy in the candidate
+// pipeline (worker.ts's processAiCall awaits notifyNewToken before ever
+// reaching the consensus/AutoTrader gate), one wedged connection would
+// silently stall every future BUY, not just fail one notification. Bounding
+// every bot.api call here turns that into the same "logged, not thrown"
+// failure the existing try/catch already treats as normal.
+const TELEGRAM_API_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${TELEGRAM_API_TIMEOUT_MS}ms`)),
+      TELEGRAM_API_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 /**
  * All Telegram alert delivery goes through this one class — the owner's configured
  * broadcast chat, plus (for the sniper alert types: trade/exit/new-token/migration)
@@ -509,7 +532,10 @@ export class NotificationService {
 
   private async sendToChat(chatId: string, text: string): Promise<void> {
     try {
-      await this.bot.api.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+      await withTimeout(
+        this.bot.api.sendMessage(chatId, text, { parse_mode: 'Markdown' }),
+        'sendMessage',
+      );
     } catch (err) {
       this.logger.error({ err, chatId }, 'failed to send telegram notification');
     }
@@ -534,11 +560,14 @@ export class NotificationService {
     keyboard: InlineKeyboard,
   ): Promise<void> {
     try {
-      await this.bot.api.sendPhoto(chatId, new InputFile(png), {
-        caption,
-        parse_mode: 'Markdown',
-        reply_markup: keyboard,
-      });
+      await withTimeout(
+        this.bot.api.sendPhoto(chatId, new InputFile(png), {
+          caption,
+          parse_mode: 'Markdown',
+          reply_markup: keyboard,
+        }),
+        'sendPhoto',
+      );
     } catch (err) {
       this.logger.error({ err, chatId }, 'failed to send telegram trade card');
     }
@@ -562,7 +591,7 @@ export class NotificationService {
   private async getBotUsername(): Promise<string | undefined> {
     if (this.cachedBotUsername) return this.cachedBotUsername;
     try {
-      const me = await this.bot.api.getMe();
+      const me = await withTimeout(this.bot.api.getMe(), 'getMe');
       this.cachedBotUsername = me.username;
       return me.username;
     } catch (err) {
@@ -731,7 +760,10 @@ export class NotificationService {
       `${d.lowBalanceSkipNote(shortfall.toFixed(4))}\n\n` +
       `${d.lowBalanceOneTimeNote}`;
     try {
-      await this.bot.api.sendMessage(user.telegramId, text, { parse_mode: 'Markdown' });
+      await withTimeout(
+        this.bot.api.sendMessage(user.telegramId, text, { parse_mode: 'Markdown' }),
+        'sendMessage',
+      );
       return true;
     } catch (err) {
       this.logger.error(
@@ -777,7 +809,7 @@ export class NotificationService {
     const results = await Promise.all(
       recipients.map(async ({ chatId }) => {
         try {
-          await this.bot.api.sendMessage(chatId, text);
+          await withTimeout(this.bot.api.sendMessage(chatId, text), 'sendMessage');
           return true;
         } catch (err) {
           this.logger.error({ err, chatId }, 'failed to send broadcast message');

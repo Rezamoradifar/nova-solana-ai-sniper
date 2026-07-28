@@ -180,7 +180,13 @@ export class MigrationMonitor {
     });
 
     this.deps.logger.info({ mint, from: 'PUMPFUN', to: newDex }, 'token migrated off pump.fun');
-    eventBus.publish('token.migrated', { tokenId, mint, from: 'PUMPFUN', to: newDex });
+    eventBus.publish('token.migrated', {
+      tokenId,
+      mint,
+      from: 'PUMPFUN',
+      to: newDex,
+      poolAddress: updated.poolAddress ?? undefined,
+    });
     await this.deps.notifier?.notifyMigration({
       mint,
       symbol: updated.symbol ?? undefined,

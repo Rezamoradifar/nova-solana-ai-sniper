@@ -76,19 +76,21 @@ const DATA_UNAVAILABLE_REJECTION_REASONS = new Set([
  * past the $500 floor yet (riskAnalyzer.ts's isHoneypotSuspected) — both are
  * real, resolved readings of a token that is simply too young to have
  * revealed itself, not confirmed fraud. `lp_not_locked_or_burned` is the same
- * story at zero liquidity. None of these are removed as gate criteria and
- * none of their thresholds change — a token that still fails them once it's
- * had real time to trade is rejected for good, exactly as before. Retrying
- * them is provably safe, not a weakening: the full pipeline (including this
- * exact gate) always re-runs before any buy, so nothing new is ever accepted
- * that wouldn't have passed anyway — the only thing that changes is how long
- * we wait, on a token that hasn't yet had the chance to prove itself either
- * way, before giving up. `mint_authority_not_revoked`/
- * `freeze_authority_not_revoked` (the *confirmed*, non-`_unknown` variants),
- * `deployer_blacklisted`, `mint_blacklisted`, `no_sell_route`, and every
- * holder-clustering reason are deliberately EXCLUDED — those describe a
- * structural property that time alone does not change, so they keep
- * rejecting for good on the very first attempt.
+ * story at zero liquidity.
+ *
+ * 2026-07-27 audit ("bot buys nothing"): kept as its own named set for
+ * classification (securityGateStats.ts, log clarity) but deliberately NO
+ * LONGER unioned into RETRYABLE_REJECTION_REASONS below. These reasons need
+ * real elapsed *trading* time to change — minutes to hours, not the
+ * few-second budget CANDIDATE_RETRY_INTERVAL_MS/MAX_ATTEMPTS actually has
+ * (that 60-second-total budget matched the 0%-success finding above exactly:
+ * retrying age-dependent reasons on any short timer was never going to work,
+ * it just made every rejection look like it took 60s to resolve). A token
+ * that's still too young now gets a real second chance once it actually
+ * matures — see worker.ts's 'token.migrated' subscriber, which re-runs this
+ * whole pipeline fresh the moment a pump.fun token migrates to a real AMM
+ * pool with real liquidity and real holders, instead of busy-retrying a
+ * verdict that can't change in seconds.
  */
 const AGE_DEPENDENT_REJECTION_REASONS = new Set([
   'holder_concentration_critical',
@@ -97,10 +99,10 @@ const AGE_DEPENDENT_REJECTION_REASONS = new Set([
   'lp_not_locked_or_burned',
 ]);
 
-const RETRYABLE_REJECTION_REASONS = new Set([
-  ...DATA_UNAVAILABLE_REJECTION_REASONS,
-  ...AGE_DEPENDENT_REJECTION_REASONS,
-]);
+/** Only genuinely transient provider/request failures are retried on the
+ * short CANDIDATE_RETRY_INTERVAL_MS timer — see AGE_DEPENDENT_REJECTION_REASONS'
+ * own doc comment for why age-dependent reasons are deliberately excluded. */
+const RETRYABLE_REJECTION_REASONS = new Set([...DATA_UNAVAILABLE_REJECTION_REASONS]);
 
 /** Empty `reasons` (nothing rejected) is not "retryable" — there's nothing to
  * retry. Mixed in with even one confirmed-bad reason, the whole rejection is
@@ -115,6 +117,14 @@ export interface CandidatePipelineDeps {
   prisma: PrismaClient;
   logger: Logger;
   notifier?: NotificationService;
+  /**
+   * 2026-07-27 "unblock buys" audit (PUMPFUN_GRACE_PERIOD_MS in
+   * packages/shared/src/env.ts) — how long after detection a PUMPFUN
+   * candidate is still eligible for the grace-period relaxation below.
+   * Optional/undefined (every existing caller, e.g. every test in this file)
+   * reproduces today's exact behavior — grace period never activates.
+   */
+  pumpfunGracePeriodMs?: number;
 }
 
 export interface CandidateInput {
@@ -133,6 +143,19 @@ export interface CandidateInput {
    * on missing data (those describe the token's own risk; this doesn't).
    */
   deployerAddress?: string;
+  /**
+   * 2026-07-27 "unblock buys" audit: epoch-ms this candidate was first
+   * detected — required for the PUMPFUN grace-period relaxation below (see
+   * CandidatePipelineDeps.pumpfunGracePeriodMs). Only worker.ts's genuine
+   * on-chain detection path (runCandidateThroughPipeline) passes this; it is
+   * NOT a "when this candidate was created" guarantee for every source — the
+   * Telegram-trend source deliberately omits it (a channel mention has no
+   * reliable relationship to a token's real creation time), which is exactly
+   * what keeps the grace period from ever activating for that source.
+   * Absence simply means "age unknown" -> grace period never activates,
+   * same fail-safe default as every other unknown-data case in this pipeline.
+   */
+  tokenDetectedAt?: number;
 }
 
 export interface CandidatePipelineTimestamps {
@@ -189,6 +212,26 @@ export async function runCandidatePipeline(
 ): Promise<CandidatePipelineResult> {
   const analysisStartedAt = Date.now();
 
+  // 2026-07-27 "unblock buys" audit — see CandidatePipelineDeps.pumpfunGracePeriodMs
+  // and CandidateInput.tokenDetectedAt's own doc comments for why PUMPFUN and a
+  // known detection timestamp are both required, and why only the genuine
+  // on-chain detection path can ever supply the latter.
+  const pumpfunGracePeriodActive =
+    candidate.dex === 'PUMPFUN' &&
+    candidate.tokenDetectedAt !== undefined &&
+    !!deps.pumpfunGracePeriodMs &&
+    analysisStartedAt - candidate.tokenDetectedAt < deps.pumpfunGracePeriodMs;
+  if (pumpfunGracePeriodActive) {
+    deps.logger.info(
+      {
+        mint: candidate.mint,
+        ageMs: analysisStartedAt - candidate.tokenDetectedAt!,
+        pumpfunGracePeriodMs: deps.pumpfunGracePeriodMs,
+      },
+      'candidatePipeline: pump.fun grace period active — DexScreener listing and minimum holder count are not required for this evaluation; every other check still applies',
+    );
+  }
+
   const [riskFlagsResult, deployerBlacklistResult, mintBlacklistResult, forwardQuoteResult] =
     await Promise.allSettled([
       deps.riskAnalyzer.analyze({
@@ -234,7 +277,7 @@ export async function runCandidatePipeline(
   }
   const riskFlags = riskFlagsResult.value;
 
-  const criticalGate = evaluateCriticalSecurityGate(riskFlags);
+  const criticalGate = evaluateCriticalSecurityGate(riskFlags, { pumpfunGracePeriodActive });
   const reasons = [...criticalGate.reasons];
 
   if (mintBlacklistResult.status === 'rejected') {
@@ -281,6 +324,7 @@ export async function runCandidatePipeline(
         reasons,
         riskFlags,
         securityState: classifySecurityState(riskFlags),
+        pumpfunGracePeriodActive,
         location:
           'apps/api/src/detection/candidatePipeline.ts:runCandidatePipeline (critical security gate)',
       },

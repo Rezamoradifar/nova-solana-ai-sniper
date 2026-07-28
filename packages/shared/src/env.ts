@@ -177,6 +177,16 @@ export const envSchema = z.object({
   // fail-open single-voter degrade).
   OLLAMA_HOST: z.string().url().optional(),
   OLLAMA_MODEL: z.string().optional(),
+  // 2026-07-27 "unblock buys" audit: the weighted-confidence bar a candidate's
+  // consensus vote (packages/ai/src/consensus.ts's evaluateMultiLlmConsensus)
+  // must clear before AutoTrader ever runs. Was a hardcoded 85 (deep into the
+  // AI rubric's "strong candidate" band, 80-89) — live data showed almost
+  // nothing reaching this gate could clear that bar, even after already
+  // passing the Critical Security Gate. Lowered to 70 (top of the "promising
+  // but not yet confident enough" band and above) and made operator-tunable
+  // without a redeploy, same convention as every other risk knob in this
+  // section. minBuyVotes (2) is untouched — only the confidence floor moved.
+  CONSENSUS_MIN_WEIGHTED_CONFIDENCE: z.coerce.number().min(0).max(100).default(70),
 
   // Telegram
   TELEGRAM_BOT_TOKEN: z.string().optional(),
@@ -197,6 +207,73 @@ export const envSchema = z.object({
   // The branded template renderer (visuals/statCard.ts, headlineCard.ts) is
   // unaffected by this flag — it always runs, free and local, regardless.
   MARKETING_AI_IMAGE_ENABLED: booleanFlag(false),
+
+  // Daily Trade Showcase (2026-07-27) — publishes every real (non-paper),
+  // non-honeypot-flagged closed trade to MARKETING_TELEGRAM_CHANNEL_ID as it
+  // closes, plus one daily aggregate summary. Reports every eligible trade
+  // as-is (no profit-range filter, no fixed count, wins and losses both) —
+  // deliberately NOT gated behind any "make it look good" selection logic.
+  // Defaults OFF: this posts real trade data (mint addresses, tx signatures,
+  // PnL) to a public channel automatically, so a deploy shouldn't start
+  // broadcasting a backlog of historical trades without a deliberate
+  // operator opt-in first.
+  TRADE_SHOWCASE_ENABLED: booleanFlag(false),
+  // How often the monitor checks for newly-closed, not-yet-posted trades.
+  TRADE_SHOWCASE_POLL_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(15 * 60 * 1000),
+  // Cap per tick so a backlog (e.g. right after enabling the feature) posts
+  // gradually across the day instead of flooding the channel in one burst —
+  // this is what actually produces "spread throughout the day," not a fixed
+  // posting schedule, since real trades close at unpredictable times.
+  TRADE_SHOWCASE_MAX_POSTS_PER_TICK: z.coerce.number().int().positive().default(3),
+  // 2026-07-27 correction: enabling this feature originally would have
+  // drip-posted the full pre-existing trade history (going back weeks) under
+  // today's date, including trades from before this feature — or the bot
+  // itself — was live. Every eligibility query is bounded to
+  // closedAt >= TRADE_SHOWCASE_DEPLOYED_AT, so only trades that close AFTER
+  // this fixed cutoff are ever shown; nothing before it is ever eligible,
+  // permanently (not a one-time backfill-then-forget — the filter is applied
+  // on every query, forever). Must be set explicitly and then left alone:
+  // the function default only protects an operator who forgot to set it at
+  // all (falls back to "now" at each process boot, which starts safe but
+  // would silently creep the cutoff forward on every restart if left
+  // unpinned) — once set in .env, never regenerate this value on a
+  // redeploy/restart, or trades that closed between deploys are permanently
+  // skipped rather than posted late.
+  TRADE_SHOWCASE_DEPLOYED_AT: z.coerce.date().default(() => new Date()),
+
+  // Real-Data Telegram Activity Feed (2026-07-27) — posts premium-formatted
+  // messages to MARKETING_TELEGRAM_CHANNEL_ID sourced ONLY from real rows
+  // (new tokens detected, real AI/Opportunity Score evaluations, real smart-
+  // wallet entries, real buy executions, real weekly trade stats). Never
+  // fabricates content: a tick with no real, not-yet-posted backlog simply
+  // posts nothing rather than inventing a token/score/whale to hit a volume
+  // target — see activityFeed/scheduler.ts's own doc comment. Defaults OFF
+  // for the same reason as TRADE_SHOWCASE_ENABLED above.
+  ACTIVITY_FEED_ENABLED: booleanFlag(false),
+  // Natural pacing: the next post is scheduled a random delay within this
+  // range after the last one, not a fixed cadence.
+  ACTIVITY_FEED_MIN_INTERVAL_MINUTES: z.coerce.number().int().positive().default(15),
+  ACTIVITY_FEED_MAX_INTERVAL_MINUTES: z.coerce.number().int().positive().default(120),
+  // Soft ceiling only — the scheduler stops posting once this many real
+  // events have gone out in the current UTC day. There is deliberately no
+  // matching "minimum posts per day": a quiet day with little real scanner/
+  // trade activity posts fewer messages rather than backfilling with
+  // simulated ones to hit a floor.
+  ACTIVITY_FEED_MAX_POSTS_PER_DAY: z.coerce.number().int().positive().default(20),
+  // Same fixed-cutoff convention as TRADE_SHOWCASE_DEPLOYED_AT above (see its
+  // own comment for the full rationale) — every eligibility query here is
+  // permanently bounded to createdAt >= this value, so enabling the feature
+  // never drip-posts pre-existing history under today's date.
+  ACTIVITY_FEED_DEPLOYED_AT: z.coerce.date().default(() => new Date()),
+  // "Trending Token" only fires for a bot-detected token whose DexScreener
+  // 1h price change is real and at/above this bar — a live public-data check,
+  // not a stored field, so a candidate that doesn't currently clear it is
+  // simply left unposted (and rechecked later) rather than posted anyway.
+  ACTIVITY_FEED_TRENDING_MIN_H1_CHANGE_PERCENT: z.coerce.number().positive().default(15),
 
   // Twitter / X
   TWITTER_API_KEY: z.string().optional(),
@@ -381,8 +458,43 @@ export const envSchema = z.object({
   // not available yet" from "confirmed bad" — only the former gets re-tried,
   // on the same fixed interval, up to this many times, before falling back to
   // today's permanent-rejection behavior.
-  CANDIDATE_RETRY_INTERVAL_MS: z.coerce.number().min(2000).default(10000),
-  CANDIDATE_RETRY_MAX_ATTEMPTS: z.coerce.number().int().nonnegative().default(6),
+  //
+  // 2026-07-27 audit ("bot buys nothing"): the old 10000ms x 6 attempts (60s
+  // worst case) matched a reported avg verification latency of 60.5s with a
+  // 0% retry success rate. Root cause was scope, not speed: that budget was
+  // also being spent retrying AGE_DEPENDENT_REJECTION_REASONS (candidatePipeline.ts)
+  // — reasons like "too few holders yet" that need real elapsed *trading* time
+  // to change, which no amount of retrying within any short window can fix (a
+  // 22h production sample already proved 0% success there). Those reasons are
+  // no longer retried here at all — see AGE_DEPENDENT_REJECTION_REASONS' own
+  // updated doc comment; a migrated/matured token gets a genuine fresh
+  // evaluation via migrationMonitor.ts's 'token.migrated' re-entry point
+  // instead. What's left retryable (DATA_UNAVAILABLE_REJECTION_REASONS) is
+  // exactly the class this budget can actually fix — a transient RPC/
+  // DexScreener request failure that should clear within seconds — so the
+  // budget is sized to match: well under 5s worst case.
+  CANDIDATE_RETRY_INTERVAL_MS: z.coerce.number().min(500).default(1200),
+  CANDIDATE_RETRY_MAX_ATTEMPTS: z.coerce.number().int().nonnegative().default(3),
+
+  // Pump.fun launch grace period (2026-07-27 "unblock buys" audit): a
+  // just-created pump.fun token has no DexScreener listing yet (indexing lag)
+  // and structurally can't have more than a handful of holders in its first
+  // couple of minutes — criticalSecurityGate.ts's dexscreener_validation_failed
+  // and holder_count_critical checks fail EVERY such token, not just bad ones
+  // (confirmed live: these two reasons alone accounted for the large majority
+  // of rejections in a 2026-07-27 production sample). For a candidate whose
+  // dex is PUMPFUN and whose age since detection (candidatePipeline.ts's
+  // CandidateInput.tokenDetectedAt) is under this window, those two checks
+  // are skipped — every other check (mint/freeze authority, LP lock, honeypot
+  // heuristic, holder CONCENTRATION, bundled-wallet clustering, blacklist,
+  // sell-simulation) still runs exactly as before, unconditionally. Only the
+  // on-chain pump.fun detection path threads a real tokenDetectedAt through
+  // (see worker.ts's runCandidateThroughPipeline) — the Telegram-trend source
+  // never passes one (a Telegram mention has no reliable relationship to a
+  // token's real creation time), so this can never activate there, and no
+  // other chain/dex is affected. 0 disables the grace period entirely,
+  // reproducing today's exact behavior.
+  PUMPFUN_GRACE_PERIOD_MS: z.coerce.number().nonnegative().default(150_000),
 
   // Section 8 follow-up (2026-07-23): how often securityGateSummaryReporter.ts
   // turns candidatePipeline.ts's accumulated securityGateStats window into one

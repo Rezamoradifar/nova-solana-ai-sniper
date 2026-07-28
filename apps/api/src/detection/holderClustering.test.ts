@@ -158,4 +158,31 @@ describe('analyzeHolderClustering', () => {
     const result = analyzeHolderClustering(holders, TOTAL_SUPPLY, DEFAULT_HOLDER_CLUSTERING_CONFIG);
     expect(result.largestClusterWalletCount).toBe(18);
   });
+
+  it('regression (2026-07-27, USOX confirmed-scam false negative): flags the real USOX holder shape as UNSAFE — a 2026-07-27 audit briefly tightened the default tolerance to 50bps on the theory that this exact shape was organic retail convergence, which let this confirmed scam pass; must never regress back to that state', () => {
+    // Reconstructed from USOX's real captured on-chain data (mint
+    // FRvCZ21KnXp3oWBE92qRi4K9Gh4ms8f4mqUUMKKHPump): real total supply
+    // 999,902,737,971,779 (6 decimals), a 17-wallet cluster combining to the
+    // real observed 14.865768922154734% of supply, each wallet within ~1% of
+    // the group average (a tight-but-not-machine-exact spread, consistent
+    // with a coordinated distribution) — while top10HolderPercent (9.5%) and
+    // isHoneypotSuspected (false) looked clean, this shape combined with a
+    // +102,540%/24h pump and only 20 total holders across 856 recorded trades
+    // (confirmed real-world: a fake "United States Oil Exchange" scam, not a
+    // legitimate token).
+    const totalSupply = 999_902_737_971_779n;
+    const perWalletBase = 8_743_719_439_599n;
+    const jitterBps = [40, -35, 60, -20, 15, -50, 30, -10, 55, -25, 5, -45, 20, -15, 65, -30, 0];
+    const holders: ClusterHolderBalance[] = jitterBps.map((bps, i) => ({
+      address: `USOXHolder${i}`,
+      amountRaw: perWalletBase + (perWalletBase * BigInt(bps)) / 10_000n,
+    }));
+
+    const result = analyzeHolderClustering(holders, totalSupply, DEFAULT_HOLDER_CLUSTERING_CONFIG);
+    expect(result.state).toBe('UNSAFE');
+    expect(result.reasons).toContain('bundled_wallet_cluster_detected');
+    expect(result.largestClusterWalletCount).toBe(17);
+    expect(result.largestClusterSupplyPercent).toBeGreaterThan(14);
+    expect(result.largestClusterSupplyPercent).toBeLessThan(16);
+  });
 });

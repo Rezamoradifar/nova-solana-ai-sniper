@@ -39,10 +39,25 @@ export interface HolderClusteringConfig {
 }
 
 /** Calibrated against the USOH incident's actual holder data: 18 wallets each
- * within ~0.05% of each other, combining to ~4.45% of supply. Comfortably
- * inside these defaults (3% similarity band, 4+ wallets, 3%+ of supply) while
- * still requiring genuine multi-wallet, near-identical concentration — not
- * just "two wallets happen to hold similar amounts." */
+ * within ~0.045% of each other (max pairwise spread ~4.5bps), combining to
+ * ~4.45% of supply — a single distribution transaction's signature.
+ *
+ * 2026-07-27 correction ("USOX false negative" incident): a 2026-07-27 audit
+ * ("bot buys nothing") tightened this from 300bps to 50bps, reasoning that
+ * live candidate USOX (17 of 20 top holders clustered, 14.9% of supply,
+ * $420k reported liquidity, top10 only 9.5%) was an organic false positive —
+ * ordinary retail buyers converging on similar buy sizes during a pump. That
+ * reasoning was WRONG and got reverted the same day: USOX was a confirmed
+ * scam (a fake "United States Oil Exchange" listing riding a +102,540%/24h
+ * pump with only 20 total holders across 856 recorded trades — a wash-
+ * trading/sybil signature, not organic distribution). The 50bps tolerance
+ * stopped flagging USOX's actual holder spread entirely, letting a real scam
+ * through — exactly the false negative this detector exists to prevent.
+ * Restored to the original, production-validated 300bps: it correctly
+ * flagged BOTH the USOH incident and USOX as UNSAFE. Do not loosen this
+ * again on the theory that a tight multi-wallet cluster on a young/pumping
+ * token is "just retail" — live evidence says otherwise. See
+ * holderClustering.test.ts's USOX regression test. */
 export const DEFAULT_HOLDER_CLUSTERING_CONFIG: HolderClusteringConfig = {
   similarityToleranceBps: 300,
   minClusterWalletCount: 4,

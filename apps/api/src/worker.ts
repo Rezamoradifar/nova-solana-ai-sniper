@@ -81,7 +81,6 @@ import {
   scoreToken,
   evaluateMultiLlmConsensus,
   DEFAULT_CONSENSUS_MIN_BUY_VOTES,
-  DEFAULT_CONSENSUS_MIN_WEIGHTED_CONFIDENCE,
 } from '@nova/ai';
 import type { AiScore, Dex, RiskFlags } from '@nova/shared';
 import {
@@ -1011,7 +1010,18 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     // blocks or delays this — see evaluateMultiLlmConsensus's fail-open
     // single-voter degrade.
     if (consensusModeActive && openRouterResult) {
-      const consensus = evaluateMultiLlmConsensus(openRouterResult, ollamaResult);
+      // 2026-07-27 "unblock buys" audit: confidence floor is now operator-tunable
+      // (CONSENSUS_MIN_WEIGHTED_CONFIDENCE, default 70 — was a hardcoded 85) without
+      // a redeploy; minBuyVotes is unchanged (still DEFAULT_CONSENSUS_MIN_BUY_VOTES).
+      const consensusThresholds = {
+        minWeightedConfidence: app.config.CONSENSUS_MIN_WEIGHTED_CONFIDENCE,
+        minBuyVotes: DEFAULT_CONSENSUS_MIN_BUY_VOTES,
+      };
+      const consensus = evaluateMultiLlmConsensus(
+        openRouterResult,
+        ollamaResult,
+        consensusThresholds,
+      );
       // Evidence line (2026-07-26): every model's individual vote (score,
       // decision, weight actually applied, whether it participated) plus the
       // final weighted decision — logged unconditionally, on every token,
@@ -1023,8 +1033,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
           votes: consensus.votes,
           weightedConfidence: consensus.weightedConfidence,
           buyVotes: consensus.buyVotes,
-          minBuyVotesRequired: DEFAULT_CONSENSUS_MIN_BUY_VOTES,
-          minWeightedConfidenceRequired: DEFAULT_CONSENSUS_MIN_WEIGHTED_CONFIDENCE,
+          minBuyVotesRequired: consensusThresholds.minBuyVotes,
+          minWeightedConfidenceRequired: consensusThresholds.minWeightedConfidence,
           ollamaParticipated: consensus.ollamaParticipated,
           decision: consensus.decision,
         },
@@ -1091,6 +1101,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     prisma: app.prisma,
     logger: app.log as never,
     notifier,
+    pumpfunGracePeriodMs: app.config.PUMPFUN_GRACE_PERIOD_MS,
   };
 
   /**
@@ -1132,6 +1143,12 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       dex,
       poolAddress,
       deployerAddress,
+      // 2026-07-27 "unblock buys" audit: only this genuine on-chain detection
+      // path supplies a real tokenDetectedAt — see CandidateInput's own doc
+      // comment for why the Telegram-trend call site below deliberately does
+      // not. This is what actually enables the PUMPFUN grace period; dex
+      // still has to be PUMPFUN too (checked inside runCandidatePipeline).
+      tokenDetectedAt,
     });
 
     const canRetry =
@@ -1207,6 +1224,32 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       fastPath ? 'FAST_PATH' : 'NORMAL',
     );
   }
+
+  // Root-cause fix (2026-07-27, "bot buys nothing" audit): migrationMonitor.ts
+  // already detects pump.fun -> real-AMM migration (ground truth: the bonding
+  // curve's `complete` flag) and publishes 'token.migrated', but until now
+  // nothing subscribed to it. A pump.fun candidate correctly deferred at birth
+  // (no DexScreener listing yet, too few holders, bonding-curve-only liquidity
+  // — see criticalSecurityGate.ts's dexscreener-source requirement and
+  // candidatePipeline.ts's AGE_DEPENDENT_REJECTION_REASONS) had no path back
+  // into the pipeline once it matured: the exact moment it gains a real
+  // DexScreener listing, real liquidity, and real holders was silently
+  // dropped. This re-runs the full candidate pipeline fresh (attempt 0, not a
+  // "retry" of the old rejection) now that the token is on a real venue —
+  // upsertTokenRow/aiQueue.enqueue/hasOpenPositionForToken downstream are all
+  // already idempotent per-mint, so this is safe even for a token that was
+  // never rejected in the first place (a harmless re-score).
+  eventBus.subscribe((event) => {
+    if (event.type !== 'token.migrated') return;
+    const { mint, to, poolAddress } = event.payload as {
+      mint: string;
+      to: LaunchableDex | 'JUPITER';
+      poolAddress?: string;
+    };
+    if (to === 'JUPITER') return;
+    app.log.info({ mint, dex: to }, 'candidate pipeline: re-evaluating migrated token');
+    void runCandidateThroughPipeline(mint, to, Date.now(), poolAddress, undefined);
+  });
 
   // Telegram trend channels (t.me/trendingssol, t.me/trending) are a signal
   // source only — they never buy directly. A mint mentioned there is just a
