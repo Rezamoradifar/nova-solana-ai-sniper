@@ -17,6 +17,7 @@
     "@nova/shared": "*",
     "@nova/telegram-bot": "*",
     "@prisma/client": "^5.22.0",
+    "grammy": "^1.32.0",
     "sharp": "^0.35.3"
   },
   "devDependencies": {

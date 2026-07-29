@@ -43,10 +43,20 @@ const MIN_ACCOUNT_LEN = OFFSET.lpSupply + 8;
 
 export interface RaydiumCpmmPoolState {
   poolAddress: string;
+  ammConfig: string;
   token0Vault: string;
   token1Vault: string;
   token0Mint: string;
   token1Mint: string;
+  /** Each side's real SPL token program (classic Token or Token-2022), read
+   * directly from the pool account — unlike PumpSwap, Raydium CPMM pool state
+   * already stores this per side, so no extra RPC round-trip is needed to
+   * detect a Token-2022 mint (see raydiumExecutor.ts). */
+  token0Program: string;
+  token1Program: string;
+  /** The pool's price-oracle observation account — a required, mutable
+   * account on every swap instruction (see raydiumExecutor.ts). */
+  observationKey: string;
   status: number;
   lpSupply: bigint;
 }
@@ -59,10 +69,14 @@ export function decodeRaydiumCpmmPool(poolAddress: string, data: Buffer): Raydiu
     new PublicKey(data.subarray(offset, offset + 32)).toBase58();
   return {
     poolAddress,
+    ammConfig: readPubkey(OFFSET.ammConfig),
     token0Vault: readPubkey(OFFSET.token0Vault),
     token1Vault: readPubkey(OFFSET.token1Vault),
     token0Mint: readPubkey(OFFSET.token0Mint),
     token1Mint: readPubkey(OFFSET.token1Mint),
+    token0Program: readPubkey(OFFSET.token0Program),
+    token1Program: readPubkey(OFFSET.token1Program),
+    observationKey: readPubkey(OFFSET.observationKey),
     status: data.readUInt8(OFFSET.status),
     lpSupply: data.readBigUInt64LE(OFFSET.lpSupply),
   };

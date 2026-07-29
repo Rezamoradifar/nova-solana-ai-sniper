@@ -10,6 +10,7 @@ import { sharedSolPriceOracle } from '../solana/pumpfunBondingCurve.js';
 import type { PositionManager } from './positionManager.js';
 import { getRealTokenBalance } from './positionManager.js';
 import { TtlCache } from '../lib/ttlCache.js';
+import { PriceVolatilityTracker } from './priceVolatilityTracker.js';
 import { isTransientQuoteError } from './sellabilityCheck.js';
 import {
   isPlausiblePriceUpdate,
@@ -117,6 +118,14 @@ export class PriceMonitor {
   private readonly stalePriceAlerted = new TtlCache<string>(STALE_PRICE_ALERT_DEDUPE_TTL_MS);
   private readonly staleReminderIntervalMs: number;
   private readonly manualReviewAfterMs: number;
+  // TP1 / Breakeven / Trailing exit strategy (2026-07-29) — rolling
+  // per-position volatility signal, recorded only for exitStrategy ===
+  // 'tp1_trailing_v1' positions, feeding tp1TrailingStrategy.ts's
+  // volatility-adaptive trailing distance. Same in-memory/process-lifetime
+  // convention as outlierState/noPriceState above — see
+  // priceVolatilityTracker.ts's own doc comment on why that's an acceptable
+  // trade-off here (a soft adaptive signal, not safety-critical).
+  private readonly volatilityTracker = new PriceVolatilityTracker();
 
   constructor(private readonly deps: PriceMonitorDeps) {
     this.staleReminderIntervalMs =
@@ -181,6 +190,9 @@ export class PriceMonitor {
       entryPriceUsd: number;
       stopLossPercent: number | null;
       stopLossIsSystemDefault: boolean;
+      /** TP1 / Breakeven / Trailing exit strategy (2026-07-29) — see
+       * this.volatilityTracker's use below. */
+      exitStrategy: string | null;
       wallet: { publicKey: string; encryptedSecret: string };
     },
   ): Promise<void> {
@@ -303,12 +315,30 @@ export class PriceMonitor {
       }
       this.outlierState.delete(position.id);
 
-      await this.deps.positionManager.checkAndMaybeClose(
+      const usesTp1TrailingStrategy = position.exitStrategy === 'tp1_trailing_v1';
+      let volatilityStdDevPercent: number | undefined;
+      if (usesTp1TrailingStrategy) {
+        this.volatilityTracker.recordSample(position.id, currentPriceUsd, Date.now());
+        volatilityStdDevPercent = this.volatilityTracker.getRollingStdDevPercent(position.id);
+      }
+
+      const result = await this.deps.positionManager.checkAndMaybeClose(
         position.id,
         currentPriceUsd,
         position.wallet.encryptedSecret,
         this.deps.encryptionKey,
+        usesTp1TrailingStrategy ? { volatilityStdDevPercent } : undefined,
       );
+      // Bounds the volatility tracker's memory to only currently-open
+      // tp1_trailing_v1 positions — same "forget on close" convention
+      // outlierState/noPriceState already follow via their own natural
+      // per-position keys. checkAndMaybeClose's result is a union: a plain/
+      // institutional close (`{closed: true}`), a TP1 partial-exit
+      // (`{sold: true}`, position stays OPEN — never forgotten here), or a
+      // post-TP1 close (`{closed: true}`, same as the plain case).
+      if (usesTp1TrailingStrategy && 'closed' in result && result.closed) {
+        this.volatilityTracker.forget(position.id);
+      }
     } catch (err) {
       // Production Bug Fix (2026-07-14): this catch previously covered both
       // a DexScreener price-fetch failure above AND a SELL execution

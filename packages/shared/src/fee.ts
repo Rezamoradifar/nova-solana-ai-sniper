@@ -249,6 +249,9 @@ export interface BusinessSettingsWithLevels {
   walletWeightBps: number;
   socialWeightBps: number;
   aiWeightBps: number;
+  // 2026-07-29, DEX-agnostic adapter refactor — see opportunityScore.ts's
+  // bandLiquidityDepthScore.
+  liquidityDepthWeightBps: number;
 }
 
 const DEFAULT_PERFORMANCE_FEE_BPS = 2000; // 20%

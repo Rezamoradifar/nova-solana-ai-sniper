@@ -50,6 +50,7 @@ import type { DexLaunchEvent } from './solana/dex/types.js';
 import { SourceHealthMonitor } from './detection/sourceHealthMonitor.js';
 import { JitoClient } from './solana/jito.js';
 import { PositionManager } from './trading/positionManager.js';
+import type { Tp1TrailingConfig } from './trading/tp1TrailingStrategy.js';
 import { AutoTrader } from './trading/autoTrader.js';
 import { resolveTokenAgeMs } from './trading/riskTier.js';
 import { checkMintBlacklist } from './trading/mintBlacklist.js';
@@ -85,6 +86,7 @@ import {
 import type { AiScore, Dex, RiskFlags } from '@nova/shared';
 import {
   calculateOpportunityScore,
+  bandLiquidityDepthScore,
   getOrCreateBusinessSettings,
   getTelegramTrendEnabled,
 } from '@nova/shared';
@@ -160,12 +162,20 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // delays startup or the caller; see JupiterClient.warmConnection's doc
   // comment.
   void jupiter.warmConnection();
+  const enabledNativeDexes = new Set(
+    app.config.ENABLED_NATIVE_DEXES.split(',')
+      .map((d) => d.trim())
+      .filter((d): d is 'PUMPSWAP' | 'RAYDIUM' | 'ORCA' | 'METEORA' =>
+        (['PUMPSWAP', 'RAYDIUM', 'ORCA', 'METEORA'] as const).includes(d as never),
+      ),
+  );
   const dexRegistry = new DexRegistry(
     connection,
     dexScreener,
     app.log as never,
     { PUMPSWAP: new PumpSwapExecutor() },
     app.config.DEX_MONITOR_IDLE_MS,
+    enabledNativeDexes,
   );
   // No-ops (undefined) when unset, same convention as every other optional
   // integration in this codebase — sends just go direct, never blocked on Jito.
@@ -246,6 +256,22 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     app.log.warn('TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — trade notifications disabled');
   }
 
+  // TP1 / Breakeven / Trailing exit strategy (2026-07-28/29) — one config
+  // object built from EXIT_V2_* env vars, shared by PositionManager (tick
+  // evaluation) and AutoTrader (initial exitParams at open) so both always
+  // agree on the same numbers. EXIT_STRATEGY_V2_ENABLED is the double-opt-in
+  // global gate (a config's own exitStrategy field must ALSO be set) — see
+  // tp1TrailingStrategy.ts's own doc comment.
+  const exitV2Config: Tp1TrailingConfig = {
+    initialStopLossPercent: app.config.EXIT_V2_INITIAL_STOP_LOSS_PERCENT,
+    breakevenStopLossPercent: app.config.EXIT_V2_BREAKEVEN_STOP_LOSS_PERCENT,
+    tp1RoiPercent: app.config.EXIT_V2_TP1_ROI_PERCENT,
+    tp1SellFraction: app.config.EXIT_V2_TP1_SELL_FRACTION,
+    baseTrailingPercent: app.config.EXIT_V2_TRAILING_BASE_PERCENT,
+    trailingMinPercent: app.config.EXIT_V2_TRAILING_MIN_PERCENT,
+    trailingMaxPercent: app.config.EXIT_V2_TRAILING_MAX_PERCENT,
+    volatilityReferenceStdDevPercent: app.config.EXIT_V2_VOLATILITY_REFERENCE_STDDEV_PERCENT,
+  };
   const positionManager = new PositionManager(
     app.prisma,
     connection,
@@ -264,6 +290,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     app.config.SELL_MAX_PERMANENT_ROUTE_RETRIES,
     app.config.SELL_PERMANENT_RETRY_BACKOFF_BASE_MS,
     app.config.SELL_PERMANENT_RETRY_BACKOFF_MAX_MS,
+    app.config.EXIT_STRATEGY_V2_ENABLED,
+    exitV2Config,
   );
   if (!app.hasDecorator('positionManager')) {
     app.decorate('positionManager', positionManager);
@@ -279,6 +307,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     encryptionKey: app.config.ENCRYPTION_KEY,
     entryFilterGloballyEnabled: app.config.ENTRY_FILTER_ENABLED,
     opportunityScoreGateGloballyEnabled: app.config.OPPORTUNITY_SCORE_GATE_ENABLED,
+    exitStrategyV2GloballyEnabled: app.config.EXIT_STRATEGY_V2_ENABLED,
+    exitV2Config,
     notifier,
     // Dynamic Risk Tiers (2026-07-23 USOH incident follow-up) — operator-
     // tunable via env, always active (not a staged opt-in feature flag).
@@ -688,6 +718,12 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
         aiScore: usedRealAi ? aiScoreValue : undefined,
         momentumScore: momentumWalletScores?.momentumScore,
         walletScore: momentumWalletScores?.walletScore,
+        // DEX-agnostic adapter refactor (2026-07-29) — real liquidityUsd was
+        // already resolved by RiskAnalyzer for every candidate; this just
+        // bands it into a score. 0 weight by default (BusinessSettings.
+        // liquidityDepthWeightBps), so finalScore is unaffected until an
+        // operator deliberately turns it on.
+        liquidityDepthScore: bandLiquidityDepthScore(riskFlags.liquidityUsd),
       },
       businessSettings,
     );
@@ -700,6 +736,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
         walletScore: opportunityScore.breakdown.walletScore,
         socialScore: opportunityScore.breakdown.socialScore,
         aiScore: opportunityScore.breakdown.aiScore,
+        liquidityDepthScore: opportunityScore.breakdown.liquidityDepthScore,
         finalScore: opportunityScore.finalScore,
         // Prisma's Json input type wants a plain index-signature object, not
         // the named OpportunityScoreWeights interface — round-tripping

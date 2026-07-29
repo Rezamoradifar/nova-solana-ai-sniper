@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import { fetchTradeOhlcv, MINUTE_MS, type Candle } from '@nova/shared';
 import { escapeXml } from './cards/render.js';
 
 /**
@@ -18,129 +19,18 @@ import { escapeXml } from './cards/render.js';
  *
  * This module is the replacement fallback: render our own real-data price
  * chart from GeckoTerminal's public OHLCV API (unauthenticated, not
- * Cloudflare-blocked — verified working), using the same sharp/SVG rendering
- * technique already proven in this package (see cards/render.ts). The Buy and
- * Sell markers are plotted at the bot's own real recorded fill price/time,
- * which is more accurate than anything a DexScreener screenshot could show
- * anyway (DexScreener has no notion of *our* fills).
+ * Cloudflare-blocked — verified working; see @nova/shared's
+ * marketData/geckoTerminal.ts, extracted 2026-07-28 so the backtest engine in
+ * apps/api can reuse the same real-data fetch this feature already proved
+ * out), using the same sharp/SVG rendering technique already proven in this
+ * package (see cards/render.ts). The Buy and Sell markers are plotted at the
+ * bot's own real recorded fill price/time, which is more accurate than
+ * anything a DexScreener screenshot could show anyway (DexScreener has no
+ * notion of *our* fills).
  */
 
-const GECKOTERMINAL_BASE = 'https://api.geckoterminal.com/api/v2';
-const FETCH_TIMEOUT_MS = 8_000;
-
-async function fetchJson(url: string): Promise<unknown | undefined> {
-  try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      headers: { Accept: 'application/json' },
-    });
-    if (!res.ok) return undefined;
-    return await res.json();
-  } catch {
-    return undefined;
-  }
-}
-
-interface GeckoTerminalPoolsResponse {
-  data?: Array<{ attributes?: { address?: string; reserve_in_usd?: string } }>;
-}
-
-/**
- * Picks the Solana pool with the most on-chain liquidity for this mint — same
- * "most representative price" convention DexScreener/most trackers use when a
- * token trades across several pools (e.g. a pump.fun bonding-curve pool and a
- * post-migration Raydium/PumpSwap pool for the same mint).
- */
-async function fetchPrimaryPoolAddress(mint: string): Promise<string | undefined> {
-  const json = (await fetchJson(`${GECKOTERMINAL_BASE}/networks/solana/tokens/${mint}/pools`)) as
-    GeckoTerminalPoolsResponse | undefined;
-  const pools = json?.data;
-  if (!pools || pools.length === 0) return undefined;
-
-  let best: { address: string; reserveUsd: number } | undefined;
-  for (const pool of pools) {
-    const address = pool.attributes?.address;
-    const reserveUsd = Number(pool.attributes?.reserve_in_usd ?? 0);
-    if (!address) continue;
-    if (!best || reserveUsd > best.reserveUsd) best = { address, reserveUsd };
-  }
-  return best?.address;
-}
-
-export interface Candle {
-  tMs: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-}
-
-interface Resolution {
-  timeframe: 'minute' | 'hour' | 'day';
-  aggregate: number;
-  intervalMs: number;
-}
-
-const MINUTE_MS = 60_000;
-const HOUR_MS = 3_600_000;
-const DAY_MS = 86_400_000;
-
-/** Coarser candles for a longer hold — keeps the fetched window at a sane
- * candle count instead of asking for e.g. months of 1-minute candles. */
-function pickResolution(holdMs: number): Resolution {
-  if (holdMs <= 30 * MINUTE_MS) return { timeframe: 'minute', aggregate: 1, intervalMs: MINUTE_MS };
-  if (holdMs <= 6 * HOUR_MS)
-    return { timeframe: 'minute', aggregate: 5, intervalMs: 5 * MINUTE_MS };
-  if (holdMs <= 2 * DAY_MS) return { timeframe: 'hour', aggregate: 1, intervalMs: HOUR_MS };
-  if (holdMs <= 14 * DAY_MS) return { timeframe: 'hour', aggregate: 4, intervalMs: 4 * HOUR_MS };
-  return { timeframe: 'day', aggregate: 1, intervalMs: DAY_MS };
-}
-
-interface GeckoTerminalOhlcvResponse {
-  data?: { attributes?: { ohlcv_list?: number[][] } };
-}
-
-/**
- * Real per-trade OHLCV window from GeckoTerminal, padded ~25% of the hold
- * time on each side (minimum two candle intervals) so the rendered chart
- * shows context before the buy and after the sell, not just the two points.
- * Never throws — any lookup/fetch failure (no pool found, rate-limited,
- * network error, empty response) resolves to undefined, same "best-effort
- * enrichment" convention as fetchDexScreenerChartImage.
- */
-export async function fetchTradeOhlcv(
-  mint: string,
-  buyAtMs: number,
-  sellAtMs: number,
-): Promise<Candle[] | undefined> {
-  try {
-    const poolAddress = await fetchPrimaryPoolAddress(mint);
-    if (!poolAddress) return undefined;
-
-    const holdMs = Math.max(sellAtMs - buyAtMs, 0);
-    const resolution = pickResolution(holdMs);
-    const padMs = Math.max(holdMs * 0.25, resolution.intervalMs * 2);
-    const windowStartMs = buyAtMs - padMs;
-    const windowEndMs = sellAtMs + padMs;
-    const candleCount = Math.ceil((windowEndMs - windowStartMs) / resolution.intervalMs) + 4;
-    const limit = Math.min(Math.max(candleCount, 20), 1000);
-    const beforeTimestampSec = Math.ceil(windowEndMs / 1000);
-
-    const json = (await fetchJson(
-      `${GECKOTERMINAL_BASE}/networks/solana/pools/${poolAddress}/ohlcv/${resolution.timeframe}` +
-        `?aggregate=${resolution.aggregate}&before_timestamp=${beforeTimestampSec}&limit=${limit}&currency=usd`,
-    )) as GeckoTerminalOhlcvResponse | undefined;
-    const rows = json?.data?.attributes?.ohlcv_list;
-    if (!rows || rows.length === 0) return undefined;
-
-    return rows
-      .filter((row): row is [number, number, number, number, number, number] => row.length >= 5)
-      .map(([t, o, h, l, c]) => ({ tMs: t * 1000, open: o, high: h, low: l, close: c }))
-      .sort((a, b) => a.tMs - b.tMs);
-  } catch {
-    return undefined;
-  }
-}
+export type { Candle };
+export { fetchTradeOhlcv };
 
 // --- Rendering ---------------------------------------------------------------
 

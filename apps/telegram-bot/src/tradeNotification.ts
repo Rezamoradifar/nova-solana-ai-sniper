@@ -196,19 +196,42 @@ export async function resolveTradePhoto(
 }
 
 /**
+ * A previously-sent photo's Telegram file_id — reusing this via sendPhoto
+ * (2026-07-29, broadcast queue) skips re-uploading the raw buffer, which
+ * matters once a single trade's photo is being sent to 100k+ recipients.
+ * broadcastWorker.ts captures this from the first successful delivery's
+ * response (see sendTradeNotificationPhoto's return type below) and reuses
+ * it for every subsequent recipient in that same broadcast.
+ */
+export interface ResolvedTradePhotoFileId {
+  fileId: string;
+}
+
+export type SendableTradePhoto = ResolvedTradePhoto | ResolvedTradePhotoFileId;
+
+function isFileId(photo: SendableTradePhoto): photo is ResolvedTradePhotoFileId {
+  return 'fileId' in photo;
+}
+
+/**
  * The one send path for a Real Bot Trade notification — always sendPhoto
- * when a real price-chart photo was resolved, sendMessage with the same
- * caption text only in the rare case neither chart source was available
- * (never a fabricated placeholder image, and never the token logo).
+ * when a real price-chart photo was resolved (either the raw buffer or an
+ * already-known file_id), sendMessage with the same caption text only in the
+ * rare case neither chart source was available (never a fabricated
+ * placeholder image, and never the token logo). Returns the raw grammy
+ * Message shape (not just message_id) so a caller can capture `photo` for
+ * file_id reuse — sendMessage's response has no `photo` field, hence it's
+ * optional here.
  */
 export async function sendTradeNotificationPhoto(
   bot: Bot,
   chatId: string,
   caption: string,
-  photo: ResolvedTradePhoto | undefined,
-): Promise<{ message_id: number }> {
+  photo: SendableTradePhoto | undefined,
+): Promise<{ message_id: number; photo?: Array<{ file_id: string }> }> {
   if (photo) {
-    return bot.api.sendPhoto(chatId, new InputFile(photo.buffer), {
+    const source = isFileId(photo) ? photo.fileId : new InputFile(photo.buffer);
+    return bot.api.sendPhoto(chatId, source, {
       caption,
       parse_mode: 'Markdown',
     });

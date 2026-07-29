@@ -13,6 +13,7 @@ import {
   TRAILING_STOP_PRESETS,
   type TrailingStopPreset,
 } from './adaptiveTrailingStop.js';
+import { DEFAULT_TP1_TRAILING_CONFIG, type Tp1TrailingConfig } from './tp1TrailingStrategy.js';
 import {
   applyRiskTierSizing,
   classifyRiskTier,
@@ -99,6 +100,13 @@ export interface AutoTraderDeps {
    * riskTier.ts's own doc comments. */
   riskTierAgeThresholds?: RiskTierAgeThresholds;
   riskTierSizeConfig?: RiskTierSizeConfig;
+  /** TP1 / Breakeven / Trailing exit strategy (2026-07-28/29) — double
+   * opt-in, same convention as entryFilterGloballyEnabled above: a config's
+   * own exitStrategy must ALSO be 'tp1_trailing_v1'. Defaults false/
+   * DEFAULT_TP1_TRAILING_CONFIG so every existing caller/test that omits
+   * these gets exactly today's preset/manual exitParams behavior. */
+  exitStrategyV2GloballyEnabled?: boolean;
+  exitV2Config?: Tp1TrailingConfig;
 }
 
 /**
@@ -315,22 +323,41 @@ export class AutoTrader {
         continue;
       }
 
+      // TP1 / Breakeven / Trailing exit strategy (2026-07-28/29) — checked
+      // BEFORE the preset/manual branch below, double opt-in (this config's
+      // own exitStrategy AND the global EXIT_STRATEGY_V2_ENABLED flag).
+      // Initial state is SL-only: no takeProfitPercent/trailingStopPercent
+      // stored — TP1/breakeven/trailing are all state-driven from
+      // Position.trailingActivatedAt (see positionManager.ts's
+      // checkAndMaybeCloseTp1Trailing), not pre-computed here. Storing a
+      // trailingStopPercent up front would be inert (never read by that
+      // path) but misleading on any UI that displays it, so it's left unset.
+      const usesTp1TrailingStrategy =
+        !!this.deps.exitStrategyV2GloballyEnabled && config.exitStrategy === 'tp1_trailing_v1';
+      const exitV2Config = this.deps.exitV2Config ?? DEFAULT_TP1_TRAILING_CONFIG;
+
       // Optional exit strategy, additive on top of the existing manual TP/SL/
       // trailing fields: only when the config has explicitly opted into a preset
       // (not null, not 'custom') do these get overridden. Anyone who hasn't touched
       // this setting gets exactly today's behavior — config.takeProfitPercent etc,
       // unchanged. See adaptiveTrailingStop.ts.
       const preset = activePreset(config.trailingStopPreset);
-      const exitParams = preset
-        ? resolvePresetExitParams(preset, {
-            liquidityUsd: riskFlags.liquidityUsd,
-            top10HolderPercent: riskFlags.top10HolderPercent,
-          })
-        : {
-            takeProfitPercent: config.takeProfitPercent ?? undefined,
-            stopLossPercent: config.stopLossPercent ?? undefined,
-            trailingStopPercent: config.trailingStopPercent ?? undefined,
-          };
+      const exitParams = usesTp1TrailingStrategy
+        ? {
+            takeProfitPercent: undefined,
+            stopLossPercent: exitV2Config.initialStopLossPercent,
+            trailingStopPercent: undefined,
+          }
+        : preset
+          ? resolvePresetExitParams(preset, {
+              liquidityUsd: riskFlags.liquidityUsd,
+              top10HolderPercent: riskFlags.top10HolderPercent,
+            })
+          : {
+              takeProfitPercent: config.takeProfitPercent ?? undefined,
+              stopLossPercent: config.stopLossPercent ?? undefined,
+              trailingStopPercent: config.trailingStopPercent ?? undefined,
+            };
 
       // Dynamic Risk Tiers (2026-07-23): scales the user's OWN configured
       // buyAmountSol down for an early/ultra-early/pump-escalated tier —
@@ -375,6 +402,7 @@ export class AutoTrader {
           amountSol: tieredBuyAmountSol,
           slippageBps: config.maxSlippageBps,
           trailingStopPreset: preset,
+          exitStrategy: usesTp1TrailingStrategy ? 'tp1_trailing_v1' : undefined,
           aiScore,
           // Production bug fix (2026-07-18): this was never passed, leaving
           // riskScoreAtEntry NULL on every auto-bought position (44 of 45 in

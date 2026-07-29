@@ -1,5 +1,10 @@
 import { describe, expect, it, beforeEach } from 'vitest';
-import { latencyTracker, computeLatencyReport, type CompletedTrace } from './latencyTracker.js';
+import {
+  latencyTracker,
+  computeLatencyReport,
+  getTraceLatencySummary,
+  type CompletedTrace,
+} from './latencyTracker.js';
 
 beforeEach(() => {
   latencyTracker.reset();
@@ -23,6 +28,21 @@ describe('LatencyTracker lifecycle', () => {
       totalMs: 200,
       marks: { token_detected: 1000, filters_complete: 1050, broadcast: 1200 },
     });
+  });
+
+  it('finish() returns the completed record for the caller to summarize (2026-07-29)', () => {
+    latencyTracker.start('t1', 'BUY');
+    latencyTracker.mark('t1', 'token_detected', 1000);
+    latencyTracker.mark('t1', 'buy_submitted', 1300);
+    const record = latencyTracker.finish('t1', 'success');
+    expect(record?.traceId).toBe('t1');
+    expect(latencyTracker.getCompleted()).toHaveLength(1);
+  });
+
+  it('finish() returns undefined for an unknown or empty trace, matching the no-op convention', () => {
+    expect(latencyTracker.finish('never-started', 'success')).toBeUndefined();
+    latencyTracker.start('empty', 'BUY');
+    expect(latencyTracker.finish('empty', 'success')).toBeUndefined();
   });
 
   it('is a fully safe no-op for every method when traceId is undefined', () => {
@@ -88,6 +108,39 @@ describe('LatencyTracker lifecycle', () => {
     expect(trace!.side).toBe('BUY');
     expect(trace!.mint).toBe('MintA');
     expect(trace!.marks.token_detected).toBe(1000);
+  });
+});
+
+describe('getTraceLatencySummary (2026-07-29 logging enrichment)', () => {
+  it('computes detection and buy latency from a real completed trace', () => {
+    latencyTracker.start('t6', 'BUY');
+    latencyTracker.mark('t6', 'token_detected', 1000);
+    latencyTracker.mark('t6', 'buy_submitted', 1300);
+    latencyTracker.mark('t6', 'position_opened', 1450);
+    const record = latencyTracker.finish('t6', 'success');
+
+    expect(getTraceLatencySummary(record)).toEqual({
+      detectionLatencyMs: 300,
+      buyLatencyMs: 150,
+    });
+  });
+
+  it('returns an empty object for an undefined record rather than throwing', () => {
+    expect(getTraceLatencySummary(undefined)).toEqual({});
+  });
+
+  it('leaves a field undefined (never fabricates 0) when its marks were never both recorded', () => {
+    latencyTracker.start('t7', 'BUY');
+    latencyTracker.mark('t7', 'token_detected', 1000);
+    // buy_submitted/position_opened never marked.
+    const record = latencyTracker.finish('t7', 'failure');
+
+    // finish() only returns a record when marks.size > 0, so this is real —
+    // just missing the marks the summary needs.
+    expect(getTraceLatencySummary(record)).toEqual({
+      detectionLatencyMs: undefined,
+      buyLatencyMs: undefined,
+    });
   });
 });
 

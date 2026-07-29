@@ -25,6 +25,12 @@ function fakeDeps(overrides: Record<string, unknown> = {}) {
   const summaryFindUnique = vi.fn().mockResolvedValue(null);
   const summaryCreate = vi.fn().mockResolvedValue(undefined);
   const userFindMany = vi.fn().mockResolvedValue([]);
+  const tradeBroadcastCreate = vi
+    .fn()
+    .mockImplementation((args: { data: Record<string, unknown> }) =>
+      Promise.resolve({ id: 'broadcast1', ...args.data }),
+    );
+  const tradeBroadcastDeliveryCreateMany = vi.fn().mockResolvedValue({ count: 0 });
 
   return {
     deps: {
@@ -36,6 +42,8 @@ function fakeDeps(overrides: Record<string, unknown> = {}) {
         },
         tradeShowcaseDailySummary: { findUnique: summaryFindUnique, create: summaryCreate },
         user: { findMany: userFindMany },
+        tradeBroadcast: { create: tradeBroadcastCreate },
+        tradeBroadcastDelivery: { createMany: tradeBroadcastDeliveryCreateMany },
       },
       bot: { api: { sendMessage } },
       chatId: '@testchannel',
@@ -50,6 +58,8 @@ function fakeDeps(overrides: Record<string, unknown> = {}) {
     summaryFindUnique,
     summaryCreate,
     userFindMany,
+    tradeBroadcastCreate,
+    tradeBroadcastDeliveryCreateMany,
   };
 }
 
@@ -133,12 +143,10 @@ describe('TradeShowcaseMonitor — real bot trade sendPhoto + DM broadcast', () 
         update: vi.fn().mockResolvedValue(undefined),
       },
       trade: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({
-            createdAt: new Date('2026-07-27T10:00:00Z'),
-            txSignature: 'buySig',
-          }),
+        findFirst: vi.fn().mockResolvedValue({
+          createdAt: new Date('2026-07-27T10:00:00Z'),
+          txSignature: 'buySig',
+        }),
         findMany: vi.fn().mockResolvedValue([
           {
             createdAt: new Date('2026-07-27T10:30:00Z'),
@@ -152,15 +160,19 @@ describe('TradeShowcaseMonitor — real bot trade sendPhoto + DM broadcast', () 
     return deps;
   }
 
-  it('resolves one photo per trade and sends the identical caption+photo to the channel and every subscribed telegramId', async () => {
+  it('resolves one photo per trade, posts it to the channel directly, and enqueues a durable broadcast for every subscribed telegramId (2026-07-29)', async () => {
     resolveTradePhotoMock.mockClear();
     sendTradeNotificationPhotoMock.mockClear();
     const resolvedPhoto = { buffer: Buffer.from([1, 2, 3]) };
     resolveTradePhotoMock.mockResolvedValue(resolvedPhoto);
 
-    const { deps, userFindMany } = fakeDeps();
+    const { deps, userFindMany, tradeBroadcastCreate, tradeBroadcastDeliveryCreateMany } =
+      fakeDeps();
     withEligibleTrade(deps);
-    userFindMany.mockResolvedValue([{ telegramId: 'chat1' }, { telegramId: 'chat2' }]);
+    userFindMany.mockResolvedValue([
+      { id: 'user1', telegramId: 'chat1' },
+      { id: 'user2', telegramId: 'chat2' },
+    ]);
 
     const monitor = new TradeShowcaseMonitor(deps);
     await monitor.tick();
@@ -168,23 +180,51 @@ describe('TradeShowcaseMonitor — real bot trade sendPhoto + DM broadcast', () 
     // Fetched exactly once per trade, not once per recipient.
     expect(resolveTradePhotoMock).toHaveBeenCalledTimes(1);
 
-    const recipients = sendTradeNotificationPhotoMock.mock.calls.map((call) => call[1]);
-    expect(recipients).toEqual(expect.arrayContaining(['@testchannel', 'chat1', 'chat2']));
-    expect(sendTradeNotificationPhotoMock).toHaveBeenCalledTimes(3);
-    for (const call of sendTradeNotificationPhotoMock.mock.calls) {
-      expect(call[2]).toBe('CAPTION TEXT');
-      expect(call[3]).toBe(resolvedPhoto);
-    }
+    // The channel post is still a direct, immediate sendPhoto — unaffected
+    // by the durable-queue change.
+    expect(sendTradeNotificationPhotoMock).toHaveBeenCalledTimes(1);
+    expect(sendTradeNotificationPhotoMock).toHaveBeenCalledWith(
+      expect.anything(),
+      '@testchannel',
+      'CAPTION TEXT',
+      resolvedPhoto,
+    );
+
+    // The DM fan-out is now a fast DB enqueue, not per-recipient sends —
+    // only queries telegramActive users, and creates one delivery row per
+    // recipient with the exact same caption the channel post used.
+    expect(userFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { telegramId: { not: null }, telegramActive: true } }),
+    );
+    expect(tradeBroadcastCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          positionId: 'pos1',
+          caption: 'CAPTION TEXT',
+          totalRecipients: 2,
+        }),
+      }),
+    );
+    expect(tradeBroadcastDeliveryCreateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            broadcastId: 'broadcast1',
+            userId: 'user1',
+            telegramChatId: 'chat1',
+          }),
+          expect.objectContaining({
+            broadcastId: 'broadcast1',
+            userId: 'user2',
+            telegramChatId: 'chat2',
+          }),
+        ]),
+      }),
+    );
   });
 
-  it('still posts to the channel and marks the trade showcased even if a DM send fails', async () => {
-    sendTradeNotificationPhotoMock.mockReset();
-    sendTradeNotificationPhotoMock.mockImplementation((_bot, chatId) => {
-      if (chatId === 'brokenChat') return Promise.reject(new Error('blocked'));
-      return Promise.resolve({ message_id: 1 });
-    });
-
-    const { deps, userFindMany } = fakeDeps();
+  it('still posts to the channel and marks the trade showcased even if enqueuing the broadcast fails', async () => {
+    const { deps, userFindMany, tradeBroadcastCreate } = fakeDeps();
     const positionUpdate = vi.fn().mockResolvedValue(undefined);
     withEligibleTrade(deps);
     (deps as never as { prisma: Record<string, unknown> }).prisma = {
@@ -194,12 +234,19 @@ describe('TradeShowcaseMonitor — real bot trade sendPhoto + DM broadcast', () 
         update: positionUpdate,
       },
     };
-    userFindMany.mockResolvedValue([{ telegramId: 'brokenChat' }]);
+    userFindMany.mockResolvedValue([{ id: 'user1', telegramId: 'chat1' }]);
+    tradeBroadcastCreate.mockRejectedValueOnce(new Error('db blip'));
 
     const monitor = new TradeShowcaseMonitor(deps);
     await monitor.tick();
 
-    expect(positionUpdate).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'pos1' } }));
+    // The whole per-trade try/catch treats an enqueue failure the same as
+    // any other per-trade failure — showcasePostedAt is left null so it's
+    // retried next tick, but the channel post (which already landed before
+    // the enqueue call) is not undone.
+    expect(positionUpdate).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'pos1' } }),
+    );
   });
 });
 

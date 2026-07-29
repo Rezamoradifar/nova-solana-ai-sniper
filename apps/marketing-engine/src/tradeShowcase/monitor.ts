@@ -4,7 +4,6 @@ import {
   formatTradePhotoCaption,
   resolveTradePhoto,
   sendTradeNotificationPhoto,
-  type ResolvedTradePhoto,
   type TradeNotificationData,
   type Bot,
 } from '@nova/telegram-bot';
@@ -13,17 +12,20 @@ import { sendBrandedMessage } from '../telegramSend.js';
 import {
   fetchShowcaseEligibleTrades,
   fetchClosedTradesForDay,
-  fetchSubscribedTelegramIds,
   markTradeShowcased,
   type ShowcaseTrade,
 } from './data.js';
 import { formatDailySummaryMessage, computeDailySummaryStats } from './format.js';
+import { enqueueTradeBroadcast } from './broadcastQueue.js';
 
 /** Maps this module's Prisma-backed trade/enrichment shapes onto the
  * generic, Prisma-free TradeNotificationData shape the shared
  * apps/telegram-bot notification builder expects — see that module's own
- * doc comment for why the builder lives there instead of here. */
-function toTradeNotificationData(
+ * doc comment for why the builder lives there instead of here. Exported
+ * (2026-07-29) so broadcastWorker.ts can build the same shape when it needs
+ * to (re-)resolve a broadcast's chart photo independently of this class's
+ * own tick. */
+export function toTradeNotificationData(
   trade: ShowcaseTrade,
   enrichment: DexScreenerEnrichment | undefined,
 ): TradeNotificationData {
@@ -146,10 +148,24 @@ export class TradeShowcaseMonitor {
         // per recipient.
         const photo = await resolveTradePhoto(notification);
         await sendTradeNotificationPhoto(this.deps.bot, this.deps.chatId, caption, photo);
-        await this.dmSubscribedUsers(trade.positionId, caption, photo);
+        // Durable broadcast queue (2026-07-29) — replaces the old bare
+        // Promise.all DM fan-out. This is a fast, DB-only write (create one
+        // TradeBroadcast + N TradeBroadcastDelivery rows); the actual sends
+        // happen entirely on BroadcastWorker's own tick, never blocking this
+        // per-trade loop. See broadcastQueue.ts/broadcastWorker.ts.
+        const { recipientCount } = await enqueueTradeBroadcast(
+          this.deps.prisma,
+          trade.positionId,
+          caption,
+        );
         await markTradeShowcased(this.deps.prisma, trade.positionId);
         this.deps.logger.info(
-          { positionId: trade.positionId, mint: trade.mint, roiPercent: trade.roiPercent },
+          {
+            positionId: trade.positionId,
+            mint: trade.mint,
+            roiPercent: trade.roiPercent,
+            recipientCount,
+          },
           'trade showcase: posted trade',
         );
       } catch (err) {
@@ -162,38 +178,6 @@ export class TradeShowcaseMonitor {
       }
       await sleep(SEND_SPACING_MS);
     }
-  }
-
-  /**
-   * Real Bot Trade DM broadcast (2026-07-28): every user who has ever
-   * started the bot (User.telegramId set) gets the identical sendPhoto
-   * notification — same photo, same caption — direct in their own chat, in
-   * addition to (never instead of) the public channel post above.
-   * Independent of SnipeConfig activity: this is a broadcast to every
-   * registered user, not the narrower "active sniper" fan-out
-   * NotificationService already does for the BUY/SELL card images.
-   * Best-effort per recipient (logged, not thrown) so one blocked chat, or
-   * a Telegram outage, never stops the channel post or the dedup marker
-   * above from going through.
-   */
-  private async dmSubscribedUsers(
-    positionId: string,
-    caption: string,
-    photo: ResolvedTradePhoto | undefined,
-  ): Promise<void> {
-    const chatIds = await fetchSubscribedTelegramIds(this.deps.prisma);
-    await Promise.all(
-      chatIds.map(async (chatId) => {
-        try {
-          await sendTradeNotificationPhoto(this.deps.bot, chatId, caption, photo);
-        } catch (err) {
-          this.deps.logger.error(
-            { err, positionId, chatId },
-            'trade showcase: failed to DM subscribed user',
-          );
-        }
-      }),
-    );
   }
 
   private async postDailySummaryIfDue(): Promise<void> {

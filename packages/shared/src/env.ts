@@ -245,6 +245,14 @@ export const envSchema = z.object({
   // skipped rather than posted late.
   TRADE_SHOWCASE_DEPLOYED_AT: z.coerce.date().default(() => new Date()),
 
+  // Durable Telegram broadcast queue worker (2026-07-29) — how often
+  // BroadcastWorker ticks to drain TradeBroadcast/TradeBroadcastDelivery
+  // rows enqueued by enqueueTradeBroadcast (see broadcastQueue.ts). Much
+  // shorter than TRADE_SHOWCASE_POLL_INTERVAL_MS since this is just a DB
+  // poll, not an external API scan — the worker's own `ticking` guard means
+  // a short interval never causes overlapping runs.
+  BROADCAST_WORKER_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
+
   // Real-Data Telegram Activity Feed (2026-07-27) — posts premium-formatted
   // messages to MARKETING_TELEGRAM_CHANNEL_ID sourced ONLY from real rows
   // (new tokens detected, real AI/Opportunity Score evaluations, real smart-
@@ -514,15 +522,52 @@ export const envSchema = z.object({
   // polling the User table on every single registration.
   MEMBER_GROWTH_REPORT_INTERVAL_MS: z.coerce.number().min(60_000).default(300_000),
 
-  // EmergencyExitMonitor — Institutional Mode's safety net: force-closes an
-  // OPEN institutional-mode position on a detected liquidity-removal/rug
-  // signal, independent of that position's own TP/SL/trailing-stop (see
-  // emergencyExitMonitor.ts). Defaults off, same convention as the staged
-  // profitability flags above. On-chain/liquidity checks are slower and
-  // heavier than a plain price tick, hence its own, longer interval rather
-  // than reusing PRICE_CHECK_INTERVAL_MS.
+  // EmergencyExitMonitor — the system-wide safety net: force-closes any OPEN
+  // position (2026-07-28: every strategy, not just Institutional Mode — see
+  // emergencyExitMonitor.ts's own doc comment) on a detected liquidity-
+  // removal/rug signal, independent of that position's own TP/SL/trailing-
+  // stop. Defaults off, same convention as the staged profitability flags
+  // above — this engine went from protecting zero real positions to
+  // protecting every OPEN one the moment it's flipped on, so it's
+  // deliberately canaried manually rather than defaulted on as part of that
+  // fix. On-chain/liquidity checks are slower and heavier than a plain price
+  // tick, hence its own, longer interval rather than reusing
+  // PRICE_CHECK_INTERVAL_MS.
   EMERGENCY_EXIT_ENABLED: booleanFlag(false),
   EMERGENCY_EXIT_CHECK_INTERVAL_MS: z.coerce.number().min(15000).default(45000),
+
+  // TP1 / Breakeven / Trailing exit strategy (2026-07-28) — a new, dedicated
+  // exit strategy (tp1TrailingStrategy.ts), opt-in per SnipeConfig
+  // (SnipeConfig.exitStrategy / Position.exitStrategy = 'tp1_trailing_v1'),
+  // globally gated by this flag same as every other staged feature. Defaults
+  // off — only enabled after Phase 7's backtest (runStrategyBacktest.ts)
+  // shows a statistically meaningful improvement over the current strategy,
+  // reviewed by a human, per the spec's own "apply only if proven better"
+  // requirement.
+  EXIT_STRATEGY_V2_ENABLED: booleanFlag(false),
+  // Initial stop-loss before TP1 fires. Still clamped through
+  // resolveEffectiveStopLossPercent/DEFAULT_MAX_LOSS_PERCENT — this can never
+  // be looser than the system-wide 20% ceiling regardless of this value.
+  EXIT_V2_INITIAL_STOP_LOSS_PERCENT: z.coerce.number().positive().default(20),
+  // ROI% that triggers TP1 ("Take Profit #1 — at +50% ROI").
+  EXIT_V2_TP1_ROI_PERCENT: z.coerce.number().positive().default(50),
+  // Fraction of the position sold at TP1 ("sell exactly 50% of the
+  // position").
+  EXIT_V2_TP1_SELL_FRACTION: z.coerce.number().min(0).max(1).default(0.5),
+  // Stop-loss moved here once TP1 fires ("move Stop Loss to Break Even (+0%
+  // to +5%)").
+  EXIT_V2_BREAKEVEN_STOP_LOSS_PERCENT: z.coerce.number().min(0).max(5).default(2),
+  // Base trailing distance for the post-TP1 phase before volatility
+  // adjustment ("default trailing distance: 15%").
+  EXIT_V2_TRAILING_BASE_PERCENT: z.coerce.number().positive().default(15),
+  EXIT_V2_TRAILING_MIN_PERCENT: z.coerce.number().positive().default(10),
+  EXIT_V2_TRAILING_MAX_PERCENT: z.coerce.number().positive().default(25),
+  // Calibration constant for the volatility-adaptive trailing formula (see
+  // tp1TrailingStrategy.ts's computeVolatilityAdaptiveTrailingPercent) — the
+  // "normal" rolling-stddev-of-returns level EXIT_V2_TRAILING_BASE_PERCENT is
+  // calibrated for. Unvalidated; re-examine against Phase 7's backtest
+  // before any live rollout.
+  EXIT_V2_VOLATILITY_REFERENCE_STDDEV_PERCENT: z.coerce.number().positive().default(5),
 
   // Dynamic Risk Tiers / bundled-wallet detection / extreme-pump protection
   // (2026-07-23, USOH incident follow-up — see apps/api/src/trading/riskTier.ts,
@@ -594,6 +639,16 @@ export const envSchema = z.object({
   // threshold this long still only fires on a genuinely dead subscription, not a quiet
   // native-DEX hour.
   DEX_MONITOR_IDLE_MS: z.coerce.number().min(300000).default(1800000),
+
+  // Config-driven DEX registry (2026-07-29) — comma-separated subset of
+  // PUMPSWAP/RAYDIUM/ORCA/METEORA that DexRegistry (dex/registry.ts) actually
+  // registers a monitor/liquidity-reader/executor for; a DEX left out gets no
+  // native integration at all, same end state as if it didn't exist, without
+  // a redeploy. Default is today's exact existing set — this changes nothing
+  // until an operator deliberately edits it. Split into a Set at the point of
+  // use (worker.ts), same convention as TELEGRAM_TREND_CHANNELS's own
+  // plain-string-here/split-downstream pattern.
+  ENABLED_NATIVE_DEXES: z.string().default('PUMPSWAP,RAYDIUM,ORCA,METEORA'),
 
   // DepositMonitor — polls every active wallet's live SOL balance and records
   // an increase as a DEPOSIT ledger/audit event (see

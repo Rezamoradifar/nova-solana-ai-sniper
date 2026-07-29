@@ -55,6 +55,10 @@ describe('decodeRaydiumCpmmPool', () => {
     expect(state.token1Mint).toBe(REAL_POOL.token1Mint);
     expect(state.token0Vault).toBe(REAL_POOL.token0Vault);
     expect(state.token1Vault).toBe(REAL_POOL.token1Vault);
+    expect(state.ammConfig).toBe(REAL_POOL.ammConfig);
+    expect(state.token0Program).toBe(REAL_POOL.token0Program);
+    expect(state.token1Program).toBe(REAL_POOL.token1Program);
+    expect(state.observationKey).toBe(REAL_POOL.observationKey);
     expect(state.status).toBe(0);
     expect(state.lpSupply).toBe(REAL_POOL.lpSupply);
   });

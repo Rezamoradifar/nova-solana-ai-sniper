@@ -21,18 +21,30 @@ export interface EmergencyExitMonitorDeps {
 }
 
 /**
- * Institutional Mode's safety net — polls every OPEN, institutionalModeEnabled
- * position on its own (slower — see EMERGENCY_EXIT_CHECK_INTERVAL_MS's doc
- * comment) interval, independent of PriceMonitor's plain TP/SL/trailing-stop
- * loop. Only institutional positions are in scope: this is the same "Force-
- * closes an OPEN institutional-mode position" engine described in
- * packages/shared/src/env.ts's EMERGENCY_EXIT_ENABLED doc comment; a
- * non-institutional position keeps relying solely on its configured TP/SL/
- * trailing-stop, exactly as before this engine existed.
+ * The system-wide safety net — polls every OPEN position (any exit strategy:
+ * legacy manual TP/SL/trailing, a preset, Institutional Mode, or the new
+ * tp1_trailing_v1 strategy) on its own (slower — see
+ * EMERGENCY_EXIT_CHECK_INTERVAL_MS's doc comment) interval, independent of
+ * PriceMonitor's plain TP/SL/trailing-stop loop.
+ *
+ * 2026-07-28 fix: this used to filter to `institutionalModeEnabled: true`
+ * only, which — combined with Institutional Mode never actually being
+ * enabled in production (see positionManager.ts's own history) — meant this
+ * fully-built engine protected zero real positions. There is no principled
+ * reason a legacy/preset/new-strategy position should be unprotected from a
+ * liquidity collapse, a re-enabled mint/freeze authority, a rug-score
+ * collapse, or a no-sell-route condition while only an institutional one is —
+ * every OPEN position is now in scope. The dev-wallet-dump signal
+ * (devWalletAddress/devWalletAmountRawAtEntry) is a proxy resolved at open
+ * time; positions opened before this fix (or any position this proxy
+ * couldn't resolve) simply won't have that one signal available — the other
+ * five (liquidity collapse, no-sell-route, mint/freeze re-enabled, critical
+ * rug score) are unaffected and still fully active for every position.
  *
  * A trigger sells 100% of whatever remains via the ordinary closePosition
  * path (which already reads the real live wallet balance for a real sell,
- * so this correctly sells through the moonbag too) — never a partial sell.
+ * so this correctly sells through an institutional-mode moonbag too, or a
+ * tp1_trailing_v1 position's post-TP1 remainder) — never a partial sell.
  */
 export class EmergencyExitMonitor {
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -60,8 +72,12 @@ export class EmergencyExitMonitor {
       // no point spending a fresh riskAnalyzer.analyze + Jupiter quote on it
       // every tick when any resulting closePosition call would just be
       // rejected by PositionManager's own sellUnsellable gate anyway.
+      //
+      // institutionalModeEnabled filter removed (2026-07-28) — see this
+      // class's own doc comment: every OPEN position is now in scope, not
+      // just institutional-mode ones.
       const positions = await this.deps.prisma.position.findMany({
-        where: { status: 'OPEN', institutionalModeEnabled: true, sellUnsellable: false },
+        where: { status: 'OPEN', sellUnsellable: false },
         include: { token: true, wallet: true },
       });
 

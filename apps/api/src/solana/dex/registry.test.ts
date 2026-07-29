@@ -47,6 +47,47 @@ import { DexRegistry } from './registry.js';
 import { getPumpSwapLiquidity, getPumpSwapPoolState } from './pumpswap.js';
 import { getRaydiumCpmmPoolState } from './raydium.js';
 
+describe('DexRegistry — ENABLED_NATIVE_DEXES filtering (2026-07-29)', () => {
+  it('registers all 4 DEXs by default, unchanged from before this feature', () => {
+    const registry = new DexRegistry({} as never, {} as never, fakeLogger());
+    expect([...registry.monitors.keys()].sort()).toEqual([
+      'METEORA',
+      'ORCA',
+      'PUMPSWAP',
+      'RAYDIUM',
+    ]);
+    expect(registry.getAdapter('ORCA')).toBeDefined();
+  });
+
+  it('only registers the enabled subset — a disabled DEX has no monitor, liquidity reader, executor, or adapter', () => {
+    const registry = new DexRegistry(
+      {} as never,
+      {} as never,
+      fakeLogger(),
+      {},
+      undefined,
+      new Set(['PUMPSWAP', 'RAYDIUM']),
+    );
+    expect([...registry.monitors.keys()].sort()).toEqual(['PUMPSWAP', 'RAYDIUM']);
+    expect(registry.getExecutor('ORCA')).toBeUndefined();
+    expect(registry.getAdapter('METEORA')).toBeUndefined();
+  });
+
+  it('an empty enabled set disables every native DEX (Jupiter remains the only path)', () => {
+    const registry = new DexRegistry(
+      {} as never,
+      {} as never,
+      fakeLogger(),
+      {},
+      undefined,
+      new Set(),
+    );
+    expect(registry.monitors.size).toBe(0);
+    expect(registry.getExecutor('PUMPSWAP')).toBeUndefined();
+    expect(registry.getAdapter('PUMPSWAP')).toBeUndefined();
+  });
+});
+
 describe('DexRegistry', () => {
   it('starts and stops every registered monitor', () => {
     const registry = new DexRegistry({} as never, {} as never, fakeLogger());
@@ -212,6 +253,62 @@ describe('DexRegistry', () => {
       const registry = new DexRegistry({} as never, {} as never, fakeLogger());
 
       expect(await registry.getVaultAddresses('PUMPSWAP', 'PoolA')).toEqual([]);
+    });
+  });
+
+  describe('getAdapter', () => {
+    it('returns undefined for a dex with no native reader (PUMPFUN/JUPITER)', () => {
+      const registry = new DexRegistry({} as never, {} as never, fakeLogger());
+      expect(registry.getAdapter('PUMPFUN')).toBeUndefined();
+      expect(registry.getAdapter('JUPITER')).toBeUndefined();
+    });
+
+    it('returns a DexAdapter for every registered NativeDexName', () => {
+      const registry = new DexRegistry({} as never, {} as never, fakeLogger());
+      for (const dex of ['PUMPSWAP', 'RAYDIUM', 'ORCA', 'METEORA'] as const) {
+        const adapter = registry.getAdapter(dex);
+        expect(adapter).toBeDefined();
+        expect(adapter!.dex).toBe(dex);
+      }
+    });
+
+    it('adapter.getLiquidity delegates to the same per-DEX reader as registry.getLiquidity', async () => {
+      vi.mocked(getPumpSwapLiquidity).mockResolvedValueOnce({
+        dex: 'PUMPSWAP',
+        poolAddress: 'PoolA',
+        baseMint: 'MintA',
+        quoteMint: 'So11111111111111111111111111111111111111112',
+        baseReserve: 1,
+        quoteReserve: 2,
+        liquidityUsd: 100,
+      });
+      const registry = new DexRegistry({} as never, {} as never, fakeLogger());
+      const result = await registry.getAdapter('PUMPSWAP')!.getLiquidity('PoolA');
+      expect(result).toEqual({ liquidityUsd: 100, baseReserve: 1, quoteReserve: 2 });
+    });
+
+    it('adapter.isExecutable is false by default (NotImplementedNativeExecutor stub)', () => {
+      const registry = new DexRegistry({} as never, {} as never, fakeLogger());
+      expect(registry.getAdapter('RAYDIUM')!.isExecutable).toBe(false);
+    });
+
+    it('adapter.isExecutable is true when a real executor override is supplied', () => {
+      const realExecutor = { dex: 'PUMPSWAP', buildSwap: vi.fn() };
+      const registry = new DexRegistry({} as never, {} as never, fakeLogger(), {
+        PUMPSWAP: realExecutor as never,
+      });
+      expect(registry.getAdapter('PUMPSWAP')!.isExecutable).toBe(true);
+    });
+
+    it('adapter.executeSwap delegates to the underlying executor.buildSwap and wraps the result', async () => {
+      const fakeTx = { fake: 'transaction' };
+      const realExecutor = { dex: 'PUMPSWAP', buildSwap: vi.fn().mockResolvedValue(fakeTx) };
+      const registry = new DexRegistry({} as never, {} as never, fakeLogger(), {
+        PUMPSWAP: realExecutor as never,
+      });
+      const result = await registry.getAdapter('PUMPSWAP')!.executeSwap({} as never);
+      expect(realExecutor.buildSwap).toHaveBeenCalled();
+      expect(result).toEqual({ transaction: fakeTx });
     });
   });
 });

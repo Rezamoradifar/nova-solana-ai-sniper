@@ -89,6 +89,15 @@ export type LaunchableDex = Exclude<Dex, 'JUPITER'>;
  * `undefined`, which callers treat as "ignore this pool." Pure and exported
  * so the mapping can't silently regress, same convention as
  * resolveLiquidityUsd.
+ *
+ * 2026-07-29: deliberately NOT extended to recognize Lifinity/FluxBeam/
+ * OpenBook/Phoenix the way migrationMonitor.ts's mapDexIdToDex was — this
+ * function's only caller (cheapLiquidityPrecheck below) uses an unmapped
+ * `dexId` as an outright reject (`liquidityUsd: 0`) for a *fresh* candidate,
+ * so extending it would newly admit tokens on those 4 venues as buy
+ * candidates for the first time — a real trading-eligibility change, not
+ * "just labeling" (unlike mapDexIdToDex, which only relabels a token already
+ * being tracked after it migrates). Left as a deliberate scope boundary.
  */
 export function mapDexScreenerIdToDex(dexId: string | undefined): LaunchableDex | undefined {
   if (!dexId) return undefined;

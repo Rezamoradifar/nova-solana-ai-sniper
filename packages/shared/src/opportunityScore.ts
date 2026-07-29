@@ -20,6 +20,13 @@ export interface OpportunityScoreComponents {
   socialScore?: number;
   /** undefined when no AI provider is configured. */
   aiScore?: number;
+  /** A banded read of real liquidity depth (see bandLiquidityDepthScore) —
+   * undefined only when liquidityUsd itself couldn't be resolved at all
+   * (distinct from $0, which bands to the lowest score, not undefined).
+   * 2026-07-29: the closest match to the DEX-agnostic refactor's "composite
+   * token health score" requirement — extends this existing composite rather
+   * than adding a second, divergent scorer. */
+  liquidityDepthScore?: number;
 }
 
 export interface OpportunityScoreWeights {
@@ -28,6 +35,27 @@ export interface OpportunityScoreWeights {
   walletWeightBps: number;
   socialWeightBps: number;
   aiWeightBps: number;
+  liquidityDepthWeightBps: number;
+}
+
+/**
+ * Bands real, already-resolved liquidity USD into a 0-100 score — a simple,
+ * transparent read of "how much real capital is actually behind this pool,"
+ * not a new liquidity signal (liquidityUsd itself already comes from
+ * RiskAnalyzer's existing resolveLiquidityUsd chain). Bands are deliberately
+ * coarse and conservative: even $200k+ (institutional-scale for a memecoin
+ * pool) only reaches the ceiling, since liquidity alone never justifies a
+ * high score on its own — it is one of several weighted components, and
+ * defaults to 0 weight (see BusinessSettings.liquidityDepthWeightBps) until
+ * an operator deliberately turns it on.
+ */
+export function bandLiquidityDepthScore(liquidityUsd: number): number {
+  if (!Number.isFinite(liquidityUsd) || liquidityUsd <= 0) return 0;
+  if (liquidityUsd < 1_000) return 10;
+  if (liquidityUsd < 10_000) return 30;
+  if (liquidityUsd < 50_000) return 60;
+  if (liquidityUsd < 200_000) return 85;
+  return 100;
 }
 
 export interface OpportunityScoreResult {
@@ -58,6 +86,7 @@ export function calculateOpportunityScore(
     [components.walletScore, weights.walletWeightBps],
     [components.socialScore, weights.socialWeightBps],
     [components.aiScore, weights.aiWeightBps],
+    [components.liquidityDepthScore, weights.liquidityDepthWeightBps],
   ];
 
   let weightedSum = 0;

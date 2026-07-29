@@ -44,6 +44,16 @@ model User {
   feePolicyAcceptedAt     DateTime?
   feePolicyAcceptedFeeBps Int?
 
+  // Durable Telegram broadcast queue (2026-07-29) — flips to false the first
+  // time a broadcast delivery to this user's telegramId gets a PERMANENT
+  // Telegram error (403 Forbidden/bot blocked, chat not found, user
+  // deactivated — see marketing-engine's telegramErrorClassifier.ts).
+  // Every future TradeBroadcast enqueue query excludes telegramActive:false
+  // users automatically — this is the "mark inactive, stop retrying forever"
+  // requirement. Irrelevant (stays true, never checked) for a user with no
+  // telegramId at all.
+  telegramActive Boolean @default(true)
+
   wallets               Wallet[]
   watchlists            WatchlistItem[]
   snipeConfigs          SnipeConfig[]
@@ -53,8 +63,65 @@ model User {
   performanceFees       PerformanceFeeLedger[]
   referralRewardsEarned ReferralReward[]       @relation("ReferralRewardReferrer")
   referralRewardsCaused ReferralReward[]       @relation("ReferralRewardReferredUser")
+  tradeBroadcastDeliveries TradeBroadcastDelivery[]
 
   @@map("users")
+}
+
+/// Durable Telegram broadcast queue (2026-07-29) — one row per completed real
+/// trade that needs to reach every registered user. Replaces the old bare
+/// Promise.all fan-out (apps/marketing-engine/src/tradeShowcase/monitor.ts's
+/// dmSubscribedUsers, now removed) with a persistent, retryable, crash-safe
+/// queue at 100k+-user scale — see broadcastWorker.ts.
+model TradeBroadcast {
+  id         String @id @default(cuid())
+  positionId String @unique
+
+  caption String
+  /// A Telegram file_id captured from the FIRST successful delivery in this
+  /// broadcast — every subsequent recipient reuses it via sendPhoto instead
+  /// of re-uploading the photo buffer, which matters at 100k+-recipient
+  /// scale (bandwidth + Telegram API load). Null until that first send
+  /// lands.
+  photoFileId String?
+
+  status               String    @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED | COMPLETED_WITH_FAILURES
+  totalRecipients      Int?
+  sentCount            Int       @default(0)
+  failedPermanentCount Int       @default(0)
+  failedTempCount      Int       @default(0)
+  createdAt            DateTime  @default(now())
+  completedAt          DateTime?
+
+  deliveries TradeBroadcastDelivery[]
+
+  @@map("trade_broadcasts")
+}
+
+/// One row per (broadcast, recipient) — the durable unit of work
+/// broadcastWorker.ts's rate-limited loop claims and retries. See
+/// telegramErrorClassifier.ts for the PENDING -> SENT | FAILED_PERMANENT |
+/// FAILED_TEMP transitions.
+model TradeBroadcastDelivery {
+  id             String @id @default(cuid())
+  broadcastId    String
+  broadcast      TradeBroadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User   @relation(fields: [userId], references: [id])
+  telegramChatId String
+
+  status String @default("PENDING") // PENDING | SENT | FAILED_PERMANENT | FAILED_TEMP
+  /// Count of TRANSIENT send attempts only — a permanent-error delivery is
+  /// terminal on its first attempt and never increments this.
+  attempts      Int       @default(0)
+  lastError     String?
+  lastAttemptAt DateTime?
+  sentAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@unique([broadcastId, userId])
+  @@index([status, lastAttemptAt])
+  @@map("trade_broadcast_deliveries")
 }
 
 /// Wallet private keys are stored encrypted (AES-256-GCM) via the security layer,
@@ -179,7 +246,13 @@ model OpportunityScoreLog {
   walletScore   Float? // null until Section 4 (Wallet Intelligence) exists
   socialScore   Float? // null until Section 5 (Social/Trend Signals) exists
   aiScore       Float? // null when no AI provider is configured (matches today's rule-score-only fallback)
-  finalScore    Float
+  /// bandLiquidityDepthScore(riskFlags.liquidityUsd) — see opportunityScore.ts.
+  /// Added 2026-07-29 as part of the DEX-agnostic adapter refactor's
+  /// "composite token health score" requirement. 0 weight by default (see
+  /// BusinessSettings.liquidityDepthWeightBps) so this is inert until an
+  /// operator deliberately turns it on.
+  liquidityDepthScore Float?
+  finalScore          Float
 
   /// {safetyBps, momentumBps, walletBps, socialBps, aiBps} actually applied —
   /// BusinessSettings' weights can change over time, so this is a permanent
@@ -279,6 +352,17 @@ model Position {
   // exit strategy doesn't retroactively change if the user edits their SnipeConfig
   // later. Null means "not using a preset" (today's default behavior, unchanged).
   trailingStopPreset  String?
+  // TP1 / Breakeven / Trailing exit strategy (2026-07-28) — frozen at open,
+  // same convention as trailingStopPreset above. 'tp1_trailing_v1' or null
+  // (today's exact unchanged behavior). See
+  // apps/api/src/trading/tp1TrailingStrategy.ts.
+  exitStrategy        String?
+  // Non-null once TP1 has fired for this position — doubles as both the
+  // "has TP1 fired yet" state exitStrategy='tp1_trailing_v1' positions are
+  // evaluated against (see positionManager.ts's checkAndMaybeCloseTp1Trailing)
+  // and the "trailing activation" log timestamp requirement #7 of the
+  // 2026-07-28 spec wants. Always null for every other exitStrategy value.
+  trailingActivatedAt DateTime?
   highWaterMarkUsd    Float?
   // Running total: incremented by each partial exit (see PositionPartialExit)
   // plus the final close, rather than "set once at close" — backward compatible,
@@ -564,6 +648,12 @@ model SnipeConfig {
   // position at open time. Null (the default) is fully backward compatible: no
   // behavior changes unless a user explicitly picks a preset in Settings.
   trailingStopPreset  String?
+  // TP1 / Breakeven / Trailing exit strategy (2026-07-28) — see
+  // Position.exitStrategy. User opt-in, also gated by the global
+  // EXIT_STRATEGY_V2_ENABLED env flag (double opt-in, same convention as
+  // institutionalModeEnabled/INSTITUTIONAL_MODE_ENABLED below). Null (the
+  // default) reproduces today's behavior exactly for every existing config.
+  exitStrategy        String?
   autoBuyOnLaunch     Boolean  @default(false)
   createdAt           DateTime @default(now())
 
@@ -1076,6 +1166,10 @@ model BusinessSettings {
   walletWeightBps   Int @default(0)
   socialWeightBps   Int @default(0)
   aiWeightBps       Int @default(5000)
+  /// liquidityDepthScore's weight (see opportunityScore.ts's
+  /// bandLiquidityDepthScore) — 0 by default, same "someone must deliberately
+  /// raise this off 0 first" convention as momentum/wallet/social above.
+  liquidityDepthWeightBps Int @default(0)
 
   referralLevels ReferralLevelConfig[]
 

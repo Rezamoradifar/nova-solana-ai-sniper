@@ -235,9 +235,13 @@ describe('PriceMonitor — persisted monitoring state survives a process restart
     // process's ticks), then the process restarts (a fresh PriceMonitor
     // instance, with empty in-memory Maps) — the very first tick on the new
     // instance must still report ~70 minutes elapsed, never "10 minutes."
+    // Captured once — comparing two independent Date.now() calls (one here,
+    // one in the final assertion) is a real wall-clock race under a loaded
+    // test runner, occasionally off by a millisecond.
+    const monitoringStateSinceMs = Date.now() - 70 * 60 * 1000;
     const position = fakePosition({
       monitoringState: 'PRICE_UNAVAILABLE',
-      monitoringStateSince: new Date(Date.now() - 70 * 60 * 1000),
+      monitoringStateSince: new Date(monitoringStateSinceMs),
       lastMonitoringAlertAt: new Date(Date.now() - 60 * 60 * 1000),
       lastAlertedMonitoringState: 'PRICE_UNAVAILABLE',
     });
@@ -262,7 +266,7 @@ describe('PriceMonitor — persisted monitoring state survives a process restart
     expect(notifyError).not.toHaveBeenCalled();
     expect(
       (position as { monitoringStateSince: Date | null }).monitoringStateSince!.getTime(),
-    ).toBe(Date.now() - 70 * 60 * 1000);
+    ).toBe(monitoringStateSinceMs);
   });
 
   it('escalates to MANUAL_REVIEW once NO_SELL_ROUTE has persisted past manualReviewAfterMs, without closing the position', async () => {
@@ -406,6 +410,7 @@ describe('PriceMonitor — concurrent position processing (2026-07-23 USOH incid
       expect.anything(),
       expect.anything(),
       expect.anything(),
+      undefined,
     );
   });
 });
@@ -530,5 +535,69 @@ describe('PriceMonitor — emergency liquidity-deterioration detection (2026-07-
     await monitor.tick();
 
     expect(deps.positionManager.closePosition).not.toHaveBeenCalled();
+  });
+});
+
+describe('PriceMonitor — TP1/Breakeven/Trailing volatility sample recording (2026-07-29)', () => {
+  it('passes a volatilityStdDevPercent opts object only for an exitStrategy=tp1_trailing_v1 position', async () => {
+    const v2Position = fakePosition({ id: 'pos-v2', exitStrategy: 'tp1_trailing_v1' });
+    const plainPosition = fakePosition({ id: 'pos-plain' });
+    const deps = buildDeps({}, [v2Position, plainPosition]);
+    deps.positionManager.checkAndMaybeClose.mockResolvedValue({ closed: false });
+    const monitor = new PriceMonitor(deps);
+
+    await monitor.tick();
+
+    expect(deps.positionManager.checkAndMaybeClose).toHaveBeenCalledWith(
+      'pos-v2',
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ volatilityStdDevPercent: undefined }),
+    );
+    expect(deps.positionManager.checkAndMaybeClose).toHaveBeenCalledWith(
+      'pos-plain',
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      undefined,
+    );
+  });
+
+  it('computes a real rolling volatility figure once enough samples accumulate across ticks', async () => {
+    const v2Position = fakePosition({ id: 'pos-v2', exitStrategy: 'tp1_trailing_v1' });
+    const prices = ['1', '1.1', '0.9', '1.2', '0.8', '1.05'];
+    let call = 0;
+    const deps = buildDeps(
+      {
+        dexScreener: {
+          getBestSolanaPair: vi.fn(() =>
+            Promise.resolve({ priceUsd: prices[call++ % prices.length] }),
+          ),
+        } as unknown as DexScreenerClient,
+      },
+      [v2Position],
+    );
+    deps.positionManager.checkAndMaybeClose.mockResolvedValue({ closed: false });
+    const monitor = new PriceMonitor(deps);
+
+    for (let i = 0; i < prices.length; i++) {
+      await monitor.tick();
+    }
+
+    const lastCall = deps.positionManager.checkAndMaybeClose.mock.calls.at(-1)!;
+    const opts = lastCall[4] as { volatilityStdDevPercent?: number };
+    expect(opts.volatilityStdDevPercent).toBeGreaterThan(0);
+  });
+
+  it("forgets a closed tp1_trailing_v1 position's volatility samples (memory bound)", async () => {
+    const v2Position = fakePosition({ id: 'pos-v2', exitStrategy: 'tp1_trailing_v1' });
+    const deps = buildDeps({}, [v2Position]);
+    deps.positionManager.checkAndMaybeClose.mockResolvedValue({ closed: true, signature: 'sig' });
+    const monitor = new PriceMonitor(deps);
+
+    // Should not throw despite the position being reported closed —
+    // confirms the forget() path runs without error.
+    await expect(monitor.tick()).resolves.toBeUndefined();
   });
 });

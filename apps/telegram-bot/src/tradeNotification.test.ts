@@ -214,6 +214,19 @@ describe('sendTradeNotificationPhoto', () => {
     );
   });
 
+  it('sends the raw file_id string directly (no InputFile wrap) when reusing a previously-uploaded photo', async () => {
+    const sendPhoto = vi.fn().mockResolvedValue({ message_id: 2 });
+    const bot = { api: { sendPhoto, sendMessage: vi.fn() } } as never;
+
+    await sendTradeNotificationPhoto(bot, 'chat1', 'caption text', { fileId: 'AgACAgFILEID' });
+
+    expect(sendPhoto).toHaveBeenCalledWith(
+      'chat1',
+      'AgACAgFILEID',
+      expect.objectContaining({ caption: 'caption text', parse_mode: 'Markdown' }),
+    );
+  });
+
   it('falls back to sendMessage with the same caption text when no photo is available', async () => {
     const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
     const bot = { api: { sendPhoto: vi.fn(), sendMessage } } as never;

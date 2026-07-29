@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { calculateOpportunityScore, type OpportunityScoreWeights } from './opportunityScore.js';
+import {
+  bandLiquidityDepthScore,
+  calculateOpportunityScore,
+  type OpportunityScoreWeights,
+} from './opportunityScore.js';
 
 const DEFAULT_WEIGHTS: OpportunityScoreWeights = {
   safetyWeightBps: 5000,
@@ -7,6 +11,7 @@ const DEFAULT_WEIGHTS: OpportunityScoreWeights = {
   walletWeightBps: 0,
   socialWeightBps: 0,
   aiWeightBps: 5000,
+  liquidityDepthWeightBps: 0,
 };
 
 describe('calculateOpportunityScore', () => {
@@ -44,6 +49,7 @@ describe('calculateOpportunityScore', () => {
       walletWeightBps: 0,
       socialWeightBps: 0,
       aiWeightBps: 0,
+      liquidityDepthWeightBps: 0,
     };
     const result = calculateOpportunityScore(
       { safetyScore: 10, momentumScore: 55, aiScore: 90 },
@@ -59,6 +65,7 @@ describe('calculateOpportunityScore', () => {
       walletWeightBps: 0,
       socialWeightBps: 0,
       aiWeightBps: 0,
+      liquidityDepthWeightBps: 0,
     };
     const result = calculateOpportunityScore({ safetyScore: 90 }, weights);
     expect(result.finalScore).toBe(0);
@@ -69,5 +76,45 @@ describe('calculateOpportunityScore', () => {
     const result = calculateOpportunityScore(components, DEFAULT_WEIGHTS);
     expect(result.breakdown).toEqual(components);
     expect(result.weightsUsed).toEqual(DEFAULT_WEIGHTS);
+  });
+
+  it('liquidityDepthScore defaults to 0 weight — inert until an operator turns it on', () => {
+    const withLiquidity = calculateOpportunityScore(
+      { safetyScore: 100, aiScore: 60, liquidityDepthScore: 0 },
+      DEFAULT_WEIGHTS,
+    );
+    const without = calculateOpportunityScore({ safetyScore: 100, aiScore: 60 }, DEFAULT_WEIGHTS);
+    expect(withLiquidity.finalScore).toBeCloseTo(without.finalScore, 8);
+  });
+
+  it('liquidityDepthScore contributes once its weight is raised above 0', () => {
+    const weights: OpportunityScoreWeights = {
+      ...DEFAULT_WEIGHTS,
+      safetyWeightBps: 5000,
+      aiWeightBps: 0,
+      liquidityDepthWeightBps: 5000,
+    };
+    const result = calculateOpportunityScore(
+      { safetyScore: 100, liquidityDepthScore: 40 },
+      weights,
+    );
+    expect(result.finalScore).toBeCloseTo(70, 8);
+  });
+});
+
+describe('bandLiquidityDepthScore', () => {
+  it('bands real liquidity into a coarse, transparent 0-100 score', () => {
+    expect(bandLiquidityDepthScore(0)).toBe(0);
+    expect(bandLiquidityDepthScore(500)).toBe(10);
+    expect(bandLiquidityDepthScore(5_000)).toBe(30);
+    expect(bandLiquidityDepthScore(25_000)).toBe(60);
+    expect(bandLiquidityDepthScore(100_000)).toBe(85);
+    expect(bandLiquidityDepthScore(1_000_000)).toBe(100);
+  });
+
+  it('treats a negative or non-finite value as 0 liquidity rather than throwing', () => {
+    expect(bandLiquidityDepthScore(-100)).toBe(0);
+    expect(bandLiquidityDepthScore(NaN)).toBe(0);
+    expect(bandLiquidityDepthScore(Infinity)).toBe(0);
   });
 });

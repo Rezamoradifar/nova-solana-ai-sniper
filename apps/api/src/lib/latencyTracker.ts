@@ -128,11 +128,16 @@ class LatencyTracker {
     trace.marks.set(stage, timestamp);
   }
 
-  finish(traceId: string | undefined, outcome: 'success' | 'failure'): void {
-    if (!traceId) return;
+  /** Returns the just-completed record (undefined for an unknown/empty
+   * trace) so a caller can pull a same-tick summary (see
+   * getTraceLatencySummary below) without a second lookup through
+   * getCompleted() — purely additive, every existing caller that ignores
+   * the return value is unaffected. */
+  finish(traceId: string | undefined, outcome: 'success' | 'failure'): CompletedTrace | undefined {
+    if (!traceId) return undefined;
     const trace = this.active.get(traceId);
     this.active.delete(traceId);
-    if (!trace || trace.marks.size === 0) return;
+    if (!trace || trace.marks.size === 0) return undefined;
 
     const timestamps = [...trace.marks.values()];
     const record: CompletedTrace = {
@@ -150,6 +155,7 @@ class LatencyTracker {
     if (this.completedTraces.length > LatencyTracker.MAX_COMPLETED) {
       this.completedTraces.shift();
     }
+    return record;
   }
 
   getCompleted(): readonly CompletedTrace[] {
@@ -172,6 +178,34 @@ export interface StageStats {
   medianMs: number;
   p95Ms: number;
   maxMs: number;
+}
+
+export interface TraceLatencySummary {
+  detectionLatencyMs?: number;
+  buyLatencyMs?: number;
+}
+
+/**
+ * Logging enrichment (2026-07-29, requirement #7): a same-trace summary for
+ * merging straight into the BUY EXECUTED log line, computed from the marks
+ * `finish()` just returned — no second lookup, no aggregation across other
+ * traces (that's what computeLatencyReport below is for). Undefined fields
+ * mean the relevant marks were never both recorded for this trace (e.g. a
+ * caller that skipped latencyTracker.start entirely) — never a fabricated 0.
+ */
+export function getTraceLatencySummary(record: CompletedTrace | undefined): TraceLatencySummary {
+  if (!record) return {};
+  const { token_detected, buy_submitted, position_opened } = record.marks;
+  return {
+    detectionLatencyMs:
+      token_detected !== undefined && buy_submitted !== undefined
+        ? buy_submitted - token_detected
+        : undefined,
+    buyLatencyMs:
+      buy_submitted !== undefined && position_opened !== undefined
+        ? position_opened - buy_submitted
+        : undefined,
+  };
 }
 
 /** Nearest-rank percentile over a pre-sorted-ascending array — deterministic, no interpolation needed for this use. */

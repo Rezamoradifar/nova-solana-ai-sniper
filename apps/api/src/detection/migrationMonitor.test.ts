@@ -21,6 +21,14 @@ describe('mapDexIdToDex', () => {
     expect(mapDexIdToDex('meteora-dlmm')).toBe('METEORA');
   });
 
+  it('maps the 4 detection-only venues added 2026-07-29 (no monitor/executor, labeling only)', () => {
+    expect(mapDexIdToDex('lifinity')).toBe('LIFINITY');
+    expect(mapDexIdToDex('fluxbeam')).toBe('FLUXBEAM');
+    expect(mapDexIdToDex('openbook')).toBe('OPENBOOK');
+    expect(mapDexIdToDex('openbook-v2')).toBe('OPENBOOK');
+    expect(mapDexIdToDex('phoenix')).toBe('PHOENIX');
+  });
+
   it('returns undefined instead of guessing on an unrecognized or absent dexId', () => {
     expect(mapDexIdToDex('some-new-dex')).toBeUndefined();
     expect(mapDexIdToDex(undefined)).toBeUndefined();

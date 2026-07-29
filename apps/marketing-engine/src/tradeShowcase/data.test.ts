@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   fetchShowcaseEligibleTrades,
-  fetchSubscribedTelegramIds,
+  resolveShowcaseTradeByPositionId,
   markTradeShowcased,
 } from './data.js';
 
@@ -155,17 +155,48 @@ describe('fetchShowcaseEligibleTrades — real ROI/PnL computation', () => {
   });
 });
 
-describe('fetchSubscribedTelegramIds', () => {
-  it('returns every telegramId, regardless of SnipeConfig activity', async () => {
-    const findMany = vi.fn().mockResolvedValue([{ telegramId: 'chat1' }, { telegramId: 'chat2' }]);
-    const prisma = { user: { findMany } } as never;
+describe('resolveShowcaseTradeByPositionId (2026-07-29, broadcast worker chart re-resolution)', () => {
+  function fakePrismaForOnePosition(
+    position: ReturnType<typeof fakePosition> | null,
+    sellTrades: Array<{
+      createdAt: Date;
+      amountSol: number;
+      priceUsd: number | null;
+      txSignature: string | null;
+    }> = [],
+  ) {
+    return {
+      position: { findUnique: vi.fn().mockResolvedValue(position) },
+      trade: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue(sellTrades),
+      },
+    } as never;
+  }
 
-    const ids = await fetchSubscribedTelegramIds(prisma);
+  it('resolves a specific position by id, independent of showcase-eligibility filtering', async () => {
+    const prisma = fakePrismaForOnePosition(fakePosition(), [
+      {
+        createdAt: new Date('2026-07-27T10:29:00Z'),
+        amountSol: 0.15,
+        priceUsd: 1,
+        txSignature: 'sellSig',
+      },
+    ]);
 
-    expect(ids).toEqual(['chat1', 'chat2']);
-    expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { telegramId: { not: null } } }),
-    );
+    const trade = await resolveShowcaseTradeByPositionId(prisma, 'pos1');
+
+    expect(trade?.positionId).toBe('pos1');
+  });
+
+  it('returns undefined when the position does not exist', async () => {
+    const prisma = fakePrismaForOnePosition(null);
+    expect(await resolveShowcaseTradeByPositionId(prisma, 'missing')).toBeUndefined();
+  });
+
+  it('returns undefined when no confirmed sell trade can be found, same data-integrity guard as the eligibility path', async () => {
+    const prisma = fakePrismaForOnePosition(fakePosition(), []);
+    expect(await resolveShowcaseTradeByPositionId(prisma, 'pos1')).toBeUndefined();
   });
 });
 

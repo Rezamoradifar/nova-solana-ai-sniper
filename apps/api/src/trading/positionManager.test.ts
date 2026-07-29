@@ -363,17 +363,21 @@ describe('PositionManager Institutional Mode — Emergency Exit Engine dev-walle
     );
   });
 
-  it('never resolves a dev wallet for a non-institutional buy', async () => {
+  it('also resolves a dev wallet for a non-institutional buy (2026-07-28: EmergencyExitMonitor now watches every position, not just institutional ones)', async () => {
+    vi.mocked(getTopHolder).mockResolvedValueOnce({
+      address: 'TopHolderWallet111111111111111111111111111',
+      amountRaw: 123_456_789n,
+    });
     const { manager, positionCreate } = fakeOpenPositionSetup();
 
-    await manager.openPosition(BASE_PARAMS);
+    await manager.openPosition({ ...BASE_PARAMS, mint: VALID_MINT });
 
-    expect(getTopHolder).not.toHaveBeenCalled();
+    expect(getTopHolder).toHaveBeenCalled();
     expect(positionCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          devWalletAddress: undefined,
-          devWalletAmountRawAtEntry: undefined,
+          devWalletAddress: 'TopHolderWallet111111111111111111111111111',
+          devWalletAmountRawAtEntry: '123456789',
         }),
       }),
     );

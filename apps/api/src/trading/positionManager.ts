@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { Connection, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import { getMint } from '@solana/spl-token';
-import type { Dex, PrismaClient } from '@prisma/client';
+import type { Dex, Prisma, PrismaClient } from '@prisma/client';
 import { unsealKeypair, type Logger } from '@nova/shared';
 import type { NotificationService } from '@nova/telegram-bot';
 import { JupiterClient, SOL_MINT, type PriorityLevel } from '../solana/jupiter.js';
@@ -26,7 +26,7 @@ import {
 import { computeSellRetryBackoffMs } from './sellRetryBackoff.js';
 import { computeTrailingStopDisplay, defaultExitParams } from './adaptiveTrailingStop.js';
 import { eventBus } from '../lib/eventBus.js';
-import { latencyTracker } from '../lib/latencyTracker.js';
+import { latencyTracker, getTraceLatencySummary } from '../lib/latencyTracker.js';
 import { TtlCache } from '../lib/ttlCache.js';
 import { TradingSafety, SafetyCheckError } from './safety.js';
 import {
@@ -38,6 +38,11 @@ import {
   computeInstitutionalTrailingStopPriceUsd,
   INSTITUTIONAL_STOP_LOSS_PERCENT,
 } from './institutionalTrailingStop.js';
+import {
+  evaluateTp1TrailingStrategy,
+  DEFAULT_TP1_TRAILING_CONFIG,
+  type Tp1TrailingConfig,
+} from './tp1TrailingStrategy.js';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const DEFAULT_MAX_PRIORITY_FEE_LAMPORTS = 1_000_000;
@@ -178,6 +183,13 @@ export interface OpenPositionParams {
   trailingStopPercent?: number;
   /** Optional exit strategy — see adaptiveTrailingStop.ts. Frozen onto the Position at open time. */
   trailingStopPreset?: string;
+  /** TP1 / Breakeven / Trailing exit strategy (2026-07-28/29) — 'tp1_trailing_v1'
+   * or undefined (today's exact unchanged behavior). Frozen onto the
+   * Position at open time, same convention as trailingStopPreset. Mutually
+   * exclusive with trailingStopPreset/institutionalModeEnabled in practice
+   * (autoTrader.ts only ever sets one), though this method itself doesn't
+   * enforce that — it just freezes whatever the caller passed. */
+  exitStrategy?: string;
   /** Display-only, for the BUY trade card — the score that actually gated this buy. */
   aiScore?: number;
   /** Institutional Mode — "max 3 simultaneous positions," see safety.ts's CheckOpenParams. */
@@ -385,6 +397,17 @@ export class PositionManager {
      */
     private readonly sellPermanentRetryBackoffBaseMs: number = 60_000,
     private readonly sellPermanentRetryBackoffMaxMs: number = 1_800_000,
+    /**
+     * TP1 / Breakeven / Trailing exit strategy (2026-07-28) — same
+     * double-opt-in convention as institutionalModeGloballyEnabled above:
+     * defaults false, so every existing caller/test that omits this gets
+     * exactly today's checkAndMaybeClose behavior even for a position whose
+     * exitStrategy happens to be set. exitV2Config bundles the operator-
+     * tunable numeric knobs (see tp1TrailingStrategy.ts's own doc comment on
+     * why this is one object rather than 7 more positional params).
+     */
+    private readonly exitStrategyV2GloballyEnabled: boolean = false,
+    private readonly exitV2Config: Tp1TrailingConfig = DEFAULT_TP1_TRAILING_CONFIG,
   ) {}
 
   /**
@@ -1147,32 +1170,32 @@ export class PositionManager {
       );
     }
 
-    // Emergency Exit Engine's "developer wallet" dump proxy — resolved only
-    // for institutional positions (the only ones emergencyExitMonitor.ts
-    // watches), best-effort: a failure here never blocks the buy, it just
-    // means the dev-wallet-dump check is unavailable for this position (see
-    // schema.prisma's devWalletAddress doc comment on the real limitation —
-    // this is the largest real holder, not a verified deployer identity).
-    // Only the bonding-curve vault is excluded (cheap, no RPC) — this
-    // function has no dex/poolAddress to also exclude a post-migration AMM
-    // pool's vaults the way riskAnalyzer.ts's resolveExcludedVaultAddresses
-    // does, a known imprecision for entries that happen post-migration.
+    // Emergency Exit Engine's "developer wallet" dump proxy — resolved for
+    // every position (2026-07-28: previously institutional-mode-only, but
+    // EmergencyExitMonitor now watches every OPEN position, not just
+    // institutional ones — see its own doc comment), best-effort: a failure
+    // here never blocks the buy, it just means the dev-wallet-dump check is
+    // unavailable for this position (see schema.prisma's devWalletAddress doc
+    // comment on the real limitation — this is the largest real holder, not a
+    // verified deployer identity). Only the bonding-curve vault is excluded
+    // (cheap, no RPC) — this function has no dex/poolAddress to also exclude
+    // a post-migration AMM pool's vaults the way riskAnalyzer.ts's
+    // resolveExcludedVaultAddresses does, a known imprecision for entries
+    // that happen post-migration.
     let devWalletAddress: string | undefined;
     let devWalletAmountRawAtEntry: string | undefined;
-    if (params.institutionalModeEnabled) {
-      try {
-        const excludeAddresses = [getBondingCurveVaultAta(new PublicKey(params.mint)).toBase58()];
-        const topHolder = await getTopHolder(this.connection, params.mint, excludeAddresses);
-        if (topHolder) {
-          devWalletAddress = topHolder.address;
-          devWalletAmountRawAtEntry = topHolder.amountRaw.toString();
-        }
-      } catch (err) {
-        this.logger.debug(
-          { mint: params.mint, err },
-          'dev-wallet-proxy resolution failed at open — emergency exit dev-dump signal unavailable for this position',
-        );
+    try {
+      const excludeAddresses = [getBondingCurveVaultAta(new PublicKey(params.mint)).toBase58()];
+      const topHolder = await getTopHolder(this.connection, params.mint, excludeAddresses);
+      if (topHolder) {
+        devWalletAddress = topHolder.address;
+        devWalletAmountRawAtEntry = topHolder.amountRaw.toString();
       }
+    } catch (err) {
+      this.logger.debug(
+        { mint: params.mint, err },
+        'dev-wallet-proxy resolution failed at open — emergency exit dev-dump signal unavailable for this position',
+      );
     }
 
     const tradeData = {
@@ -1207,6 +1230,7 @@ export class PositionManager {
       stopLossIsSystemDefault: isSystemDefault,
       trailingStopPercent: params.trailingStopPercent ?? fallbackExit?.trailingStopPercent,
       trailingStopPreset: params.trailingStopPreset ?? (fallbackExit ? 'balanced' : undefined),
+      exitStrategy: params.exitStrategy,
       isPaperTrade: this.paperTrading,
       // Institutional Mode — frozen at open time, same convention as
       // trailingStopPreset above. originalAmountToken/remainingAmountToken
@@ -1266,7 +1290,14 @@ export class PositionManager {
       });
 
     latencyTracker.mark(traceId, 'position_opened');
-    latencyTracker.finish(traceId, 'success');
+    const latencyRecord = latencyTracker.finish(traceId, 'success');
+
+    // Logging enrichment (2026-07-29, requirement #7's detection/buy latency
+    // fields) — merges the same trace latencyTracker was already recording
+    // (see latencyTracker.ts's own doc comment: measurement-only, never
+    // affects control flow) directly into this line rather than requiring a
+    // separate report lookup to answer "how long did this specific buy take."
+    const { detectionLatencyMs, buyLatencyMs } = getTraceLatencySummary(latencyRecord);
 
     this.logger.info(
       {
@@ -1275,6 +1306,9 @@ export class PositionManager {
         signature,
         walletId: params.walletId,
         mint: params.mint,
+        entryPriceUsd,
+        detectionLatencyMs,
+        buyLatencyMs,
       },
       `BUY EXECUTED\nSignature:\n${signature}`,
     );
@@ -1348,6 +1382,11 @@ export class PositionManager {
     currentPriceUsd: number,
     encryptedSecret: string,
     encryptionKey: string,
+    /** volatilityStdDevPercent: rolling stddev of recent percent-returns for
+     * this position (see priceVolatilityTracker.ts), only meaningful for a
+     * tp1_trailing_v1 position — optional so every existing call site/test
+     * stays source-compatible without passing it. */
+    opts?: { volatilityStdDevPercent?: number },
   ) {
     const position = await this.prisma.position.findUniqueOrThrow({
       where: { id: positionId },
@@ -1416,6 +1455,19 @@ export class PositionManager {
         currentPriceUsd,
         encryptedSecret,
         encryptionKey,
+      );
+    }
+
+    const usesTp1TrailingStrategy =
+      position.exitStrategy === 'tp1_trailing_v1' && this.exitStrategyV2GloballyEnabled;
+
+    if (usesTp1TrailingStrategy) {
+      return this.checkAndMaybeCloseTp1Trailing(
+        position,
+        currentPriceUsd,
+        encryptedSecret,
+        encryptionKey,
+        opts?.volatilityStdDevPercent,
       );
     }
 
@@ -1563,6 +1615,96 @@ export class PositionManager {
       data: { highWaterMarkUsd: decision.newHighWaterMarkUsd },
     });
     return { closed: false as const };
+  }
+
+  /**
+   * TP1 / Breakeven / Trailing exit strategy's own tick evaluation
+   * (2026-07-28) — a new, dedicated path, deliberately separate from
+   * checkAndMaybeCloseInstitutional above (see tp1TrailingStrategy.ts's own
+   * doc comment on why this isn't built on Institutional Mode's machinery).
+   * Delegates every actual decision to the pure evaluateTp1TrailingStrategy
+   * — this method only translates its result into DB writes/real sells,
+   * exactly the same "pure decision, impure execution" split every other
+   * exit path in this class already follows.
+   */
+  private async checkAndMaybeCloseTp1Trailing(
+    position: Prisma.PositionGetPayload<{ include: { token: true } }>,
+    currentPriceUsd: number,
+    encryptedSecret: string,
+    encryptionKey: string,
+    volatilityStdDevPercent: number | undefined,
+  ) {
+    const action = evaluateTp1TrailingStrategy({
+      entryPriceUsd: position.entryPriceUsd,
+      currentPriceUsd,
+      highWaterMarkUsd: position.highWaterMarkUsd ?? position.entryPriceUsd,
+      initialStopLossPercent: position.stopLossPercent ?? this.exitV2Config.initialStopLossPercent,
+      breakevenStopLossPercent: this.exitV2Config.breakevenStopLossPercent,
+      tp1RoiPercent: this.exitV2Config.tp1RoiPercent,
+      tp1SellFraction: this.exitV2Config.tp1SellFraction,
+      baseTrailingPercent: this.exitV2Config.baseTrailingPercent,
+      trailingMinPercent: this.exitV2Config.trailingMinPercent,
+      trailingMaxPercent: this.exitV2Config.trailingMaxPercent,
+      volatilityReferenceStdDevPercent: this.exitV2Config.volatilityReferenceStdDevPercent,
+      volatilityStdDevPercent,
+      state: { trailingActivatedAt: position.trailingActivatedAt?.getTime() ?? null },
+    });
+
+    if (action.type === 'none') {
+      await this.prisma.position.update({
+        where: { id: position.id },
+        data: { highWaterMarkUsd: action.newHighWaterMarkUsd },
+      });
+      return { closed: false as const };
+    }
+
+    if (action.type === 'close') {
+      return this.closePosition(position.id, position.walletId, encryptedSecret, encryptionKey, {
+        currentPriceUsd,
+        reason: action.reason,
+      });
+    }
+
+    // 'tp1_partial_exit' — sell the configured fraction via the existing,
+    // generic (no institutional-specific logic) partial-sell path, then move
+    // the stop-loss to breakeven and activate trailing.
+    const originalAmountToken = position.originalAmountToken ?? position.amountToken;
+    const sellAmountToken = Math.floor(originalAmountToken * action.sellFraction);
+    const TP1_TIER_INDEX = 0; // this strategy only ever has one partial-exit event.
+
+    const result = await this.executePartialSell(
+      position.id,
+      position.walletId,
+      TP1_TIER_INDEX,
+      sellAmountToken,
+      currentPriceUsd,
+      encryptedSecret,
+      encryptionKey,
+    );
+
+    if (result.sold) {
+      const trailingActivatedAt = new Date();
+      await this.prisma.position.update({
+        where: { id: position.id },
+        data: {
+          stopLossPercent: this.exitV2Config.breakevenStopLossPercent,
+          stopLossIsSystemDefault: false,
+          trailingActivatedAt,
+          highWaterMarkUsd: action.newHighWaterMarkUsd,
+        },
+      });
+      this.logger.info(
+        {
+          positionId: position.id,
+          mint: position.token.mint,
+          trailingActivatedAt,
+          breakevenStopLossPercent: this.exitV2Config.breakevenStopLossPercent,
+        },
+        'TRAILING ACTIVATED',
+      );
+    }
+
+    return result;
   }
 
   /**
@@ -1854,8 +1996,27 @@ export class PositionManager {
       },
     });
 
+    // Logging enrichment (2026-07-29, requirement #7's "remaining position"
+    // field) — remainingPositionPercent was previously only computed later,
+    // for notifyPartialExit's payload; hoisted here so both the log line and
+    // that notification use the same value instead of two copies of the
+    // same formula.
+    const remainingPositionPercent =
+      ((position.originalAmountToken ?? position.amountToken) > 0
+        ? Math.max(0, newRemainingAmountToken) /
+          (position.originalAmountToken ?? position.amountToken)
+        : 0) * 100;
+
     this.logger.info(
-      { positionId, tierIndex, sellAmountToken, signature, realizedPnlUsdThisTier },
+      {
+        positionId,
+        tierIndex,
+        sellAmountToken,
+        signature,
+        realizedPnlUsdThisTier,
+        remainingAmountToken: updated.remainingAmountToken,
+        remainingPositionPercent,
+      },
       'PARTIAL EXIT EXECUTED',
     );
 
@@ -1889,11 +2050,7 @@ export class PositionManager {
           ? ((currentPriceUsd - position.entryPriceUsd) / position.entryPriceUsd) * 100
           : 0,
       realizedPnlUsd: realizedPnlUsdThisTier,
-      remainingPositionPercent:
-        ((position.originalAmountToken ?? position.amountToken) > 0
-          ? Math.max(0, newRemainingAmountToken) /
-            (position.originalAmountToken ?? position.amountToken)
-          : 0) * 100,
+      remainingPositionPercent,
       isPaperTrade: this.paperTrading,
     });
 
@@ -2284,8 +2441,32 @@ export class PositionManager {
     latencyTracker.mark(traceId, 'position_closed');
     latencyTracker.finish(traceId, 'success');
 
+    // Logging enrichment (2026-07-29, requirement #7): this line used to
+    // carry only {positionId, signature, reason, realizedPnlUsd} — far
+    // thinner than the BUY EXECUTED line gets. roiPercent/holdingTimeMs here
+    // are a simple, single-leg computation (entry vs. this exit's price/time)
+    // — deliberately NOT the more elaborate multi-leg sum the sell-card
+    // notification below computes (which needs extra DB queries for prior
+    // partial-exit legs) — kept independent so this log line can never be
+    // blocked by, or accidentally alter, that proven notification path.
+    const holdingTimeMs = (updated.closedAt ?? new Date()).getTime() - position.createdAt.getTime();
+    const roiPercent =
+      position.entryPriceUsd > 0
+        ? ((exit.currentPriceUsd - position.entryPriceUsd) / position.entryPriceUsd) * 100
+        : 0;
     this.logger.info(
-      { positionId, signature, reason: exit.reason, realizedPnlUsd },
+      {
+        positionId,
+        signature,
+        reason: exit.reason,
+        realizedPnlUsd,
+        entryPriceUsd: position.entryPriceUsd,
+        exitPriceUsd: exit.currentPriceUsd,
+        roiPercent,
+        holdingTimeMs,
+        exitStrategy: position.exitStrategy ?? undefined,
+        trailingActivatedAt: position.trailingActivatedAt ?? undefined,
+      },
       'position closed',
     );
 

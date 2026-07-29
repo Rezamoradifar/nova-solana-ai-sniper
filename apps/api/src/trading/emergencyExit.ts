@@ -1,14 +1,16 @@
 /**
- * Emergency Exit Engine — pure decision logic. Institutional Mode's safety
- * net: unlike the profit-tiered trailing stop (institutionalTrailingStop.ts),
- * which only reacts to price, this reacts to on-chain/liquidity signals that
- * price alone can lag behind or miss entirely (a rug can drain liquidity
- * before DexScreener's price feed even updates). Checked on its own slower
- * interval by emergencyExitMonitor.ts — see EMERGENCY_EXIT_CHECK_INTERVAL_MS's
- * doc comment in packages/shared/src/env.ts for why it's not on every price
- * tick. Every trigger sells 100% of whatever remains (including the
- * moonbag) — "the moonbag may never exit on a normal pullback" (see
- * positionManager.ts) explicitly carves out an exception for this engine.
+ * Emergency Exit Engine — pure decision logic. The system-wide safety net
+ * (2026-07-28: watches every OPEN position, not just Institutional Mode
+ * ones — see emergencyExitMonitor.ts's own doc comment): unlike a
+ * profit-tiered trailing stop, which only reacts to price, this reacts to
+ * on-chain/liquidity signals that price alone can lag behind or miss
+ * entirely (a rug can drain liquidity before DexScreener's price feed even
+ * updates). Checked on its own slower interval by emergencyExitMonitor.ts —
+ * see EMERGENCY_EXIT_CHECK_INTERVAL_MS's doc comment in
+ * packages/shared/src/env.ts for why it's not on every price tick. Every
+ * trigger sells 100% of whatever remains (including an institutional-mode
+ * moonbag, where "the moonbag may never exit on a normal pullback" — see
+ * positionManager.ts — explicitly carves out an exception for this engine).
  *
  * Pure and independently unit-tested, same convention as evaluateExit
  * (exitEngine.ts) and evaluateNextPartialExit (partialExitEngine.ts) — the

@@ -141,17 +141,28 @@ export async function fetchShowcaseEligibleTrades(
   return resolved.filter((t): t is ShowcaseTrade => t !== undefined);
 }
 
-/** Every user who has ever started the bot (telegramId set) — the DM
- * audience for the real-trade broadcast (2026-07-28): every completed real
- * bot trade is sent directly to each of these chats, in addition to the
- * public channel post, independent of whether the user has an active
- * sniper config. */
-export async function fetchSubscribedTelegramIds(prisma: PrismaClient): Promise<string[]> {
-  const users = await prisma.user.findMany({
-    where: { telegramId: { not: null } },
-    select: { telegramId: true },
+/**
+ * Resolves one specific position's trade details by id, independent of
+ * showcase-eligibility filtering (2026-07-29) — used by broadcastWorker.ts to
+ * (re-)resolve a real-data chart photo for a broadcast whose row was already
+ * created (the position is, by construction, already CLOSED/real/non-
+ * honeypot by the time a TradeBroadcast exists for it — enqueueTradeBroadcast
+ * is only ever called from postEligibleTrades, after the same eligibility
+ * check fetchShowcaseEligibleTrades already applied). Returns undefined if
+ * the position can't be found or resolveTradeDetails' own data-integrity
+ * check (a confirmed sell trade must exist) fails — same "never fabricate"
+ * convention as the rest of this module.
+ */
+export async function resolveShowcaseTradeByPositionId(
+  prisma: PrismaClient,
+  positionId: string,
+): Promise<ShowcaseTrade | undefined> {
+  const position = await prisma.position.findUnique({
+    where: { id: positionId },
+    include: { token: true },
   });
-  return users.map((u) => u.telegramId!);
+  if (!position) return undefined;
+  return resolveTradeDetails(prisma, position);
 }
 
 /** Marks a trade as posted — the per-trade dedup guard (Position.showcasePostedAt). */

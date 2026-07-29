@@ -11,6 +11,7 @@ import { loadMarketingEnv } from './config/env.js';
 import { startDailyScheduler } from './runner.js';
 import { MarketDataClient } from './marketData.js';
 import { TradeShowcaseMonitor } from './tradeShowcase/monitor.js';
+import { BroadcastWorker } from './tradeShowcase/broadcastWorker.js';
 import { ActivityFeedMonitor } from './activityFeed/monitor.js';
 
 const logger = createLogger('marketing-engine');
@@ -77,6 +78,7 @@ async function main() {
   // configured and running. See TRADE_SHOWCASE_ENABLED's own env.ts doc
   // comment.
   let tradeShowcase: TradeShowcaseMonitor | undefined;
+  let broadcastWorker: BroadcastWorker | undefined;
   if (env.TRADE_SHOWCASE_ENABLED) {
     tradeShowcase = new TradeShowcaseMonitor({
       prisma,
@@ -95,6 +97,14 @@ async function main() {
       },
       'trade showcase monitor started',
     );
+
+    // Durable broadcast queue (2026-07-29) — TradeShowcaseMonitor is
+    // currently the only producer of TradeBroadcast rows (via
+    // enqueueTradeBroadcast in tradeShowcase/monitor.ts), so the drain
+    // worker only needs to run when showcase posting is itself enabled.
+    broadcastWorker = new BroadcastWorker({ prisma, bot, logger });
+    broadcastWorker.start(env.BROADCAST_WORKER_INTERVAL_MS);
+    logger.info({ intervalMs: env.BROADCAST_WORKER_INTERVAL_MS }, 'broadcast worker started');
   } else {
     logger.info('TRADE_SHOWCASE_ENABLED not set — daily trade showcase is disabled');
   }
@@ -137,6 +147,7 @@ async function main() {
     logger.info('shutting down marketing-engine');
     stop();
     tradeShowcase?.stop();
+    broadcastWorker?.stop();
     activityFeed?.stop();
     process.exit(0);
   };

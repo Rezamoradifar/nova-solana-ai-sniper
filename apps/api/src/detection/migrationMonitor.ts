@@ -14,6 +14,16 @@ import { eventBus } from '../lib/eventBus.js';
  * Maps a DexScreener `dexId` string to our `Dex` enum. Returns undefined rather
  * than guessing on an unrecognized id — an unmapped venue should be retried
  * later (DexScreener may just not have indexed it yet), not misfiled.
+ *
+ * Lifinity/FluxBeam/OpenBook/Phoenix (2026-07-29, detection-only — see
+ * apps/api/src/solana/dex/registry.ts's status table; none of these 4 have a
+ * monitor/liquidity-reader/executor, only this labeling): standard lowercase
+ * protocol-name slugs, matching this function's existing convention for every
+ * other venue. Unlike the other mappings, these were NOT confirmed against a
+ * real live DexScreener pair during implementation — none turned up in
+ * several real token-pair lookups tried (these are comparatively low-volume
+ * Solana venues), so if a real migration to one of these ever fails to map,
+ * check the real dexId DexScreener actually returns for that pool first.
  */
 export function mapDexIdToDex(dexId: string | undefined): Dex | undefined {
   if (!dexId) return undefined;
@@ -24,6 +34,10 @@ export function mapDexIdToDex(dexId: string | undefined): Dex | undefined {
   if (id.startsWith('orca')) return 'ORCA';
   if (id.startsWith('meteora')) return 'METEORA';
   if (id === 'jupiter') return 'JUPITER';
+  if (id.startsWith('lifinity')) return 'LIFINITY';
+  if (id.startsWith('fluxbeam')) return 'FLUXBEAM';
+  if (id.startsWith('openbook')) return 'OPENBOOK';
+  if (id.startsWith('phoenix')) return 'PHOENIX';
   return undefined;
 }
 
