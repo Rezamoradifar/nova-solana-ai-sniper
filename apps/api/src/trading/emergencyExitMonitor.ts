@@ -21,14 +21,26 @@ export interface EmergencyExitMonitorDeps {
 }
 
 /**
- * Institutional Mode's safety net — polls every OPEN, institutionalModeEnabled
- * position on its own (slower — see EMERGENCY_EXIT_CHECK_INTERVAL_MS's doc
- * comment) interval, independent of PriceMonitor's plain TP/SL/trailing-stop
- * loop. Only institutional positions are in scope: this is the same "Force-
- * closes an OPEN institutional-mode position" engine described in
- * packages/shared/src/env.ts's EMERGENCY_EXIT_ENABLED doc comment; a
- * non-institutional position keeps relying solely on its configured TP/SL/
- * trailing-stop, exactly as before this engine existed.
+ * Rug-signal safety net for every OPEN position — polls on its own (slower —
+ * see EMERGENCY_EXIT_CHECK_INTERVAL_MS's doc comment) interval, independent
+ * of PriceMonitor's plain TP/SL/trailing-stop loop.
+ *
+ * Production incident (2026-07-23 audit): a percentage stop-loss can only
+ * fire against a real price tick — a fast/complete liquidity pull leaves
+ * DexScreener and Jupiter both returning nothing at all (not an outlier
+ * price, no tick whatsoever), so neither the ordinary stop-loss nor
+ * priceMonitor.ts's Hard Loss Ceiling fast-path (which itself still needs
+ * one rejected tick to evaluate) can ever trigger — the position just sits
+ * in NO_SELL_ROUTE, escalating only to a MANUAL_REVIEW notification, while
+ * real capital goes to zero with no automatic protection. This engine was
+ * originally scoped to institutionalModeEnabled positions only — but
+ * institutional mode has no position-open wiring yet (see worker.ts), so in
+ * practice it protected nobody. Broadened to every OPEN position: this
+ * reacts to on-chain/liquidity signals (evaluateEmergencyExit — vanished
+ * liquidity, no sell route, re-enabled mint/freeze authority, a collapsed
+ * rule score, or a tracked top-holder dump) that a price-only stop-loss can
+ * lag behind or miss entirely, since a rug can drain liquidity before any
+ * price feed even updates.
  *
  * A trigger sells 100% of whatever remains via the ordinary closePosition
  * path (which already reads the real live wallet balance for a real sell,
@@ -60,8 +72,16 @@ export class EmergencyExitMonitor {
       // no point spending a fresh riskAnalyzer.analyze + Jupiter quote on it
       // every tick when any resulting closePosition call would just be
       // rejected by PositionManager's own sellUnsellable gate anyway.
+      //
+      // 2026-07-23 audit: every OPEN position is in scope now, not just
+      // institutionalModeEnabled ones — see this class's doc comment. The
+      // dev-wallet-dump signal below still only fires for a position that
+      // actually captured a tracked top-holder at entry (institutional-mode
+      // opens today); it's simply skipped (not a false trigger) for every
+      // other position, exactly like evaluateEmergencyExit already handles
+      // an unresolved devWalletAddress.
       const positions = await this.deps.prisma.position.findMany({
-        where: { status: 'OPEN', institutionalModeEnabled: true, sellUnsellable: false },
+        where: { status: 'OPEN', sellUnsellable: false },
         include: { token: true, wallet: true },
       });
 

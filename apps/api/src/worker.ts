@@ -371,15 +371,17 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   });
   priceMonitor.start(app.config.PRICE_CHECK_INTERVAL_MS);
 
-  // Institutional Mode's safety net — force-closes an OPEN institutional-mode
-  // position on a detected liquidity-removal/rug signal, independent of that
-  // position's own TP/SL/trailing-stop. Currently a no-op even when enabled:
-  // institutional mode has no wiring on the position-open side of this
-  // codebase yet (PositionManager's institutionalModeGloballyEnabled always
-  // resolves false below), so no position ever has institutionalModeEnabled
-  // set for this monitor's query to find. Ported and wired now so it's ready
-  // the moment that wiring lands, rather than left as another orphaned
-  // subsystem — see emergencyExitMonitor.ts's own doc comment.
+  // Every OPEN position's rug-signal safety net — force-closes on a detected
+  // liquidity-removal/rug signal, independent of that position's own
+  // TP/SL/trailing-stop. 2026-07-23 audit: previously scoped to
+  // institutionalModeEnabled positions only, which meant it protected nobody
+  // (institutional mode has no position-open wiring yet, so that flag is
+  // never actually set) — a real production loss went to ~99% because a
+  // percentage stop-loss cannot fire once a rug pull leaves both DexScreener
+  // and Jupiter returning no price/route at all to evaluate against. Now
+  // covers every OPEN position — see emergencyExitMonitor.ts's own doc
+  // comment. Defaults on (EMERGENCY_EXIT_ENABLED) precisely because it's
+  // real capital at risk otherwise.
   let emergencyExitMonitor: EmergencyExitMonitor | undefined;
   if (app.config.EMERGENCY_EXIT_ENABLED) {
     emergencyExitMonitor = new EmergencyExitMonitor({
@@ -396,7 +398,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     emergencyExitMonitor.start(app.config.EMERGENCY_EXIT_CHECK_INTERVAL_MS);
   } else {
     app.log.warn(
-      'EMERGENCY_EXIT_ENABLED not set — no rug-signal safety net for institutional positions (currently moot: institutional mode has no open-side wiring yet either)',
+      'EMERGENCY_EXIT_ENABLED=false — NO rug-signal safety net for any open position: a fast/complete liquidity pull can go unprotected all the way to zero, since a percentage stop-loss cannot fire without a price to evaluate. Strongly recommended to leave this on.',
     );
   }
 
