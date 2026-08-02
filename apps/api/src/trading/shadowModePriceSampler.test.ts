@@ -88,6 +88,7 @@ describe('ShadowModePriceSampler', () => {
         smartWalletTokenEntry: { findMany: walletFindMany, update: walletUpdate },
       } as never,
       dexScreener: { getBestSolanaPair } as never,
+      smartWalletTracker: { checkAndRecordExit: vi.fn().mockResolvedValue(false) } as never,
       logger: { debug: vi.fn() } as never,
     });
 
@@ -121,6 +122,7 @@ describe('ShadowModePriceSampler', () => {
         smartWalletTokenEntry: { findMany: walletFindMany, update: walletUpdate },
       } as never,
       dexScreener: { getBestSolanaPair } as never,
+      smartWalletTracker: { checkAndRecordExit: vi.fn().mockResolvedValue(false) } as never,
       logger: { debug: vi.fn() } as never,
     });
 
@@ -130,5 +132,47 @@ describe('ShadowModePriceSampler', () => {
     const data = walletUpdate.mock.calls[0]![0].data;
     expect(data.status).toBe('RUG_FLAGGED');
     expect(data.isRugOrScam).toBe(true);
+  });
+
+  it('tries real exit-detection first and skips the price-based fallback when it finds one', async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const update = vi.fn();
+    const walletRow = {
+      id: 'entry1',
+      mint: 'mint1',
+      walletAddress: 'wallet1',
+      entryAt: new Date(),
+      entryPriceUsd: 1.0,
+      entryAmountSol: 1,
+      isRugOrScam: false,
+    };
+    const walletFindMany = vi.fn().mockResolvedValue([walletRow]);
+    const walletUpdate = vi.fn();
+    const getBestSolanaPair = vi.fn();
+    const checkAndRecordExit = vi.fn().mockResolvedValue(true);
+
+    const sampler = new ShadowModePriceSampler({
+      prisma: {
+        shadowModeDecisionLog: { findMany, update },
+        smartWalletTokenEntry: { findMany: walletFindMany, update: walletUpdate },
+      } as never,
+      dexScreener: { getBestSolanaPair } as never,
+      smartWalletTracker: { checkAndRecordExit } as never,
+      logger: { debug: vi.fn() } as never,
+    });
+
+    await sampler.tick();
+
+    expect(checkAndRecordExit).toHaveBeenCalledWith({
+      id: 'entry1',
+      mint: 'mint1',
+      walletAddress: 'wallet1',
+      entryAt: walletRow.entryAt,
+      entryAmountSol: 1,
+    });
+    // A real exit was recorded (by checkAndRecordExit itself) — this class's
+    // own price-based RUG_FLAGGED/EXPIRED/OPEN update must never overwrite it.
+    expect(getBestSolanaPair).not.toHaveBeenCalled();
+    expect(walletUpdate).not.toHaveBeenCalled();
   });
 });

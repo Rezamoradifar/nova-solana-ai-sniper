@@ -817,10 +817,32 @@ model SmartWalletTokenEntry {
   entryMarketCapUsd        Float?
   /// Early-entry-frequency signal — null when pool-creation time is unknown.
   secondsAfterPoolCreation Int?
+  /// Real, on-chain token amount bought (postTokenBalances - preTokenBalances
+  /// for this wallet at entry) — see extractBuyerFromTransaction.
+  entryAmountTokenUi Float?
+  /// Real, on-chain native SOL spent (fee payer's own balance decrease,
+  /// includes network fee) — never a guess, undefined when the parsed tx
+  /// lacked balance data. The basis for realizedPnlSol/realizedRoiPercent
+  /// below, which are computed from this vs exitAmountSol, not from price.
+  entryAmountSol     Float?
 
   exitSignature      String?
   exitAt              DateTime?
   exitPriceUsd        Float?
+  /// Real, on-chain token amount sold — see extractSellFromTransaction. Only
+  /// ever set for a FULL exit (>= FULL_EXIT_MIN_SOLD_FRACTION of the
+  /// pre-transaction balance) — this schema has one exitSignature/exitAt,
+  /// not a multi-tranche cost-basis ledger.
+  exitAmountTokenUi Float?
+  /// Real, on-chain native SOL received on exit.
+  exitAmountSol      Float?
+  /// SOL-native, not price-derived: exitAmountSol - entryAmountSol. Immune to
+  /// SOL/USD fluctuation between entry and exit, unlike a price-based PnL.
+  realizedPnlSol      Float?
+  /// realizedPnlSol converted at the live SOL/USD price at detection time
+  /// (see smartWalletTracker.ts's checkAndRecordExit) — an approximation of
+  /// the USD value at exit, not a historical-block-time price.
+  realizedPnlUsd      Float?
   realizedRoiPercent  Float?
 
   /// Refreshed periodically (same poller as shadow-mode price sampling,

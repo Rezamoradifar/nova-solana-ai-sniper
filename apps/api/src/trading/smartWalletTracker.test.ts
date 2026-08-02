@@ -5,6 +5,8 @@ import {
   computeSmartMoneyScore,
   applySybilDiscount,
   extractBuyerFromTransaction,
+  extractSellFromTransaction,
+  computeExitPnl,
   MIN_SAMPLE_SIZE_FOR_CONFIDENCE,
   type WalletEntrySummary,
   type WalletBuyEvent,
@@ -199,17 +201,38 @@ function fakeParsedTx(overrides: {
   mint: string;
   preAmount?: number;
   postAmount?: number;
+  owner?: string;
+  otherAccounts?: string[];
+  /** Native lamport balances indexed exactly like accountKeys
+   * ([feePayer, ...otherAccounts]) — omit entirely to simulate a parsed tx
+   * with no balance data at all. */
+  preBalances?: number[];
+  postBalances?: number[];
 }): ParsedTransactionWithMeta {
-  const { feePayer, mint, preAmount = 0, postAmount = 0 } = overrides;
+  const {
+    feePayer,
+    mint,
+    preAmount = 0,
+    postAmount = 0,
+    owner = feePayer,
+    otherAccounts = [],
+    preBalances,
+    postBalances,
+  } = overrides;
   return {
     transaction: {
       message: {
-        accountKeys: [{ pubkey: { toBase58: () => feePayer } }],
+        accountKeys: [
+          { pubkey: { toBase58: () => feePayer } },
+          ...otherAccounts.map((a) => ({ pubkey: { toBase58: () => a } })),
+        ],
       },
     },
     meta: {
-      preTokenBalances: [{ mint, owner: feePayer, uiTokenAmount: { uiAmount: preAmount } }],
-      postTokenBalances: [{ mint, owner: feePayer, uiTokenAmount: { uiAmount: postAmount } }],
+      preTokenBalances: [{ mint, owner, uiTokenAmount: { uiAmount: preAmount } }],
+      postTokenBalances: [{ mint, owner, uiTokenAmount: { uiAmount: postAmount } }],
+      preBalances,
+      postBalances,
     },
   } as unknown as ParsedTransactionWithMeta;
 }
@@ -231,5 +254,90 @@ describe('extractBuyerFromTransaction', () => {
   it('returns undefined when there is no token balance change for this mint at all', () => {
     const tx = fakeParsedTx({ feePayer: 'Nobody', mint: 'OtherMint', preAmount: 0, postAmount: 0 });
     expect(extractBuyerFromTransaction(tx, mint)).toBeUndefined();
+  });
+
+  it('resolves the real on-chain SOL spent from the fee payer native balance delta', () => {
+    const tx = fakeParsedTx({
+      feePayer: 'Buyer1',
+      mint,
+      preAmount: 0,
+      postAmount: 1000,
+      preBalances: [2_000_000_000],
+      postBalances: [1_000_000_000],
+    });
+    const result = extractBuyerFromTransaction(tx, mint);
+    expect(result?.amountSol).toBe(1);
+  });
+
+  it('leaves amountSol undefined when balance arrays are missing rather than guessing', () => {
+    const tx = fakeParsedTx({ feePayer: 'Buyer1', mint, preAmount: 0, postAmount: 1000 });
+    expect(extractBuyerFromTransaction(tx, mint)?.amountSol).toBeUndefined();
+  });
+});
+
+describe('extractSellFromTransaction', () => {
+  const mint = 'MintAddress111';
+
+  it('returns the sold amount and real SOL received for a full exit', () => {
+    const tx = fakeParsedTx({
+      feePayer: 'Relayer',
+      owner: 'Seller1',
+      mint,
+      preAmount: 1000,
+      postAmount: 0,
+      otherAccounts: ['Seller1'],
+      // index 0 = Relayer (fee payer, irrelevant here), index 1 = Seller1.
+      preBalances: [5_000_000_000, 1_000_000_000],
+      postBalances: [4_999_995_000, 1_500_000_000],
+    });
+    const result = extractSellFromTransaction(tx, mint, 'Seller1');
+    expect(result).toEqual({ amountTokenUi: 1000, amountSol: 0.5 });
+  });
+
+  it('returns undefined for a partial sell below FULL_EXIT_MIN_SOLD_FRACTION', () => {
+    const tx = fakeParsedTx({
+      feePayer: 'Seller1',
+      mint,
+      preAmount: 1000,
+      postAmount: 500, // only 50% sold
+    });
+    expect(extractSellFromTransaction(tx, mint, 'Seller1')).toBeUndefined();
+  });
+
+  it('returns undefined when the wallet never held this mint', () => {
+    const tx = fakeParsedTx({ feePayer: 'Seller1', mint, preAmount: 0, postAmount: 0 });
+    expect(extractSellFromTransaction(tx, mint, 'Seller1')).toBeUndefined();
+  });
+
+  it('leaves amountSol undefined when the wallet is not in accountKeys at all', () => {
+    const tx = fakeParsedTx({
+      feePayer: 'Relayer',
+      owner: 'Seller1',
+      mint,
+      preAmount: 1000,
+      postAmount: 0,
+    });
+    const result = extractSellFromTransaction(tx, mint, 'Seller1');
+    expect(result).toEqual({ amountTokenUi: 1000, amountSol: undefined });
+  });
+});
+
+describe('computeExitPnl', () => {
+  it('computes SOL-native PnL/ROI from real SOL in vs real SOL out, never from price', () => {
+    const result = computeExitPnl(1, { amountTokenUi: 1000, amountSol: 1.5 });
+    expect(result).toEqual({ realizedPnlSol: 0.5, realizedRoiPercent: 50 });
+  });
+
+  it('reports a real loss when less SOL came back out than went in', () => {
+    const result = computeExitPnl(2, { amountTokenUi: 1000, amountSol: 0.2 });
+    expect(result).toEqual({ realizedPnlSol: -1.8, realizedRoiPercent: -90 });
+  });
+
+  it('returns undefined when entryAmountSol was never captured (an older entry)', () => {
+    expect(computeExitPnl(null, { amountTokenUi: 1000, amountSol: 1.5 })).toBeUndefined();
+  });
+
+  it('returns undefined when the sell itself has no resolvable SOL amount', () => {
+    expect(computeExitPnl(1, { amountTokenUi: 1000, amountSol: undefined })).toBeUndefined();
   });
 });

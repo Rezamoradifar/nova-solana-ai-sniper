@@ -331,6 +331,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   const smartWalletTracker = new SmartWalletTrackerService({
     prisma: app.prisma,
     connection,
+    dexScreener,
     logger: app.log as never,
   });
   const earlyMomentumDetector = new EarlyMomentumDetectorService({
@@ -379,6 +380,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     shadowModePriceSampler = new ShadowModePriceSampler({
       prisma: app.prisma,
       dexScreener,
+      smartWalletTracker,
       logger: app.log as never,
     });
     shadowModePriceSampler.start();

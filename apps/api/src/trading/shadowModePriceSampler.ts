@@ -1,6 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
 import type { DexScreenerClient, DexScreenerPair } from '../solana/dexscreener.js';
+import type { SmartWalletTrackerService } from './smartWalletTracker.js';
 
 /**
  * Shadow-mode price sampling (Sections 3-4, 2026-07-22). Independent of
@@ -49,9 +50,11 @@ export function isLikelyRugFromSample(pair: DexScreenerPair | undefined): boolea
 
 /** Wallet entries older than this with no exit signal are marked EXPIRED
  * (their unrealizedRoiPercent becomes a "resolved" outcome for
- * computeWalletConfidence purposes) — this codebase has no way to observe an
- * arbitrary tracked wallet's own sell, so an entry can otherwise stay OPEN
- * forever. 7 days is generous for a meme-coin-timescale evaluation. */
+ * computeWalletConfidence purposes) — real exit-detection (see
+ * SmartWalletTrackerService.checkAndRecordExit, tried first every tick below)
+ * is bounded/best-effort, not a guaranteed subscription, so a sell can still
+ * go uncaught indefinitely and an entry would otherwise stay OPEN forever. 7
+ * days is generous for a meme-coin-timescale evaluation. */
 export const WALLET_ENTRY_EVALUATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 const DEFAULT_POLL_INTERVAL_MS = 90_000;
@@ -60,6 +63,10 @@ const BATCH_SIZE = 200;
 export interface ShadowModePriceSamplerDeps {
   prisma: PrismaClient;
   dexScreener: DexScreenerClient;
+  /** Real exit-detection for OPEN wallet entries — see
+   * checkAndRecordExit's own doc comment. Tried once per entry per tick,
+   * before this class's own price-based EXPIRED/RUG_FLAGGED fallback. */
+  smartWalletTracker: SmartWalletTrackerService;
   logger: Logger;
 }
 
@@ -128,6 +135,15 @@ export class ShadowModePriceSampler {
 
     for (const row of rows) {
       try {
+        const exited = await this.deps.smartWalletTracker.checkAndRecordExit({
+          id: row.id,
+          mint: row.mint,
+          walletAddress: row.walletAddress,
+          entryAt: row.entryAt,
+          entryAmountSol: row.entryAmountSol,
+        });
+        if (exited) continue;
+
         const pair = await this.deps.dexScreener.getBestSolanaPair(row.mint);
         const priceUsd = pair?.priceUsd !== undefined ? Number(pair.priceUsd) : undefined;
         const rugLikely = isLikelyRugFromSample(pair);

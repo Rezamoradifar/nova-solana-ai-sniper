@@ -3,9 +3,11 @@ import type {
   ParsedTransactionWithMeta,
   PublicKey as PublicKeyType,
 } from '@solana/web3.js';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import type { PrismaClient, SmartWallet, SmartWalletEntryStatus } from '@prisma/client';
 import type { Logger } from '@nova/shared';
+import type { DexScreenerClient } from '../solana/dexscreener.js';
+import { sharedSolPriceOracle } from '../solana/pumpfunBondingCurve.js';
 
 /**
  * Smart Money Analysis (Sections 3-4, 2026-07-22). Pure decision functions
@@ -216,6 +218,24 @@ export function applySybilDiscount(
 export interface ExtractedBuyEvent {
   walletAddress: string;
   amountTokenUi: number;
+  /** Real, on-chain: the fee payer's own native SOL balance decrease across
+   * this transaction (includes the ~0.000005 SOL network fee, so very
+   * slightly overstates the actual swap cost — same "real number with a
+   * small, documented approximation" convention as this module's other
+   * proxies). undefined when the parsed tx lacked balance data. */
+  amountSol: number | undefined;
+}
+
+/** Fee payer's own native SOL balance decrease (account index 0 — see
+ * extractBuyerFromTransaction's own fee-payer doc comment), lamports
+ * converted to SOL. undefined rather than a guess when balance arrays are
+ * missing. */
+function resolveNativeSolSpent(tx: ParsedTransactionWithMeta): number | undefined {
+  const preLamports = tx.meta?.preBalances?.[0];
+  const postLamports = tx.meta?.postBalances?.[0];
+  if (preLamports === undefined || postLamports === undefined) return undefined;
+  const spent = (preLamports - postLamports) / LAMPORTS_PER_SOL;
+  return spent > 0 ? spent : undefined;
 }
 
 /**
@@ -248,7 +268,86 @@ export function extractBuyerFromTransaction(
   const delta = postAmt - preAmt;
   if (delta <= 0) return undefined;
 
-  return { walletAddress: feePayer, amountTokenUi: delta };
+  return { walletAddress: feePayer, amountTokenUi: delta, amountSol: resolveNativeSolSpent(tx) };
+}
+
+export interface ExtractedSellEvent {
+  amountTokenUi: number;
+  amountSol: number | undefined;
+}
+
+/** Fraction of the pre-transaction balance that must be sold for this to
+ * count as a full exit — allows for dust/rounding, not a partial-sell
+ * cost-basis tracker. SmartWalletTokenEntry has one exitSignature/exitAt,
+ * built for a single-shot exit the same way entrySignature is a single-shot
+ * entry — a sale below this threshold simply isn't detected as an exit yet
+ * (the entry stays OPEN and is re-checked on the next tick). */
+export const FULL_EXIT_MIN_SOLD_FRACTION = 0.95;
+
+/**
+ * Sell-side mirror of extractBuyerFromTransaction, for a SPECIFIC
+ * already-tracked wallet — unlike the buy side (which discovers an unknown
+ * buyer off account index 0, the fee payer), a tracked wallet's own sell
+ * doesn't have to be the one paying the fee, so this looks up whichever
+ * account index actually belongs to `walletAddress`.
+ */
+export function extractSellFromTransaction(
+  tx: ParsedTransactionWithMeta,
+  mint: string,
+  walletAddress: string,
+): ExtractedSellEvent | undefined {
+  const pre = tx.meta?.preTokenBalances ?? [];
+  const post = tx.meta?.postTokenBalances ?? [];
+
+  const preAmt = pre
+    .filter((b) => b.mint === mint && b.owner === walletAddress)
+    .reduce((sum, b) => sum + (b.uiTokenAmount.uiAmount ?? 0), 0);
+  if (preAmt <= 0) return undefined;
+
+  const postAmt = post
+    .filter((b) => b.mint === mint && b.owner === walletAddress)
+    .reduce((sum, b) => sum + (b.uiTokenAmount.uiAmount ?? 0), 0);
+
+  const soldFraction = (preAmt - postAmt) / preAmt;
+  if (soldFraction < FULL_EXIT_MIN_SOLD_FRACTION) return undefined;
+
+  const accountIndex = tx.transaction.message.accountKeys.findIndex(
+    (k) => k.pubkey?.toBase58() === walletAddress,
+  );
+  const preLamports = accountIndex >= 0 ? tx.meta?.preBalances?.[accountIndex] : undefined;
+  const postLamports = accountIndex >= 0 ? tx.meta?.postBalances?.[accountIndex] : undefined;
+  const amountSol =
+    preLamports !== undefined && postLamports !== undefined && postLamports > preLamports
+      ? (postLamports - preLamports) / LAMPORTS_PER_SOL
+      : undefined;
+
+  return { amountTokenUi: preAmt - postAmt, amountSol };
+}
+
+export interface ExitPnlResult {
+  realizedPnlSol: number;
+  realizedRoiPercent: number;
+}
+
+/**
+ * Pure — SOL-native, never price-derived: realizedPnlSol/realizedRoiPercent
+ * come directly from real SOL out (sell.amountSol) vs real SOL in
+ * (entryAmountSol), immune to SOL/USD fluctuation between entry and exit.
+ * Returns undefined (never marks an exit) when entryAmountSol wasn't
+ * captured (an entry recorded before this field existed) or the sell's own
+ * SOL amount couldn't be resolved — checkAndRecordExit's caller is expected
+ * to leave the entry OPEN for a later tick to retry rather than record a
+ * partial/estimated result.
+ */
+export function computeExitPnl(
+  entryAmountSol: number | null,
+  sell: ExtractedSellEvent,
+): ExitPnlResult | undefined {
+  if (entryAmountSol === null || entryAmountSol <= 0 || sell.amountSol === undefined) {
+    return undefined;
+  }
+  const realizedPnlSol = sell.amountSol - entryAmountSol;
+  return { realizedPnlSol, realizedRoiPercent: (realizedPnlSol / entryAmountSol) * 100 };
 }
 
 export interface ResolvedBuyEvent extends ExtractedBuyEvent {
@@ -273,9 +372,19 @@ const EMPTY_EVALUATION: SmartMoneyEvaluation = {
 /** Bounded per-token lookback — never a network-wide subscription. */
 export const RECENT_BUY_LOOKBACK_LIMIT = 15;
 
+/** Same bounded, non-exhaustive convention as RECENT_BUY_LOOKBACK_LIMIT —
+ * only the mint's RECENT_SELL_LOOKBACK_LIMIT most recent signatures are
+ * checked for a tracked wallet's exit, so a sell that happened a while ago
+ * amid a lot of other trading on the mint can be missed on any single call.
+ * checkAndRecordExit is called on every ShadowModePriceSampler tick (see its
+ * own doc comment), so a real exit gets repeated bounded chances to be
+ * caught rather than needing to land on the first try. */
+export const RECENT_SELL_LOOKBACK_LIMIT = 15;
+
 export interface SmartWalletTrackerDeps {
   prisma: PrismaClient;
   connection: Connection;
+  dexScreener: DexScreenerClient;
   logger: Logger;
 }
 
@@ -366,6 +475,8 @@ export class SmartWalletTrackerService {
           entryAt: new Date(event.timestampMs),
           secondsAfterPoolCreation,
           entryPriceUsd: approxEntryPriceUsd,
+          entryAmountTokenUi: event.amountTokenUi,
+          entryAmountSol: event.amountSol,
         },
         update: {},
       })
@@ -415,6 +526,103 @@ export class SmartWalletTrackerService {
         lastScoredAt: new Date(),
       },
     });
+  }
+
+  /** See RECENT_SELL_LOOKBACK_LIMIT's own doc comment for the bounded,
+   * best-effort search this performs. `afterMs` excludes signatures from
+   * before the entry itself, so a sell can never be attributed to a buy that
+   * hasn't happened yet. */
+  private async resolveSellEvent(
+    mint: string,
+    walletAddress: string,
+    afterMs: number,
+  ): Promise<{ signature: string; timestampMs: number; sell: ExtractedSellEvent } | undefined> {
+    try {
+      const signatures = await this.deps.connection.getSignaturesForAddress(new PublicKey(mint), {
+        limit: RECENT_SELL_LOOKBACK_LIMIT,
+      });
+      const usable = signatures.filter((s) => !s.err && (s.blockTime ?? 0) * 1000 > afterMs);
+      for (const s of usable) {
+        const tx = await this.deps.connection
+          .getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0 })
+          .catch(() => null);
+        if (!tx) continue;
+        const sell = extractSellFromTransaction(tx, mint, walletAddress);
+        if (!sell) continue;
+        return {
+          signature: s.signature,
+          timestampMs: (s.blockTime ?? Math.floor(Date.now() / 1000)) * 1000,
+          sell,
+        };
+      }
+      return undefined;
+    } catch (err) {
+      this.deps.logger.debug(
+        { mint, walletAddress, err },
+        'smartWalletTracker: sell-event resolution failed',
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * Checks one OPEN entry for a real, detected full exit and — if found —
+   * writes real realized numbers, never estimated ones: realizedPnlSol and
+   * realizedRoiPercent come directly from actual SOL out vs actual SOL in
+   * (immune to SOL/USD fluctuation between entry and exit), only converted to
+   * realizedPnlUsd via the live SOL/USD price at detection time (see
+   * sharedSolPriceOracle's own doc comment on why it's a shared singleton).
+   * Returns false — a no-op, entry stays OPEN for a later tick to retry — if
+   * no exit was found this call, or if entryAmountSol wasn't captured (an
+   * entry recorded before this field existed) or the sell's own SOL amount
+   * couldn't be resolved: this never marks an entry EXITED without the real
+   * numbers to back it.
+   */
+  async checkAndRecordExit(entry: {
+    id: string;
+    mint: string;
+    walletAddress: string;
+    entryAt: Date;
+    entryAmountSol: number | null;
+  }): Promise<boolean> {
+    const found = await this.resolveSellEvent(
+      entry.mint,
+      entry.walletAddress,
+      entry.entryAt.getTime(),
+    );
+    if (!found) return false;
+    const pnl = computeExitPnl(entry.entryAmountSol, found.sell);
+    if (!pnl) return false;
+
+    const solPriceUsd = await sharedSolPriceOracle.getPriceUsd(this.deps.dexScreener);
+    const realizedPnlUsd = solPriceUsd !== undefined ? pnl.realizedPnlSol * solPriceUsd : undefined;
+    const exitPriceUsd =
+      solPriceUsd !== undefined && found.sell.amountTokenUi > 0
+        ? (found.sell.amountSol! * solPriceUsd) / found.sell.amountTokenUi
+        : undefined;
+
+    await this.deps.prisma.smartWalletTokenEntry.update({
+      where: { id: entry.id },
+      data: {
+        status: 'EXITED',
+        exitSignature: found.signature,
+        exitAt: new Date(found.timestampMs),
+        exitPriceUsd,
+        exitAmountTokenUi: found.sell.amountTokenUi,
+        exitAmountSol: found.sell.amountSol,
+        realizedRoiPercent: pnl.realizedRoiPercent,
+        realizedPnlSol: pnl.realizedPnlSol,
+        realizedPnlUsd,
+      },
+    });
+
+    void this.recomputeWalletConfidence(entry.walletAddress).catch((err: unknown) =>
+      this.deps.logger.debug(
+        { walletAddress: entry.walletAddress, err },
+        'recomputeWalletConfidence failed',
+      ),
+    );
+    return true;
   }
 
   /**
