@@ -718,3 +718,82 @@ describe('wrapWithMultiProviderFailover — RPC benchmarking (Stage 2, 2026-07-1
     expect(secondary.onLogs).not.toHaveBeenCalled();
   });
 });
+
+describe('wrapWithMultiProviderFailover — call timeout (2026-07-30 incident fix)', () => {
+  // Live production incident, 2026-07-30: a provider that accepted the
+  // request but never responded (not even an error) left callProvider's
+  // returned promise pending forever — no code path existed to ever resolve
+  // or reject it. That hung promise was awaited inside PositionManager's sell
+  // path while holding positionCloseLock, which froze PriceMonitor.tick's
+  // `ticking` re-entrancy guard (Promise.allSettled never settles while one
+  // member never settles) for every open position, not just the stuck one,
+  // for 3h19m — stop-loss simply never got to run again until a human
+  // manually restarted the process. A position that should have stopped out
+  // at -20% closed at -94%. These tests prove a never-settling provider call
+  // can no longer hang forever: it's now treated as a retryable timeout,
+  // exactly like any other transient RPC failure.
+  it('a call that never resolves is treated as a retryable timeout and rotates to the next provider', async () => {
+    const primary = { getLatestBlockhash: vi.fn(() => new Promise(() => {})) }; // never settles
+    const secondary = { getLatestBlockhash: vi.fn().mockResolvedValue({ blockhash: 'abc' }) };
+    const wrapped = wrapWithMultiProviderFailover(
+      [provider('primary', primary), provider('secondary', secondary)],
+      fakeLogger(),
+      { retryDelayMs: 0, callTimeoutMs: 10 },
+    );
+
+    const result = await (wrapped as unknown as typeof secondary).getLatestBlockhash();
+
+    expect(result).toEqual({ blockhash: 'abc' });
+    expect(secondary.getLatestBlockhash).toHaveBeenCalledTimes(1);
+  });
+
+  it('never leaves the call pending forever even when every provider hangs', async () => {
+    const primary = { sendTransaction: vi.fn((..._args: unknown[]) => new Promise(() => {})) };
+    const secondary = { sendTransaction: vi.fn((..._args: unknown[]) => new Promise(() => {})) };
+    const wrapped = wrapWithMultiProviderFailover(
+      [provider('primary', primary), provider('secondary', secondary)],
+      fakeLogger(),
+      { retryDelayMs: 0, callTimeoutMs: 10 },
+    );
+
+    await expect((wrapped as unknown as typeof primary).sendTransaction('tx')).rejects.toThrow(
+      /timed out/i,
+    );
+  });
+
+  it('confirmTransaction is governed by confirmTransactionTimeoutMs, not the shorter callTimeoutMs', async () => {
+    // Resolves after 50ms — longer than callTimeoutMs (10ms) but well within
+    // confirmTransactionTimeoutMs (200ms). If confirmTransaction were
+    // (incorrectly) subject to callTimeoutMs like every other method, this
+    // provider would time out and the call would rotate to secondary; it
+    // must instead succeed on primary without ever touching secondary.
+    const primary = {
+      confirmTransaction: vi.fn(
+        (..._args: unknown[]) =>
+          new Promise((resolve) => setTimeout(() => resolve({ value: { err: null } }), 50)),
+      ),
+    };
+    const secondary = { confirmTransaction: vi.fn() };
+    const wrapped = wrapWithMultiProviderFailover(
+      [provider('primary', primary), provider('secondary', secondary)],
+      fakeLogger(),
+      { retryDelayMs: 0, callTimeoutMs: 10, confirmTransactionTimeoutMs: 200 },
+    );
+
+    const result = await (wrapped as unknown as typeof primary).confirmTransaction('sig');
+
+    expect(result).toEqual({ value: { err: null } });
+    expect(secondary.confirmTransaction).not.toHaveBeenCalled();
+  });
+
+  it('a call that resolves well within the timeout is unaffected', async () => {
+    const primary = { getBalance: vi.fn().mockResolvedValue(123) };
+    const wrapped = wrapWithMultiProviderFailover([provider('primary', primary)], fakeLogger(), {
+      callTimeoutMs: 5_000,
+    });
+
+    const result = await (wrapped as unknown as typeof primary).getBalance('pubkey');
+
+    expect(result).toBe(123);
+  });
+});

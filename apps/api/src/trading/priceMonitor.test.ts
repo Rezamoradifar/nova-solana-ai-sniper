@@ -415,6 +415,86 @@ describe('PriceMonitor — concurrent position processing (2026-07-23 USOH incid
   });
 });
 
+describe('PriceMonitor — per-position watchdog (2026-07-30 incident fix)', () => {
+  // Live production incident, 2026-07-30: a sell's underlying RPC call never
+  // resolved or rejected at all (a hung provider with no request timeout —
+  // see resilientConnection.ts's callTimeoutMs, fixed separately). That's a
+  // materially different failure mode than the 2026-07-23 fix above (a slow
+  // or throwing position) — Promise.allSettled's own guarantee to resolve
+  // once every member settles doesn't hold if one member never settles at
+  // all, so `ticking` stayed stuck `true` forever, freezing stop-loss checks
+  // for every open position for 3h19m until a human restarted the process.
+  // This watchdog is defense-in-depth so that failure mode can't recur even
+  // from some future, still-unknown never-settling dependency.
+  it('a position whose check never resolves does not freeze the current tick', async () => {
+    vi.useFakeTimers();
+    try {
+      const stuckPosition = fakePosition({ id: 'pos-stuck' });
+      const okPosition = fakePosition({ id: 'pos-ok' });
+
+      const checkAndMaybeClose = vi.fn(async (positionId: string) => {
+        if (positionId === 'pos-stuck') {
+          return new Promise(() => {}); // never settles — exactly the incident
+        }
+      });
+
+      const deps = buildDeps({}, [stuckPosition, okPosition]);
+      deps.positionManager.checkAndMaybeClose = checkAndMaybeClose as never;
+      const monitor = new PriceMonitor(deps);
+
+      const tickPromise = monitor.tick();
+      await vi.advanceTimersByTimeAsync(120_000);
+      await tickPromise;
+
+      expect(checkAndMaybeClose).toHaveBeenCalledWith(
+        'pos-ok',
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        undefined,
+      );
+      expect(deps.logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ positionId: 'pos-stuck' }),
+        expect.stringContaining('watchdog'),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the re-entrancy guard resets after a watchdog timeout — the next tick is not silently dropped forever', async () => {
+    vi.useFakeTimers();
+    try {
+      const stuckPosition = fakePosition({ id: 'pos-stuck' });
+      const checkAndMaybeClose = vi.fn(async (positionId: string) => {
+        if (positionId === 'pos-stuck') return new Promise(() => {});
+      });
+
+      const deps = buildDeps({}, [stuckPosition]);
+      deps.positionManager.checkAndMaybeClose = checkAndMaybeClose as never;
+      const monitor = new PriceMonitor(deps);
+
+      const findMany = deps.prisma.position.findMany as unknown as ReturnType<typeof vi.fn>;
+
+      const firstTick = monitor.tick();
+      await vi.advanceTimersByTimeAsync(120_000);
+      await firstTick;
+      expect(findMany).toHaveBeenCalledTimes(1);
+
+      // Pre-fix, `ticking` would have been stuck `true` forever here — this
+      // second tick() call would have been a silent, permanent no-op, exactly
+      // as it was in production for 3h19m. (No open positions this time, so
+      // the second tick resolves immediately — the point being tested is
+      // only that it actually runs at all, not the watchdog itself again.)
+      findMany.mockResolvedValueOnce([]);
+      await monitor.tick();
+      expect(findMany).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('PriceMonitor — stop monitoring archived (sellUnsellable) positions (2026-07-26, Phase 6 NO_SELL_ROUTE fix)', () => {
   it("tick's position query excludes sellUnsellable positions, so an archived position is never fetched, priced, or evaluated again", async () => {
     const deps = buildDeps({}, []);

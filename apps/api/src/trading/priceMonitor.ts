@@ -100,6 +100,12 @@ interface MonitoringStateFields {
  * driving it, they're just stored numbers nothing ever reads.
  */
 export class PriceMonitor {
+  /** See tick()'s watchdog fix doc comment. Generously above any legitimate
+   * single-position close attempt (resilientConnection.ts's own
+   * confirmTransaction ceiling is 90s) so it only ever fires for a genuine
+   * hang, never a normal slow confirmation. */
+  private static readonly POSITION_WATCHDOG_MS = 120_000;
+
   private timer: ReturnType<typeof setInterval> | undefined;
   private ticking = false;
   // Root-cause fix (2026-07-18): per-position consecutive-outlier-rejection
@@ -175,9 +181,60 @@ export class PriceMonitor {
       // unverifiedSwapLocks) so processing them concurrently is safe; only
       // the per-tick DB read above and the `this.ticking` re-entrancy guard
       // need to stay tick-level.
-      await Promise.allSettled(openPositions.map((position) => this.processPosition(position)));
+      //
+      // Watchdog fix (2026-07-30 incident): processPosition is now wrapped
+      // with a hard per-position ceiling (see processPositionWithWatchdog)
+      // instead of called directly. Before this, Promise.allSettled's own
+      // guarantee ("resolves once every member settles") was silently
+      // undermined by anything downstream that could await a promise which
+      // never itself settles (a hung RPC call with no timeout, live-verified
+      // 2026-07-30 — see resilientConnection.ts's callTimeoutMs) — one such
+      // position wedged this `ticking` flag true forever, since the `finally`
+      // below only runs once Promise.allSettled resolves. That silently froze
+      // stop-loss/take-profit checks for EVERY open position, not just the
+      // stuck one, for 3h19m in production until a human restarted the
+      // process. The RPC-layer timeout is the real fix; this is deliberate
+      // defense-in-depth so a future hang anywhere else in the chain (a new
+      // dependency without its own timeout, etc.) can never again turn into
+      // an unbounded freeze — it degrades to "this one position's check was
+      // late" instead. positionCloseLock already makes it safe for a slow
+      // processPosition call to keep running in the background after the
+      // watchdog gives up on awaiting it: the next tick's attempt on the same
+      // position is blocked by the lock, never double-processed.
+      await Promise.allSettled(
+        openPositions.map((position) => this.processPositionWithWatchdog(position)),
+      );
     } finally {
       this.ticking = false;
+    }
+  }
+
+  /** See the watchdog fix doc comment on tick() above. */
+  private async processPositionWithWatchdog(
+    position: Parameters<PriceMonitor['processPosition']>[0],
+  ): Promise<void> {
+    let timer: ReturnType<typeof setTimeout>;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `processPosition watchdog timeout after ${PriceMonitor.POSITION_WATCHDOG_MS}ms`,
+            ),
+          ),
+        PriceMonitor.POSITION_WATCHDOG_MS,
+      );
+      (timer as unknown as { unref?: () => void }).unref?.();
+    });
+    try {
+      await Promise.race([this.processPosition(position), timeout]);
+    } catch (err) {
+      this.deps.logger.error(
+        { err, positionId: position.id, mint: position.token.mint },
+        'PriceMonitor: processPosition exceeded watchdog timeout or failed — tick continues without blocking other positions',
+      );
+    } finally {
+      clearTimeout(timer!);
     }
   }
 

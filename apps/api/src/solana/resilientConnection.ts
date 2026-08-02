@@ -220,6 +220,53 @@ export interface ResilientConnectionOptions {
   /** Ceiling on a single benchmark probe before it's treated as a failed
    * sample (doesn't update the latency estimate, doesn't throw). */
   benchmarkTimeoutMs?: number;
+  /**
+   * 2026-07-30 incident fix: ceiling on any single live RPC call (everything
+   * except confirmTransaction, see confirmTransactionTimeoutMs below) before
+   * it's treated as a retryable timeout and the call rotates/retries exactly
+   * like a network error. Before this, callProvider had literally no upper
+   * bound — a provider that accepted the TCP connection but never answered
+   * (not even an error) left the returned promise pending forever. That hung
+   * promise was awaited, un-timed-out, inside PositionManager.closePosition's
+   * sell path, which holds positionCloseLock for its entire duration — so the
+   * lock (and, transitively, PriceMonitor.tick's `ticking` re-entrancy guard,
+   * since Promise.allSettled never settles while one of its members never
+   * settles) stayed stuck until a human manually restarted the process.
+   * Live-verified 2026-07-30: a position's stop-loss fired correctly and then
+   * spent 3h19m completely unable to retry — not because of retryable
+   * errors (those were being classified and retried fine), but because the
+   * 7th attempt never returned control at all — before the process was
+   * killed and restarted, whereupon the position was force-sold 94% below
+   * entry. DexScreener/Jupiter's HTTP clients already use AbortSignal.timeout
+   * for exactly this reason (see dexscreener.ts/jupiter.ts); the raw Solana
+   * Connection had no equivalent.
+   */
+  callTimeoutMs?: number;
+  /**
+   * confirmTransaction legitimately waits out most of a blockhash's validity
+   * window (~60-90s) under normal, non-hung conditions, so it gets its own,
+   * much longer ceiling instead of sharing callTimeoutMs.
+   */
+  confirmTransactionTimeoutMs?: number;
+}
+
+const DEFAULT_CALL_TIMEOUT_MS = 20_000;
+const DEFAULT_CONFIRM_TRANSACTION_TIMEOUT_MS = 90_000;
+
+/** Races `promise` against a timer that rejects with a message matching
+ * RETRYABLE_PATTERNS ('timed out') — so a timeout is classified and
+ * retried/rotated exactly like any other transient RPC failure, not treated
+ * as a distinct case callers need to special-case. Always clears its own
+ * timer, on either outcome, so a fast-resolving call never leaks a pending
+ * timer; the timer is also unref'd so it can never itself keep the process
+ * alive (same convention as the benchmark probe timer above). */
+function withCallTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`RPC call ${label} timed out after ${ms}ms`)), ms);
+    (timer as unknown as { unref?: () => void }).unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -444,7 +491,15 @@ export function wrapWithMultiProviderFailover(
     const fn = (provider.connection as unknown as Record<string, (...a: unknown[]) => unknown>)[
       prop
     ]!;
-    return Promise.resolve(fn.apply(provider.connection, args));
+    const timeoutMs =
+      prop === 'confirmTransaction'
+        ? (options.confirmTransactionTimeoutMs ?? DEFAULT_CONFIRM_TRANSACTION_TIMEOUT_MS)
+        : (options.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS);
+    return withCallTimeout(
+      Promise.resolve(fn.apply(provider.connection, args)),
+      timeoutMs,
+      `${provider.label}.${prop}`,
+    );
   }
 
   /** Applies backoff cooldown and rotates — shared by the rate-limited fast
