@@ -580,18 +580,19 @@ export const envSchema = z.object({
   // polling the User table on every single registration.
   MEMBER_GROWTH_REPORT_INTERVAL_MS: z.coerce.number().min(60_000).default(300_000),
 
-  // EmergencyExitMonitor — the system-wide safety net: force-closes any OPEN
-  // position (2026-07-28: every strategy, not just Institutional Mode — see
-  // emergencyExitMonitor.ts's own doc comment) on a detected liquidity-
-  // removal/rug signal, independent of that position's own TP/SL/trailing-
-  // stop. Defaults off, same convention as the staged profitability flags
-  // above — this engine went from protecting zero real positions to
-  // protecting every OPEN one the moment it's flipped on, so it's
-  // deliberately canaried manually rather than defaulted on as part of that
-  // fix. On-chain/liquidity checks are slower and heavier than a plain price
-  // tick, hence its own, longer interval rather than reusing
-  // PRICE_CHECK_INTERVAL_MS.
-  EMERGENCY_EXIT_ENABLED: booleanFlag(false),
+  // EmergencyExitMonitor — every OPEN position's rug-signal safety net:
+  // force-closes on a detected liquidity-removal/rug signal, independent of
+  // that position's own TP/SL/trailing-stop (see emergencyExitMonitor.ts).
+  // 2026-07-23 audit: previously institutional-mode-only and defaulted off
+  // (same convention as the staged profitability flags above) — but a real
+  // production position went to ~99% loss because a percentage stop-loss
+  // literally cannot fire once a fast/complete liquidity pull leaves every
+  // price source returning nothing to evaluate. Broadened to every OPEN
+  // position and now defaults ON: this is real capital, not a staged/opt-in
+  // profitability experiment. On-chain/liquidity checks are slower and
+  // heavier than a plain price tick, hence its own, longer interval rather
+  // than reusing PRICE_CHECK_INTERVAL_MS.
+  EMERGENCY_EXIT_ENABLED: booleanFlag(true),
   EMERGENCY_EXIT_CHECK_INTERVAL_MS: z.coerce.number().min(15000).default(45000),
 
   // TP1 / Breakeven / Trailing exit strategy (2026-07-28) — a new, dedicated
