@@ -1,4 +1,10 @@
-import type { Bot } from '@nova/telegram-bot';
+import { InlineKeyboard, InputFile } from 'grammy';
+import type { Bot, SendableTradePhoto } from '@nova/telegram-bot';
+import type { ButtonSpec } from './tokenButtons.js';
+
+function isFileId(photo: SendableTradePhoto): photo is { fileId: string } {
+  return 'fileId' in photo;
+}
 
 export interface BrandedSendOptions {
   /** Sent as a photo with `text` as caption when present — the "token logo"
@@ -32,5 +38,65 @@ export async function sendBrandedMessage(
   return bot.api.sendMessage(chatId, text, {
     parse_mode: 'Markdown',
     ...(opts.linkPreviewUrl ? { link_preview_options: { url: opts.linkPreviewUrl } } : {}),
+  });
+}
+
+function buildInlineKeyboard(rows: ButtonSpec[][]): InlineKeyboard | undefined {
+  const nonEmptyRows = rows.filter((row) => row.length > 0);
+  if (nonEmptyRows.length === 0) return undefined;
+  const keyboard = new InlineKeyboard();
+  nonEmptyRows.forEach((row, i) => {
+    for (const button of row) {
+      keyboard.url(button.text, button.url);
+    }
+    if (i < nonEmptyRows.length - 1) keyboard.row();
+  });
+  return keyboard;
+}
+
+/**
+ * Send path for the ecosystemFeed's new categories (2026-07-31) — HTML
+ * `parse_mode` + `sendPhoto` + an inline keyboard, per the feature's
+ * explicit requirement. Deliberately a NEW function alongside
+ * sendBrandedMessage above, not a modification of it — the existing 6
+ * activityFeed categories keep using the untouched Markdown/no-buttons path,
+ * zero regression risk.
+ *
+ * Accepts either a raw locally-generated Buffer (the new tokenStatCard
+ * template, categories 1-4) or a SendableTradePhoto (the Biggest Winners
+ * category reuses @nova/telegram-bot's resolveTradePhoto — the real
+ * GeckoTerminal-chart photo already built for a closed position — rather
+ * than duplicating chart-rendering code), same fileId/buffer branching as
+ * tradeNotification.ts's own sendTradeNotificationPhoto.
+ *
+ * `photo` may be `undefined` (the Biggest Winners category's chart-photo
+ * resolution can fail the same rare way tradeNotification.ts's own
+ * resolveTradePhoto already documents) — falls back to sendMessage with the
+ * same caption/buttons rather than dropping the post entirely.
+ *
+ * Caller is responsible for HTML-escaping any dynamic text in `captionHtml`
+ * (see ecosystemFeed/format.ts's escapeHtml) — this function sends exactly
+ * what it's given.
+ */
+export async function sendBrandedPhotoHtml(
+  bot: Bot,
+  chatId: string,
+  photo: Buffer | SendableTradePhoto | undefined,
+  captionHtml: string,
+  buttonRows: ButtonSpec[][] = [],
+): Promise<{ message_id: number }> {
+  const reply_markup = buildInlineKeyboard(buttonRows);
+  if (!photo) {
+    return bot.api.sendMessage(chatId, captionHtml, { parse_mode: 'HTML', reply_markup });
+  }
+  const source = Buffer.isBuffer(photo)
+    ? new InputFile(photo)
+    : isFileId(photo)
+      ? photo.fileId
+      : new InputFile(photo.buffer);
+  return bot.api.sendPhoto(chatId, source, {
+    caption: captionHtml,
+    parse_mode: 'HTML',
+    reply_markup,
   });
 }

@@ -12,7 +12,10 @@ import { startDailyScheduler } from './runner.js';
 import { MarketDataClient } from './marketData.js';
 import { TradeShowcaseMonitor } from './tradeShowcase/monitor.js';
 import { BroadcastWorker } from './tradeShowcase/broadcastWorker.js';
+import { AdminBroadcastWorker } from './adminBroadcast/adminBroadcastWorker.js';
 import { ActivityFeedMonitor } from './activityFeed/monitor.js';
+import { EcosystemFeedMonitor } from './ecosystemFeed/monitor.js';
+import { createEcosystemConnection } from './discovery/riskScore.js';
 
 const logger = createLogger('marketing-engine');
 
@@ -71,6 +74,20 @@ async function main() {
   });
 
   logger.info('marketing-engine scheduler started');
+
+  // Durable admin-broadcast queue (2026-07-31) — drains one-off announcements
+  // enqueued via `npm run durable-broadcast --workspace apps/api -- <file>`
+  // (see adminBroadcast/broadcastQueue.ts's enqueueAdminBroadcast). Runs
+  // unconditionally (no feature flag): unlike TRADE_SHOWCASE_ENABLED/
+  // ACTIVITY_FEED_ENABLED this worker only ever has work when an operator
+  // explicitly enqueues something, so there is no "silently starts posting on
+  // deploy" risk to gate against.
+  const adminBroadcastWorker = new AdminBroadcastWorker({ prisma, bot, logger });
+  adminBroadcastWorker.start(env.ADMIN_BROADCAST_WORKER_INTERVAL_MS);
+  logger.info(
+    { intervalMs: env.ADMIN_BROADCAST_WORKER_INTERVAL_MS },
+    'admin broadcast worker started',
+  );
 
   // Daily Trade Showcase (2026-07-27) — separate opt-in feature flag: this
   // posts real trade data (mint addresses, tx signatures, PnL) automatically,
@@ -143,12 +160,57 @@ async function main() {
     logger.info('ACTIVITY_FEED_ENABLED not set — real-data activity feed is disabled');
   }
 
+  // Ecosystem Feed (2026-07-31) — separate opt-in feature flag, same
+  // rationale as TRADE_SHOWCASE_ENABLED/ACTIVITY_FEED_ENABLED: posts real
+  // token/trade data automatically, so it stays off by default. Own
+  // read-only Connection (see discovery/riskScore.ts's own doc comment for
+  // why it can't share apps/api's live-trading connection) built from the
+  // same SOLANA_RPC_URL/HELIUS_API_KEY as live trading, but a fully separate
+  // client instance/quota consumer.
+  let ecosystemFeed: EcosystemFeedMonitor | undefined;
+  if (env.ECOSYSTEM_FEED_ENABLED) {
+    const connection = createEcosystemConnection({
+      rpcUrl: env.SOLANA_RPC_URL,
+      heliusApiKey: env.HELIUS_API_KEY,
+    });
+    ecosystemFeed = new EcosystemFeedMonitor({
+      prisma,
+      bot,
+      chatId: broadcastChatId,
+      logger,
+      connection,
+      marketData,
+      deployedAt: env.ECOSYSTEM_FEED_DEPLOYED_AT,
+      telegramChannels: env.ECOSYSTEM_FEED_TELEGRAM_CHANNELS.split(',')
+        .map((c) => c.trim())
+        .filter(Boolean),
+      minLiquidityUsd: env.ECOSYSTEM_FEED_MIN_LIQUIDITY_USD,
+      minRiskScore: env.ECOSYSTEM_FEED_MIN_RISK_SCORE,
+      minVolumeUsd: env.ECOSYSTEM_FEED_MIN_VOLUME_USD,
+      maxHiddenGemMarketCapUsd: env.ECOSYSTEM_FEED_MAX_HIDDEN_GEM_MARKET_CAP_USD,
+      maxCandidatesPerTick: env.ECOSYSTEM_FEED_MAX_CANDIDATES_PER_TICK,
+      maxPostsPerTick: env.ECOSYSTEM_FEED_MAX_POSTS_PER_TICK,
+    });
+    ecosystemFeed.start(env.ECOSYSTEM_FEED_POLL_INTERVAL_MS);
+    logger.info(
+      {
+        intervalMs: env.ECOSYSTEM_FEED_POLL_INTERVAL_MS,
+        deployedAt: env.ECOSYSTEM_FEED_DEPLOYED_AT.toISOString(),
+      },
+      'ecosystem feed monitor started',
+    );
+  } else {
+    logger.info('ECOSYSTEM_FEED_ENABLED not set — ecosystem feed is disabled');
+  }
+
   const shutdown = () => {
     logger.info('shutting down marketing-engine');
     stop();
     tradeShowcase?.stop();
     broadcastWorker?.stop();
+    adminBroadcastWorker.stop();
     activityFeed?.stop();
+    ecosystemFeed?.stop();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

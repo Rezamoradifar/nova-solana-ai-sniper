@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { sendBrandedMessage } from './telegramSend.js';
+import { InputFile } from 'grammy';
+import { sendBrandedMessage, sendBrandedPhotoHtml } from './telegramSend.js';
 
 function fakeBot() {
   const sendPhoto = vi.fn().mockResolvedValue({ message_id: 1 });
@@ -42,5 +43,74 @@ describe('sendBrandedMessage', () => {
     await sendBrandedMessage(bot, '@chat', longText, { logoUrl: 'https://example.com/logo.png' });
     expect(sendPhoto).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledWith('@chat', longText, { parse_mode: 'Markdown' });
+  });
+});
+
+describe('sendBrandedPhotoHtml', () => {
+  it('sends the buffer as a photo with HTML parse_mode', async () => {
+    const { bot, sendPhoto } = fakeBot();
+    const buf = Buffer.from('fake-png');
+
+    await sendBrandedPhotoHtml(bot, '@chat', buf, '<b>hello</b>');
+
+    expect(sendPhoto).toHaveBeenCalledTimes(1);
+    const [chatId, photo, opts] = sendPhoto.mock.calls[0]!;
+    expect(chatId).toBe('@chat');
+    expect(photo).toBeInstanceOf(InputFile);
+    expect(opts).toEqual({ caption: '<b>hello</b>', parse_mode: 'HTML', reply_markup: undefined });
+  });
+
+  it('attaches an inline keyboard built from the given button rows', async () => {
+    const { bot, sendPhoto } = fakeBot();
+    const buf = Buffer.from('fake-png');
+
+    await sendBrandedPhotoHtml(bot, '@chat', buf, 'caption', [
+      [
+        { text: 'Buy', url: 'https://jup.ag/swap/SOL-Mint' },
+        { text: 'Chart', url: 'https://dexscreener.com/solana/Mint' },
+      ],
+      [{ text: 'Website', url: 'https://novasniper.ai' }],
+    ]);
+
+    const [, , opts] = sendPhoto.mock.calls[0]!;
+    expect(opts.reply_markup.inline_keyboard).toEqual([
+      [
+        { text: 'Buy', url: 'https://jup.ag/swap/SOL-Mint' },
+        { text: 'Chart', url: 'https://dexscreener.com/solana/Mint' },
+      ],
+      [{ text: 'Website', url: 'https://novasniper.ai' }],
+    ]);
+  });
+
+  it('omits reply_markup entirely when no buttons are given', async () => {
+    const { bot, sendPhoto } = fakeBot();
+    await sendBrandedPhotoHtml(bot, '@chat', Buffer.from('x'), 'caption', []);
+    const [, , opts] = sendPhoto.mock.calls[0]!;
+    expect(opts.reply_markup).toBeUndefined();
+  });
+
+  it('falls back to sendMessage (still with buttons) when no photo could be resolved', async () => {
+    const { bot, sendPhoto, sendMessage } = fakeBot();
+
+    await sendBrandedPhotoHtml(bot, '@chat', undefined, 'caption', [
+      [{ text: 'Buy', url: 'https://jup.ag/swap/SOL-Mint' }],
+    ]);
+
+    expect(sendPhoto).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith('@chat', 'caption', {
+      parse_mode: 'HTML',
+      reply_markup: expect.objectContaining({
+        inline_keyboard: [[{ text: 'Buy', url: 'https://jup.ag/swap/SOL-Mint' }]],
+      }),
+    });
+  });
+
+  it('sends a fileId photo directly without wrapping it in InputFile', async () => {
+    const { bot, sendPhoto } = fakeBot();
+
+    await sendBrandedPhotoHtml(bot, '@chat', { fileId: 'AgADabc123' }, 'caption');
+
+    const [, photo] = sendPhoto.mock.calls[0]!;
+    expect(photo).toBe('AgADabc123');
   });
 });

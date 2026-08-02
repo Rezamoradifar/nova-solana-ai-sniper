@@ -64,6 +64,7 @@ model User {
   referralRewardsEarned ReferralReward[]       @relation("ReferralRewardReferrer")
   referralRewardsCaused ReferralReward[]       @relation("ReferralRewardReferredUser")
   tradeBroadcastDeliveries TradeBroadcastDelivery[]
+  adminBroadcastDeliveries AdminBroadcastDelivery[]
 
   @@map("users")
 }
@@ -122,6 +123,53 @@ model TradeBroadcastDelivery {
   @@unique([broadcastId, userId])
   @@index([status, lastAttemptAt])
   @@map("trade_broadcast_deliveries")
+}
+
+/// Durable Telegram broadcast queue for arbitrary admin-authored announcements
+/// (2026-07-31) — same durable/retryable/crash-safe shape as TradeBroadcast
+/// above, but for one-off text messages (e.g. ops announcements) instead of
+/// per-trade showcase captions. Text only, no photo. See
+/// adminBroadcast/broadcastQueue.ts and adminBroadcast/adminBroadcastWorker.ts.
+model AdminBroadcast {
+  id   String @id @default(cuid())
+  text String
+
+  status               String    @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED | COMPLETED_WITH_FAILURES
+  totalRecipients      Int?
+  sentCount            Int       @default(0)
+  failedPermanentCount Int       @default(0)
+  failedTempCount      Int       @default(0)
+  createdAt            DateTime  @default(now())
+  completedAt          DateTime?
+
+  deliveries AdminBroadcastDelivery[]
+
+  @@map("admin_broadcasts")
+}
+
+/// One row per (broadcast, recipient) — same PENDING -> SENT | FAILED_PERMANENT
+/// | FAILED_TEMP transitions as TradeBroadcastDelivery, driven by the same
+/// classifyTelegramError classification.
+model AdminBroadcastDelivery {
+  id             String         @id @default(cuid())
+  broadcastId    String
+  broadcast      AdminBroadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User           @relation(fields: [userId], references: [id])
+  telegramChatId String
+
+  status String @default("PENDING") // PENDING | SENT | FAILED_PERMANENT | FAILED_TEMP
+  /// Count of TRANSIENT send attempts only — a permanent-error delivery is
+  /// terminal on its first attempt and never increments this.
+  attempts      Int       @default(0)
+  lastError     String?
+  lastAttemptAt DateTime?
+  sentAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@unique([broadcastId, userId])
+  @@index([status, lastAttemptAt])
+  @@map("admin_broadcast_deliveries")
 }
 
 /// Wallet private keys are stored encrypted (AES-256-GCM) via the security layer,

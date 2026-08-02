@@ -10,13 +10,16 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --dir src",
     "send-test-post": "dotenv -e ../../.env -- tsx scripts/sendTestPost.ts",
-    "dry-run-visuals": "dotenv -e ../../.env -- tsx scripts/dryRunVisualPosts.ts"
+    "dry-run-visuals": "dotenv -e ../../.env -- tsx scripts/dryRunVisualPosts.ts",
+    "durable-broadcast": "dotenv -e ../../.env -- tsx scripts/durableBroadcast.ts"
   },
   "dependencies": {
     "@nova/ai": "*",
     "@nova/shared": "*",
     "@nova/telegram-bot": "*",
     "@prisma/client": "^5.22.0",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.98.0",
     "grammy": "^1.32.0",
     "sharp": "^0.35.3"
   },

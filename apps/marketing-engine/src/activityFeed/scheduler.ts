@@ -12,8 +12,12 @@ import type { ActivityFeedType } from './data.js';
  * hit a volume target on a quiet day.
  */
 
-export interface FeedTypeBacklog {
-  type: ActivityFeedType;
+/** Generic over the feed-type string union (defaults to this module's own
+ * ActivityFeedType) so ../ecosystemFeed/scheduler.ts can reuse this same
+ * pure pick logic under its own EcosystemFeedType, rather than duplicating
+ * it — the logic has no dependency on which concrete union is used. */
+export interface FeedTypeBacklog<T extends string = ActivityFeedType> {
+  type: T;
   count: number;
 }
 
@@ -37,11 +41,11 @@ export function randomIntervalMs(
  * only type with any backlog at all — a quiet stretch where only one real
  * signal exists shouldn't go silent forever just to avoid a repeat.
  */
-export function pickNextFeedType(
-  backlogs: FeedTypeBacklog[],
-  lastPostedType: ActivityFeedType | undefined,
+export function pickNextFeedType<T extends string = ActivityFeedType>(
+  backlogs: FeedTypeBacklog<T>[],
+  lastPostedType: T | undefined,
   rng: () => number = Math.random,
-): ActivityFeedType | undefined {
+): T | undefined {
   const withBacklog = backlogs.filter((b) => b.count > 0);
   if (withBacklog.length === 0) return undefined;
 

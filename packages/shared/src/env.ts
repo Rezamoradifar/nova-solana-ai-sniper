@@ -253,6 +253,15 @@ export const envSchema = z.object({
   // a short interval never causes overlapping runs.
   BROADCAST_WORKER_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
 
+  // Durable admin-broadcast queue worker (2026-07-31) — how often
+  // AdminBroadcastWorker ticks to drain AdminBroadcast/AdminBroadcastDelivery
+  // rows enqueued by enqueueAdminBroadcast (see adminBroadcast/broadcastQueue.ts).
+  // Runs unconditionally whenever marketing-engine has a bot+DB configured —
+  // unlike TRADE_SHOWCASE_ENABLED/ACTIVITY_FEED_ENABLED this isn't a
+  // continuously-posting feature, it only ever has work when an operator
+  // explicitly enqueues a one-off announcement via the CLI script.
+  ADMIN_BROADCAST_WORKER_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
+
   // Real-Data Telegram Activity Feed (2026-07-27) — posts premium-formatted
   // messages to MARKETING_TELEGRAM_CHANNEL_ID sourced ONLY from real rows
   // (new tokens detected, real AI/Opportunity Score evaluations, real smart-
@@ -282,6 +291,55 @@ export const envSchema = z.object({
   // not a stored field, so a candidate that doesn't currently clear it is
   // simply left unposted (and rechecked later) rather than posted anyway.
   ACTIVITY_FEED_TRENDING_MIN_H1_CHANGE_PERCENT: z.coerce.number().positive().default(15),
+
+  // Ecosystem Feed (2026-07-31) — marketing-engine's OWN sibling module to
+  // activityFeed, posting ecosystem-wide "Trending Tokens"/"Smart Money
+  // Trades"/"High Volume Tokens"/"Hidden Gems"/"Biggest Winners" content with
+  // a generated stat-card image and buttons. Deliberately separate env
+  // namespace from TELEGRAM_TREND_* above: that source feeds apps/api's live
+  // buy-candidate pipeline, this one feeds only outbound marketing content —
+  // the two must never be confused or share config, since a mistake here has
+  // zero blast radius on trading and a mistake there does not. Default OFF,
+  // same double-opt-in convention as TRADE_SHOWCASE_ENABLED/
+  // ACTIVITY_FEED_ENABLED: a deploy never silently starts posting.
+  ECOSYSTEM_FEED_ENABLED: booleanFlag(false),
+  // Public Telegram channels scraped ONLY for candidate mint discovery (same
+  // https://t.me/s/<channel> preview mechanism as TELEGRAM_TREND_CHANNELS,
+  // independently duplicated in apps/marketing-engine/src/discovery/ — see
+  // that module's own isolation doc comment). A discovered mint is never
+  // posted as-is: it must clear a real DexScreener liquidity check and the
+  // standalone rule-based risk score before becoming eligible for a post, and
+  // the source message's text is never copied into any post.
+  ECOSYSTEM_FEED_TELEGRAM_CHANNELS: z
+    .string()
+    .default('soltrenchtrending,trendingssol,solwhaletrending'),
+  ECOSYSTEM_FEED_POLL_INTERVAL_MS: z.coerce.number().min(15000).default(60000),
+  // Cap on how many newly-discovered Telegram candidates are risk-scored (RPC
+  // calls) per tick — keeps this feature's RPC usage bounded and predictable
+  // rather than bursting on a busy source-channel tick, since this Connection
+  // shares provider-side quota with apps/api's live trading RPC calls.
+  ECOSYSTEM_FEED_MAX_CANDIDATES_PER_TICK: z.coerce.number().int().positive().default(5),
+  // Minimum real DexScreener liquidity (USD) a candidate must have before it's
+  // even worth spending an RPC call on for the risk score — cheapest check
+  // first.
+  ECOSYSTEM_FEED_MIN_LIQUIDITY_USD: z.coerce.number().nonnegative().default(5000),
+  // Minimum standalone rule-based risk score (0-100, see discovery/riskScore.ts)
+  // a candidate must clear to be eligible for a post — a content-quality gate,
+  // not a trading safety gate (apps/api's own RiskAnalyzer/buy pipeline is
+  // entirely separate and unaffected by this value).
+  ECOSYSTEM_FEED_MIN_RISK_SCORE: z.coerce.number().min(0).max(100).default(50),
+  // Cap per posting tick, across all 5 categories combined — same "spread
+  // throughout the day, never flood" rationale as TRADE_SHOWCASE_MAX_POSTS_PER_TICK.
+  ECOSYSTEM_FEED_MAX_POSTS_PER_TICK: z.coerce.number().int().positive().default(3),
+  // High Volume Tokens' minimum real 24h DexScreener volume (USD) to qualify.
+  ECOSYSTEM_FEED_MIN_VOLUME_USD: z.coerce.number().nonnegative().default(50_000),
+  // Hidden Gems' maximum real market cap (USD) to qualify — "gem" means
+  // early/small, not merely safe.
+  ECOSYSTEM_FEED_MAX_HIDDEN_GEM_MARKET_CAP_USD: z.coerce.number().positive().default(200_000),
+  // Same fixed-cutoff convention as TRADE_SHOWCASE_DEPLOYED_AT/
+  // ACTIVITY_FEED_DEPLOYED_AT (see their own comments) — every eligibility
+  // query here is permanently bounded to closedAt/createdAt >= this value.
+  ECOSYSTEM_FEED_DEPLOYED_AT: z.coerce.date().default(() => new Date()),
 
   // Twitter / X
   TWITTER_API_KEY: z.string().optional(),
