@@ -16,6 +16,7 @@ import { AdminBroadcastWorker } from './adminBroadcast/adminBroadcastWorker.js';
 import { ActivityFeedMonitor } from './activityFeed/monitor.js';
 import { EcosystemFeedMonitor } from './ecosystemFeed/monitor.js';
 import { createEcosystemConnection } from './discovery/riskScore.js';
+import { NetworkTradeFeedMonitor } from './networkTradeFeed/monitor.js';
 
 const logger = createLogger('marketing-engine');
 
@@ -203,6 +204,38 @@ async function main() {
     logger.info('ECOSYSTEM_FEED_ENABLED not set — ecosystem feed is disabled');
   }
 
+  // Network Trade Feed (2026-08-02) — separate opt-in feature flag, same
+  // rationale as the feeds above: posts real, other-wallets' completed
+  // trades automatically, so it stays off by default. Curated, not a firehose
+  // — see monitor.ts's own doc comment for why this posts only the single
+  // best-scored unposted trade per tick rather than every real backlog item.
+  let networkTradeFeed: NetworkTradeFeedMonitor | undefined;
+  if (env.NETWORK_TRADE_FEED_ENABLED) {
+    networkTradeFeed = new NetworkTradeFeedMonitor({
+      prisma,
+      bot,
+      chatId: broadcastChatId,
+      logger,
+      marketData,
+      deployedAt: env.NETWORK_TRADE_FEED_DEPLOYED_AT,
+      minIntervalMinutes: env.NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES,
+      maxIntervalMinutes: env.NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES,
+      maxPostsPerDay: env.NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY,
+    });
+    networkTradeFeed.start();
+    logger.info(
+      {
+        minIntervalMinutes: env.NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES,
+        maxIntervalMinutes: env.NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES,
+        maxPostsPerDay: env.NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY,
+        deployedAt: env.NETWORK_TRADE_FEED_DEPLOYED_AT.toISOString(),
+      },
+      'network trade feed monitor started',
+    );
+  } else {
+    logger.info('NETWORK_TRADE_FEED_ENABLED not set — network trade feed is disabled');
+  }
+
   const shutdown = () => {
     logger.info('shutting down marketing-engine');
     stop();
@@ -211,6 +244,7 @@ async function main() {
     adminBroadcastWorker.stop();
     activityFeed?.stop();
     ecosystemFeed?.stop();
+    networkTradeFeed?.stop();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

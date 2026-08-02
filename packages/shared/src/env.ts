@@ -341,6 +341,22 @@ export const envSchema = z.object({
   // query here is permanently bounded to closedAt/createdAt >= this value.
   ECOSYSTEM_FEED_DEPLOYED_AT: z.coerce.date().default(() => new Date()),
 
+  // Network Trade Feed (2026-08-02) — a curated feed of OTHER real wallets'
+  // completed trades (never this bot's own — see TRADE_SHOWCASE_ENABLED for
+  // that separate category), sourced only from SmartWalletTokenEntry rows
+  // resolved to a real, on-chain-verified full exit (see
+  // smartWalletTracker.ts's checkAndRecordExit). Off by default, same
+  // double-opt-in convention as every other feed here. maxPostsPerDay is a
+  // CEILING only (10-40/day is the intended range) — never a floor; a day
+  // with fewer real, fully-resolved smart-wallet exits than that simply
+  // posts fewer, same "never fabricate to hit a target" convention as the
+  // rest of this codebase.
+  NETWORK_TRADE_FEED_ENABLED: booleanFlag(false),
+  NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES: z.coerce.number().positive().default(20),
+  NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES: z.coerce.number().positive().default(90),
+  NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY: z.coerce.number().int().positive().default(40),
+  NETWORK_TRADE_FEED_DEPLOYED_AT: z.coerce.date().default(() => new Date()),
+
   // Twitter / X
   TWITTER_API_KEY: z.string().optional(),
   TWITTER_API_SECRET: z.string().optional(),

@@ -39,6 +39,11 @@ export const marketingEnvSchema = envSchema.pick({
   ECOSYSTEM_FEED_DEPLOYED_AT: true,
   SOLANA_RPC_URL: true,
   HELIUS_API_KEY: true,
+  NETWORK_TRADE_FEED_ENABLED: true,
+  NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES: true,
+  NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES: true,
+  NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY: true,
+  NETWORK_TRADE_FEED_DEPLOYED_AT: true,
 });
 
 export function loadMarketingEnv() {
