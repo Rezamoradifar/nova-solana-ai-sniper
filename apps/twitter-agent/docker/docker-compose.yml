@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  terminal-x:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file:
+      - ../.env
+    ports:
+      - "8080:8080"
+    volumes:
+      - terminal-x-data:/data
+    restart: unless-stopped
+    # Optional cache layer (requirement: "Redis caching (optional)") — nothing
+    # in this codebase requires it yet; wire REDIS_URL into memory/db.py or
+    # analytics/metrics.py if you add a caching layer later.
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - terminal-x-redis:/data
+
+volumes:
+  terminal-x-data:
+  terminal-x-redis:

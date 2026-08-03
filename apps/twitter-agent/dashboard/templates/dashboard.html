@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>{{ agent_name }} — Dashboard</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: #0b0f14; color: #e6edf3; margin: 0; padding: 32px; }
+    h1 { font-size: 22px; margin-bottom: 24px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .card { background: #121820; border: 1px solid #232b36; border-radius: 10px; padding: 18px; }
+    .card .label { font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; }
+    .card .value { font-size: 28px; font-weight: 600; margin-top: 6px; }
+    ul { padding-left: 18px; }
+    li { margin-bottom: 8px; line-height: 1.4; }
+    section { margin-bottom: 32px; }
+    section h2 { font-size: 15px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
+    .post { background: #121820; border: 1px solid #232b36; border-radius: 8px; padding: 12px 14px; margin-bottom: 8px; }
+    .note { font-size: 12px; color: #8b949e; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>{{ agent_name }} — Live Dashboard</h1>
+
+  <div class="grid">
+    <div class="card"><div class="label">Followers</div><div class="value">{{ followers }}</div></div>
+    <div class="card"><div class="label">Engagement Rate</div><div class="value">{{ engagement_rate_percent }}%</div>
+      <div class="note">actions / impressions — link-click CTR needs X Analytics/Ads access</div></div>
+    <div class="card"><div class="label">Total Posts</div><div class="value">{{ total_posts }}</div></div>
+    <div class="card"><div class="label">Best Posting Hours (UTC)</div><div class="value" style="font-size:16px">{{ best_hours|join(', ') }}</div></div>
+  </div>
+
+  <section>
+    <h2>Trending Topics</h2>
+    <ul>
+      {% for t in trends %}
+      <li><strong>{{ t.keyword }}</strong> — {{ t.tweet_count }} recent mentions sampled</li>
+      {% else %}
+      <li>No trend data yet.</li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section>
+    <h2>Top Performing Posts</h2>
+    {% for text in top_posts %}
+    <div class="post">{{ text }}</div>
+    {% else %}
+    <div class="note">No engagement data yet.</div>
+    {% endfor %}
+  </section>
+
+  <section>
+    <h2>AI Recommendations</h2>
+    <div class="post">{{ recommendations }}</div>
+  </section>
+</body>
+</html>
