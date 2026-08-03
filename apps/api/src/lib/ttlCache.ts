@@ -36,4 +36,10 @@ export class TtlCache<K> {
   get size(): number {
     return this.entries.size;
   }
+
+  /** Test-only: clears all entries so tests never leak state into each other
+   * — same convention as resilientConnection.ts's counter/cooldown registries. */
+  clear(): void {
+    this.entries.clear();
+  }
 }

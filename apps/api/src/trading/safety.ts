@@ -1,7 +1,12 @@
 import { PublicKey, type Connection } from '@solana/web3.js';
 import type { PrismaClient } from '@prisma/client';
 import type { Redis } from 'ioredis';
-import { getKillSwitchState, type Logger } from '@nova/shared';
+import {
+  getKillSwitchState,
+  getScannerAutoBuyPauseReason,
+  getScannerAutoBuyPauseState,
+  type Logger,
+} from '@nova/shared';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
@@ -17,10 +22,19 @@ export interface SafetyConfig {
 export interface SafetyCheckResult {
   allowed: boolean;
   reason?: string;
+  /** Set only by evaluateWalletBalance's failing branch — lets a caller (e.g.
+   * AutoTrader's low-balance notification) act on the specific gate that
+   * fired without parsing the human-readable `reason` string back apart. */
+  code?: 'wallet_balance';
+  details?: { balanceSol: number; requiredSol: number };
 }
 
 export class SafetyCheckError extends Error {
-  constructor(public readonly reason: string) {
+  constructor(
+    public readonly reason: string,
+    public readonly code?: SafetyCheckResult['code'],
+    public readonly details?: SafetyCheckResult['details'],
+  ) {
     super(`Trade blocked by safety check: ${reason}`);
     this.name = 'SafetyCheckError';
   }
@@ -33,6 +47,29 @@ export function evaluateKillSwitch(active: boolean): SafetyCheckResult {
     return {
       allowed: false,
       reason: 'Emergency kill switch is active — all new trades are halted',
+    };
+  }
+  return { allowed: true };
+}
+
+/**
+ * Recurring pump.fun outage follow-up (2026-07-23): a NEW-auto-buy-only
+ * safety pause, set automatically by scannerHealth.ts when every configured
+ * launch-detection source (primary WS + fallback poller) is confirmed
+ * UNHEALTHY, and cleared only by an explicit admin action (/resumeautobuy) —
+ * see packages/shared/src/scannerAutoBuyPause.ts's doc comment for why this
+ * is deliberately separate from KILL_SWITCH. Same shape as
+ * evaluateKillSwitch, checked only from checkBeforeOpen below (never from the
+ * sell/close path), so SELL/TP/SL/trailing-stop/position monitoring are
+ * structurally unaffected by this gate.
+ */
+export function evaluateScannerAutoBuyPause(active: boolean, reason?: string): SafetyCheckResult {
+  if (active) {
+    return {
+      allowed: false,
+      reason: reason
+        ? `Launch detection is unhealthy — new auto-buys are paused (${reason})`
+        : 'Launch detection is unhealthy — new auto-buys are paused pending admin review',
     };
   }
   return { allowed: true };
@@ -101,6 +138,8 @@ export function evaluateWalletBalance(
     return {
       allowed: false,
       reason: `Wallet balance ${balanceSol.toFixed(4)} SOL is below the ${required.toFixed(4)} SOL required (trade + fee reserve)`,
+      code: 'wallet_balance',
+      details: { balanceSol, requiredSol: required },
     };
   }
   return { allowed: true };
@@ -175,6 +214,24 @@ export class TradingSafety {
     }
   }
 
+  /** Fails closed: if Redis can't be reached, treat the scanner pause as
+   * active rather than silently allowing new auto-buys with no confirmed-
+   * healthy detection source. */
+  async isScannerAutoBuyPaused(): Promise<{ active: boolean; reason?: string }> {
+    try {
+      const active = await getScannerAutoBuyPauseState(this.redis);
+      if (!active) return { active: false };
+      const reason = await getScannerAutoBuyPauseReason(this.redis);
+      return { active: true, reason };
+    } catch (err) {
+      this.logger.error(
+        { err },
+        'scanner auto-buy pause check failed — failing closed (blocking new auto-buys)',
+      );
+      return { active: true };
+    }
+  }
+
   private async dailyRealizedPnlUsd(userId: string): Promise<number> {
     const startOfDay = new Date();
     startOfDay.setUTCHours(0, 0, 0, 0);
@@ -213,6 +270,13 @@ export class TradingSafety {
   ): Promise<SafetyCheckResult> {
     const killSwitch = evaluateKillSwitch(await this.isKillSwitchActive());
     if (!killSwitch.allowed) return killSwitch;
+
+    const scannerPause = await this.isScannerAutoBuyPaused();
+    const scannerAutoBuyPause = evaluateScannerAutoBuyPause(
+      scannerPause.active,
+      scannerPause.reason,
+    );
+    if (!scannerAutoBuyPause.allowed) return scannerAutoBuyPause;
 
     const perTrade = evaluatePerTradeLimit(params.amountSol, this.config.maxTradeSol);
     if (!perTrade.allowed) return perTrade;

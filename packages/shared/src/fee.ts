@@ -134,6 +134,69 @@ export function calculateReferralRewards(
   return results;
 }
 
+/**
+ * Section 14 (2026-07-18): a FIXED, permanent profit split — 80% to the
+ * trader, 10% to their Level-1 referrer, 5% to Level-2, 5% to the platform —
+ * deliberately independent of BusinessSettings.performanceFeeBps (which stays
+ * admin-adjustable for reporting/display purposes only). Before this, the
+ * live referral system split the platform's *fee* 10%/5% between L1/L2 (a
+ * cut of a cut — with the fee at its current 20% default, that worked out to
+ * only 2%/1% of actual profit); this replaces that computation so referrers
+ * get 10%/5% of profit directly, regardless of what performanceFeeBps is set
+ * to now or in the future.
+ */
+export const FIXED_USER_SHARE_BPS = 8000; // 80% of net profit, always
+export const FIXED_REFERRAL_L1_BPS = 1000; // 10% of net profit
+export const FIXED_REFERRAL_L2_BPS = 500; // 5% of net profit
+// The remaining 20% (poolUsd below) is the platform's base pool; unclaimed
+// referrer shares (no L1 and/or no L2) roll into the platform's share
+// automatically via the subtraction in calculateFixedProfitDistribution —
+// never a separate branch, so the four shares always sum to exactly 100%.
+
+export interface ProfitDistributionResult {
+  userShareUsd: number;
+  platformShareUsd: number;
+  referralRewards: ReferralRewardDistribution[];
+}
+
+/**
+ * chain[0] is the Level-1 referrer, chain[1] is Level-2 — same ordering as
+ * resolveReferralChain, whose own walk-upward construction means index 1 can
+ * only be present if index 0 also is (so "L2 present but not L1" can't
+ * occur). Assumes netProfitUsd > 0 — callers already gate on that via
+ * calculatePerformanceFee's own `netProfitUsd <= 0 -> undefined` return, so
+ * this never runs on a losing or break-even close.
+ */
+export function calculateFixedProfitDistribution(
+  netProfitUsd: number,
+  chain: ReferralChainLink[],
+): ProfitDistributionResult {
+  const userShareUsd = netProfitUsd * (FIXED_USER_SHARE_BPS / 10_000);
+  const poolUsd = netProfitUsd - userShareUsd;
+
+  const referralRewards: ReferralRewardDistribution[] = [];
+  if (chain[0]) {
+    referralRewards.push({
+      referrerUserId: chain[0].userId,
+      level: 1,
+      percentBps: FIXED_REFERRAL_L1_BPS,
+      rewardUsd: netProfitUsd * (FIXED_REFERRAL_L1_BPS / 10_000),
+    });
+  }
+  if (chain[1]) {
+    referralRewards.push({
+      referrerUserId: chain[1].userId,
+      level: 2,
+      percentBps: FIXED_REFERRAL_L2_BPS,
+      rewardUsd: netProfitUsd * (FIXED_REFERRAL_L2_BPS / 10_000),
+    });
+  }
+
+  const platformShareUsd = poolUsd - referralRewards.reduce((sum, r) => sum + r.rewardUsd, 0);
+
+  return { userShareUsd, platformShareUsd, referralRewards };
+}
+
 const DEFAULT_MAX_REFERRAL_DEPTH = 2;
 
 /**
@@ -180,6 +243,15 @@ export interface BusinessSettingsWithLevels {
   maxReferralDepth: number;
   feeSystemActivatedAt: Date;
   referralLevels: ReferralLevelInput[];
+  // Final Opportunity Score (Section 7) weights — see opportunityScore.ts.
+  safetyWeightBps: number;
+  momentumWeightBps: number;
+  walletWeightBps: number;
+  socialWeightBps: number;
+  aiWeightBps: number;
+  // 2026-07-29, DEX-agnostic adapter refactor — see opportunityScore.ts's
+  // bandLiquidityDepthScore.
+  liquidityDepthWeightBps: number;
 }
 
 const DEFAULT_PERFORMANCE_FEE_BPS = 2000; // 20%

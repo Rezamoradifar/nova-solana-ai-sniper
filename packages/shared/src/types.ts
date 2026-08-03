@@ -57,7 +57,75 @@ export interface RiskFlags {
   // duplicated here (not imported) to keep this package app-agnostic.
   liquiditySource?:
     'dexscreener' | 'native_dex' | 'pumpfun_bonding_curve' | 'jupiter_estimate' | 'unavailable';
+  // Tri-state tracking (2026-07-22 audit, false-positive gate rejections):
+  // mintAuthorityRevoked/freezeAuthorityRevoked/top10HolderPercent/holderCount/
+  // isHoneypotSuspected above still fail-closed to their existing worst-case
+  // values (false/100/0/true) when the underlying on-chain read couldn't be
+  // completed — UNKNOWN must still block a buy, same as before. These three
+  // flags exist ONLY so a genuine "we couldn't check" is distinguishable from
+  // a genuine "we checked and it's bad" in logs, alerts, and the critical
+  // security gate's reason codes — never used to relax the fail-closed
+  // booleans themselves. All optional/undefined-by-default so every existing
+  // caller/test that doesn't set them is unaffected.
+  /** True when the on-chain mint-authority/freeze-authority/supply read itself
+   * failed (RPC error, unresolvable account, or an unsupported token program)
+   * — mintAuthorityRevoked/freezeAuthorityRevoked are unverified, not
+   * confirmed-false, in this case. */
+  mintAuthorityDataUnknown?: boolean;
+  /** True when holder concentration/count could not be computed — either the
+   * mint-authority read it depends on failed (see above) or the
+   * largest-accounts read itself failed. top10HolderPercent/holderCount are
+   * unverified (100/0 placeholders), not a confirmed critical reading. */
+  holderDataUnknown?: boolean;
+  /** True when isHoneypotSuspected is true *solely* because an upstream input
+   * was unknown (mint authority and/or holder data), not because of a
+   * genuinely resolved low-liquidity or high-concentration signal. */
+  honeypotCheckUnknown?: boolean;
+
+  // Risk Tiers / bundled-wallet detection / extreme-pump protection
+  // (2026-07-23, USOH incident follow-up) — all optional/undefined-by-default
+  // so every existing caller/test that doesn't set them is unaffected.
+  /** DexScreener's own pair-creation timestamp (ms epoch) — the real on-chain
+   * age of the token/pool, used by riskTier.ts's resolveTokenAgeMs. Undefined
+   * when no DexScreener pair has resolved yet (fails closed to "just born" —
+   * see resolveTokenAgeMs). */
+  pairCreatedAt?: number;
+  /** From holderClustering.ts's analyzeHolderClustering — undefined only when
+   * holder data itself was never resolved (see holderDataUnknown above,
+   * which already blocks the buy for its own reason; clustering simply isn't
+   * evaluated in that case rather than duplicating the failure). */
+  holderClusteringState?: 'SAFE' | 'UNSAFE' | 'UNKNOWN';
+  holderClusteringReasons?: string[];
+  largestClusterWalletCount?: number;
+  largestClusterSupplyPercent?: number;
+  /** From pumpProtection.ts's isExtremePump — a signal only, never used alone
+   * to reject a token (see that module's doc comment). */
+  extremePumpDetected?: boolean;
+
+  /**
+   * Production bug fix (2026-07-23, USOH incident post-mortem): the real
+   * on-chain decimals of the mint, from the same getMintAuthorityInfo() read
+   * that already resolves mintAuthorityRevoked/freezeAuthorityRevoked/supply
+   * above — riskAnalyzer.ts simply never surfaced it before this fix. Every
+   * caller previously fell back to Token.decimals' Prisma schema
+   * `@default(9)`, which is WRONG for any non-standard mint (e.g. USOH's
+   * real decimals=6, a Token-2022 mint) — closePosition's realized-PnL math
+   * (`soldAmountToken / 10 ** token.decimals`) silently understated a real
+   * -96% loss as -0.007%, exactly 1000x off (10^9/10^6). Always defined when
+   * mintAuthorityDataUnknown is not set; undefined only on a failed read.
+   */
+  decimals?: number;
 }
+
+/**
+ * Hard Loss Ceiling (2026-07-18): no position is ever allowed a stop loss
+ * looser than this — see apps/api/src/trading/exitEngine.ts's
+ * resolveEffectiveStopLossPercent (the actual enforcement point) and
+ * apps/telegram-bot's settings.ts (surfaces this in the edit prompt so a
+ * user isn't surprised their own looser value gets capped at buy time).
+ * Lives here, not duplicated in each app, since both need the same number.
+ */
+export const DEFAULT_MAX_LOSS_PERCENT = 20;
 
 /** Optional exit strategy — see apps/api/src/trading/adaptiveTrailingStop.ts. */
 export type TrailingStopPreset =
@@ -77,11 +145,27 @@ export const TRAILING_STOP_PRESET_LABELS: Record<Exclude<TrailingStopPreset, 'cu
   meme_coin: '🐸 Meme Coin Mode',
 };
 
+export type AiRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+/** 'BUY'/'SKIP' as suggested by the AI provider — advisory only. AutoTrader's own
+ * deterministic gates (entryFilter.ts's mint/freeze/LP/honeypot checks, notifyGate.ts's
+ * hard risk gate, and the `Math.min(ruleScore, aiScore)` threshold in autoTrader.ts) are
+ * always the final authority and can never be bypassed by this field — see
+ * riskScorer.ts's scoreToken, which force-sets this to 'SKIP' whenever a critical risk
+ * flag is present, regardless of what the model itself returned. */
+export type AiDecision = 'BUY' | 'SKIP';
+
 export interface AiScore {
   score: number; // 0-100, higher = safer/more promising
+  riskLevel: AiRiskLevel;
+  decision: AiDecision;
+  reasons: string[];
+  warnings: string[];
+  /** Back-compat convenience string derived from reasons+warnings; persisted as Token.aiSummary. */
   summary: string;
+  /** Back-compat alias — reasons+warnings combined, same list previous callers read as "flags". */
   flags: string[];
-  provider: 'anthropic' | 'openai';
+  provider: 'anthropic' | 'openai' | 'gemini' | 'openrouter' | 'ollama';
 }
 
 export type OrderSide = 'buy' | 'sell';

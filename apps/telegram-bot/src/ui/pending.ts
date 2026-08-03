@@ -17,7 +17,8 @@ export type PendingAction =
   | {
       type: 'settings_edit';
       snipeConfigId: string;
-      field: 'buyAmountSol' | 'maxSlippageBps' | 'minLiquidityUsd' | 'minAiScore';
+      field:
+        'buyAmountSol' | 'maxSlippageBps' | 'minLiquidityUsd' | 'minAiScore' | 'stopLossPercent';
       returnTo: ScreenId;
     };
 
@@ -33,4 +34,9 @@ export function getPending(chatId: number): PendingAction | undefined {
 
 export function clearPending(chatId: number): void {
   pending.delete(chatId);
+}
+
+/** Read-only diagnostic snapshot — e.g. logging what's still in-flight on shutdown. */
+export function pendingSnapshot(): Array<{ chatId: number; type: PendingAction['type'] }> {
+  return [...pending.entries()].map(([chatId, action]) => ({ chatId, type: action.type }));
 }

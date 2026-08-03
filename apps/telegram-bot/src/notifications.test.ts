@@ -7,6 +7,10 @@ import {
   buildDexScreenerLink,
   formatNewTokenMessage,
   formatAiHighScoreMessage,
+  formatEmergencyExitMessage,
+  formatReferralEarnedMessage,
+  formatMemberGrowthMessage,
+  formatMemberMilestoneMessage,
   AI_HIGH_SCORE_THRESHOLD,
   NotificationService,
 } from './notifications.js';
@@ -44,6 +48,7 @@ describe('formatNewTokenMessage', () => {
       liquidityUsd: 12345,
       marketCapUsd: 67890,
       aiScore: 82,
+      isAiScore: true,
       isHoneypotSuspected: false,
       mintAuthorityRevoked: true,
       freezeAuthorityRevoked: true,
@@ -61,6 +66,20 @@ describe('formatNewTokenMessage', () => {
     expect(text).toContain('[Chart](https://dexscreener.com/solana/MintABC)');
     expect(text).toContain('[Buy](https://pump.fun/coin/MintABC)');
     expect(text).not.toContain('Honeypot');
+  });
+
+  it('regression (2026-07-15 Telegram alert audit): labels the score "Rule Score" instead of "AI Score" when isAiScore is not true, so a rule-based fallback is never mislabeled as a real AI verdict', () => {
+    const withoutFlag = formatNewTokenMessage({ mint: 'MintABC', dex: 'PUMPFUN', aiScore: 82 });
+    expect(withoutFlag).toContain('Rule Score (no AI provider): 82/100');
+    expect(withoutFlag).not.toContain('AI Score:');
+
+    const explicitFalse = formatNewTokenMessage({
+      mint: 'MintABC',
+      dex: 'PUMPFUN',
+      aiScore: 82,
+      isAiScore: false,
+    });
+    expect(explicitFalse).toContain('Rule Score (no AI provider): 82/100');
   });
 
   it('flags honeypot risk and omits fields that were never resolved', () => {
@@ -110,6 +129,7 @@ describe('formatAiHighScoreMessage', () => {
       name: 'Rage Guy',
       symbol: 'RAGEGUY',
       aiScore: 92,
+      isAiScore: true,
       liquidityUsd: 50000,
     });
     expect(text).toContain('AI High Score');
@@ -118,6 +138,12 @@ describe('formatAiHighScoreMessage', () => {
     expect(text).toContain('MintABC');
     expect(text).toContain('Liquidity: $50000');
     expect(text).toContain('[Buy](https://pump.fun/coin/MintABC)');
+  });
+
+  it('regression (2026-07-15 Telegram alert audit): labels it "High Rule Score" instead of "AI High Score" when isAiScore is not true', () => {
+    const text = formatAiHighScoreMessage({ mint: 'MintABC', dex: 'PUMPFUN', aiScore: 92 });
+    expect(text).toContain('High Rule Score (no AI provider)');
+    expect(text).not.toContain('AI High Score');
   });
 
   it('regression: escapes an on-chain token name/symbol containing "_" so Telegram Markdown parsing never breaks', () => {
@@ -135,10 +161,190 @@ describe('formatAiHighScoreMessage', () => {
   });
 });
 
+describe('formatEmergencyExitMessage', () => {
+  it('renders an urgent header, the human-readable reason label, the detail, and PnL', () => {
+    const text = formatEmergencyExitMessage({
+      symbol: 'RAGEGUY',
+      mint: 'MintABC',
+      dex: 'PUMPFUN',
+      reason: 'liquidity_removed',
+      detail: 'liquidityUsd=120 < 500',
+      pnlPercent: -42.5,
+      pnlUsd: -12.34,
+    });
+    expect(text).toContain('EMERGENCY EXIT');
+    expect(text).toContain('Liquidity Removed');
+    expect(text).toContain('liquidityUsd=120 < 500');
+    expect(text).toContain('-42.50%');
+    expect(text).toContain('-12.34');
+    expect(text).toContain('[Chart]');
+  });
+
+  it('renders every emergency reason with a distinct human label', () => {
+    const reasons = [
+      'liquidity_removed',
+      'trading_disabled',
+      'mint_reenabled',
+      'freeze_reenabled',
+      'critical_rug_score',
+      'dev_wallet_dump',
+    ] as const;
+    const labels = new Set(
+      reasons.map((reason) =>
+        formatEmergencyExitMessage({
+          symbol: 'X',
+          mint: 'MintABC',
+          reason,
+          detail: 'd',
+          pnlPercent: 0,
+        }),
+      ),
+    );
+    expect(labels.size).toBe(reasons.length); // every reason renders distinct text
+  });
+
+  it('escapes a symbol containing "_" so Telegram Markdown parsing never breaks', () => {
+    const text = formatEmergencyExitMessage({
+      symbol: 'RAGE_GUY',
+      mint: 'MintABC',
+      reason: 'dev_wallet_dump',
+      detail: 'd',
+      pnlPercent: 0,
+    });
+    expect(text).toContain('RAGE\\_GUY');
+    expect(text).not.toContain('`RAGE_GUY`');
+  });
+
+  it('omits the pnlUsd segment cleanly when absent', () => {
+    const text = formatEmergencyExitMessage({
+      symbol: 'RAGEGUY',
+      mint: 'MintABC',
+      reason: 'trading_disabled',
+      detail: 'no route',
+      pnlPercent: -10,
+    });
+    expect(text).toContain('PnL: -10.00%');
+    expect(text).not.toContain('($');
+  });
+});
+
+describe('formatReferralEarnedMessage', () => {
+  it('renders the level, reward amount, and source symbol', () => {
+    const text = formatReferralEarnedMessage({
+      level: 1,
+      rewardUsd: 1.5,
+      sourceSymbol: 'MOODENG',
+    });
+    expect(text).toContain('Referral reward earned');
+    expect(text).toContain('Level 1');
+    expect(text).toContain('$1.50');
+    expect(text).toContain('MOODENG');
+  });
+
+  it('renders a Level-2 reward distinctly from Level-1', () => {
+    const l1 = formatReferralEarnedMessage({ level: 1, rewardUsd: 1, sourceSymbol: 'X' });
+    const l2 = formatReferralEarnedMessage({ level: 2, rewardUsd: 1, sourceSymbol: 'X' });
+    expect(l1).not.toBe(l2);
+    expect(l2).toContain('Level 2');
+  });
+
+  it('escapes a symbol containing "_" so Telegram Markdown parsing never breaks', () => {
+    const text = formatReferralEarnedMessage({
+      level: 1,
+      rewardUsd: 1,
+      sourceSymbol: 'RAGE_GUY',
+    });
+    expect(text).toContain('RAGE\\_GUY');
+    expect(text).not.toContain('`RAGE_GUY`');
+  });
+});
+
+describe('formatMemberGrowthMessage', () => {
+  const fixedNow = new Date('2026-07-27T22:10:00.000Z');
+
+  it('uses singular phrasing and "+1" for a single new user', () => {
+    const text = formatMemberGrowthMessage({ newCount: 1, totalMembers: 2541 }, fixedNow);
+    expect(text).toContain('New User Joined');
+    expect(text).toContain('A new user registered.');
+    expect(text).toContain('New Users: +1');
+    expect(text).toContain('Total Members: 2,541');
+    expect(text).toContain('Time: 2026-07-27 22:10 UTC');
+    expect(text).not.toContain('New Users Joined');
+  });
+
+  it('uses plural phrasing and the batched count for multiple new users', () => {
+    const text = formatMemberGrowthMessage({ newCount: 5, totalMembers: 2546 }, fixedNow);
+    expect(text).toContain('New Users Joined');
+    expect(text).toContain('5 new users registered.');
+    expect(text).toContain('New Users: +5');
+    expect(text).toContain('Total Members: 2,546');
+  });
+
+  it('defaults `now` to the current time when not passed', () => {
+    const text = formatMemberGrowthMessage({ newCount: 1, totalMembers: 1 });
+    expect(text).toMatch(/Time: \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
+  });
+});
+
+describe('formatMemberMilestoneMessage', () => {
+  it('renders the milestone and total with thousands separators', () => {
+    const text = formatMemberMilestoneMessage(
+      { milestone: 1000, totalMembers: 1002 },
+      new Date('2026-07-27T22:10:00.000Z'),
+    );
+    expect(text).toContain('Milestone Reached!');
+    expect(text).toContain('1,000 Members');
+    expect(text).toContain('Total Members: 1,002');
+    expect(text).toContain('Time: 2026-07-27 22:10 UTC');
+  });
+});
+
+describe('NotificationService — notifyReferralEarned (single recipient, not fanned out)', () => {
+  function fakeSingleUserPrisma(telegramId: string | null) {
+    return {
+      user: { findUnique: vi.fn().mockResolvedValue(telegramId ? { telegramId } : null) },
+    } as unknown as PrismaClient;
+  }
+
+  it('sends the referral-earned message to only the referrer, not a fan-out', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = fakeSingleUserPrisma('REFERRER_CHAT');
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyReferralEarned('referrer-user-1', {
+      level: 1,
+      rewardUsd: 1.5,
+      sourceSymbol: 'MOODENG',
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]![0]).toBe('REFERRER_CHAT');
+    expect(sendMessage.mock.calls[0]![1]).toContain('MOODENG');
+  });
+
+  it('is a silent no-op when the referrer has no telegramId on file', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = fakeSingleUserPrisma(null);
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await expect(
+      service.notifyReferralEarned('referrer-user-1', {
+        level: 1,
+        rewardUsd: 1,
+        sourceSymbol: 'X',
+      }),
+    ).resolves.toBeUndefined();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+});
+
 function fakePrisma(activeTelegramIds: string[]) {
   return {
     user: {
-      findMany: vi.fn().mockResolvedValue(activeTelegramIds.map((telegramId) => ({ telegramId }))),
+      findMany: vi
+        .fn()
+        .mockResolvedValue(activeTelegramIds.map((telegramId) => ({ telegramId, language: 'en' }))),
+      findUnique: vi.fn().mockResolvedValue(null),
     },
   } as unknown as PrismaClient;
 }
@@ -224,7 +430,8 @@ describe('NotificationService — sniper alert fan-out (notifyTrade/notifyExit/n
 
   it("the queried SnipeConfig filter matches AutoTrader's own active-sniper query exactly", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
-    const prisma = { user: { findMany } } as unknown as PrismaClient;
+    const findUnique = vi.fn().mockResolvedValue(null);
+    const prisma = { user: { findMany, findUnique } } as unknown as PrismaClient;
     const { bot } = fakeBot();
     const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
 
@@ -235,7 +442,7 @@ describe('NotificationService — sniper alert fan-out (notifyTrade/notifyExit/n
         telegramId: { not: null },
         snipeConfigs: { some: { isActive: true, autoBuyOnLaunch: true } },
       },
-      select: { telegramId: true },
+      select: { telegramId: true, language: true },
     });
   });
 
@@ -364,6 +571,31 @@ describe('NotificationService — operational alerts stay owner-only', () => {
     const text = sendMessage.mock.calls[0]![1] as string;
     expect(text).toContain('to\\_the\\_moon');
     expect(text).not.toContain('to_the_moon');
+  });
+
+  it('notifyMemberGrowth never queries active users or fans out', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = { user: { findMany: vi.fn() } } as unknown as PrismaClient;
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyMemberGrowth({ newCount: 3, totalMembers: 2543 });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith('OWNER_CHAT', expect.any(String), expect.anything());
+    expect(prisma.user.findMany as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    expect(sendMessage.mock.calls[0]![1] as string).toContain('New Users: +3');
+  });
+
+  it('notifyMemberMilestone never queries active users or fans out', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const prisma = { user: { findMany: vi.fn() } } as unknown as PrismaClient;
+    const service = new NotificationService(bot, 'OWNER_CHAT', prisma, fakeLogger);
+
+    await service.notifyMemberMilestone({ milestone: 500, totalMembers: 500 });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(prisma.user.findMany as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    expect(sendMessage.mock.calls[0]![1] as string).toContain('500 Members');
   });
 });
 

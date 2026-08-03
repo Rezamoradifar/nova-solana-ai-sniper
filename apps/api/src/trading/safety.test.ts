@@ -8,6 +8,7 @@ import {
   evaluateDuplicateOpenPosition,
   evaluateWalletBalance,
   evaluateSafetyConfig,
+  evaluateScannerAutoBuyPause,
   verifySafetySystemReady,
   TradingSafety,
   type SafetyConfig,
@@ -29,6 +30,19 @@ describe('evaluateKillSwitch', () => {
   });
   it('allows when inactive', () => {
     expect(evaluateKillSwitch(false).allowed).toBe(true);
+  });
+});
+
+describe('evaluateScannerAutoBuyPause', () => {
+  it('blocks when active', () => {
+    expect(evaluateScannerAutoBuyPause(true).allowed).toBe(false);
+  });
+  it('includes the reason in the message when given', () => {
+    const result = evaluateScannerAutoBuyPause(true, 'all launch-detection sources unhealthy');
+    expect(result.reason).toContain('all launch-detection sources unhealthy');
+  });
+  it('allows when inactive', () => {
+    expect(evaluateScannerAutoBuyPause(false).allowed).toBe(true);
   });
 });
 
@@ -184,6 +198,120 @@ describe('TradingSafety.isKillSwitchActive', () => {
       fakeLogger as never,
     );
     expect(await safety.isKillSwitchActive()).toBe(true);
+  });
+});
+
+describe('TradingSafety.isScannerAutoBuyPaused', () => {
+  it('is inactive when redis has no flag set', async () => {
+    const redis = { get: vi.fn().mockResolvedValue(null) };
+    const safety = new TradingSafety(
+      {} as never,
+      redis as never,
+      {} as never,
+      BASE_CONFIG,
+      fakeLogger as never,
+    );
+    expect(await safety.isScannerAutoBuyPaused()).toEqual({ active: false });
+  });
+
+  it('reflects the redis flag and reason when active', async () => {
+    const redis = {
+      get: vi.fn((key: string) =>
+        Promise.resolve(key.includes('reason') ? 'all launch-detection sources unhealthy' : '1'),
+      ),
+    };
+    const safety = new TradingSafety(
+      {} as never,
+      redis as never,
+      {} as never,
+      BASE_CONFIG,
+      fakeLogger as never,
+    );
+    expect(await safety.isScannerAutoBuyPaused()).toEqual({
+      active: true,
+      reason: 'all launch-detection sources unhealthy',
+    });
+  });
+
+  it('fails CLOSED (treats as active/paused) when redis errors', async () => {
+    const redis = { get: vi.fn().mockRejectedValue(new Error('connection lost')) };
+    const safety = new TradingSafety(
+      {} as never,
+      redis as never,
+      {} as never,
+      BASE_CONFIG,
+      fakeLogger as never,
+    );
+    expect(await safety.isScannerAutoBuyPaused()).toEqual({ active: true });
+  });
+});
+
+describe('TradingSafety — no equivalent gate exists for closing/selling positions', () => {
+  it('exposes checkBeforeOpen only — a buy-path-only gate by construction, so SELL/TP/SL/trailing-stop and position monitoring can never be blocked by it', () => {
+    const proto = Object.getOwnPropertyNames(TradingSafety.prototype);
+    expect(proto).toContain('checkBeforeOpen');
+    expect(proto.some((name) => /close|sell/i.test(name))).toBe(false);
+  });
+});
+
+describe('TradingSafety.checkBeforeOpen — scanner auto-buy pause (2026-07-23)', () => {
+  function makeFullSafety(
+    redisGetImpl: (key: string) => Promise<string | null>,
+    configOverrides: Partial<SafetyConfig> = {},
+  ) {
+    const prisma = {
+      position: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const connection = { getBalance: vi.fn().mockResolvedValue(2_000_000_000) };
+    const redis = { get: vi.fn(redisGetImpl) };
+    return new TradingSafety(
+      prisma as never,
+      redis as never,
+      connection as never,
+      { ...BASE_CONFIG, ...configOverrides },
+      fakeLogger as never,
+    );
+  }
+
+  const params = {
+    userId: 'u1',
+    walletId: 'w1',
+    walletPublicKey: VALID_PUBKEY,
+    amountSol: 0.1,
+    tokenId: 't1',
+  };
+
+  it('blocks a new auto-buy when the scanner auto-buy pause flag is active', async () => {
+    const safety = makeFullSafety((key) =>
+      Promise.resolve(
+        key.includes('scanner_autobuy_paused_reason')
+          ? 'all launch-detection sources unhealthy'
+          : key.includes('scanner_autobuy_paused')
+            ? '1'
+            : null,
+      ),
+    );
+    const result = await safety.checkBeforeOpen(params, { isLive: false });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/paused/i);
+    expect(result.reason).toContain('all launch-detection sources unhealthy');
+  });
+
+  it('kill switch (env override) is checked before the scanner pause flag', async () => {
+    const safety = makeFullSafety(() => Promise.resolve('1'), { killSwitchEnv: true });
+    const result = await safety.checkBeforeOpen(params, { isLive: false });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toMatch(/kill switch/i);
+  });
+
+  it('allows the buy when the scanner pause flag is not set', async () => {
+    const safety = makeFullSafety(() => Promise.resolve(null));
+    const result = await safety.checkBeforeOpen(params, { isLive: false });
+    expect(result.allowed).toBe(true);
   });
 });
 

@@ -26,7 +26,18 @@ export type DexLaunchHandler = (event: DexLaunchEvent) => void | Promise<void>;
 
 /** Same shape as PumpFunMonitor/PriceMonitor's start/stop lifecycle, one per DEX. */
 export interface DexMonitor {
-  start(onEvent: DexLaunchHandler): void;
+  /**
+   * `onRawActivity`, if given, fires on every raw log delivery for this
+   * program — before the `logInfo.err` check and before the pool-creation
+   * filter, i.e. far more often than `onEvent` (which only fires on a
+   * confirmed pool creation). 2026-07-15 Helius credit audit: this exists so
+   * a caller that needs a true "is this WS subscription still alive" signal
+   * (see sourceHealthMonitor.ts — pool creations are too rare on their own to
+   * safely gate liveness on) can get it from THIS subscription instead of
+   * opening a second, fully redundant `onLogs` subscription to the same
+   * program purely for that purpose.
+   */
+  start(onEvent: DexLaunchHandler, onRawActivity?: () => void): void;
   stop(): Promise<void> | void;
 }
 

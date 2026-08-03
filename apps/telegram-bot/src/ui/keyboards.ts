@@ -1,127 +1,128 @@
 import { InlineKeyboard, Keyboard } from 'grammy';
 import type { ScreenId } from './types.js';
+import { t, type Locale } from '../i18n/index.js';
 
-export const MENU_LABELS = {
-  home: '🏠 Home',
-  sniperStart: '▶️ Start Sniper',
-  sniperStop: '⏹ Stop Sniper',
-  wallet: '👛 Wallet',
-  dashboard: '📊 Dashboard',
-  positions: '📈 Positions',
-  trades: '💱 Trades',
-  leaderboard: '🏆 Leaderboard',
-  alerts: '🔔 Alerts',
-  settings: '⚙️ Settings',
-  profile: '👤 Profile',
-  portfolio: '💰 Portfolio',
-  referrals: '🔗 Referrals',
-  help: '❓ Help',
-  trending: '🚀 Trending',
-  arbitrage: '🚧 Arbitrage',
-  liveOpportunities: '🔥 Live Opportunities',
-  telegramTrends: '📡 Telegram Trends',
-  trendSettings: '⚙️ Trend Settings',
-  feeDashboard: '💸 Fees & Earnings',
-} as const;
+/** Maps each reply-keyboard menu key to the screen it opens — language-independent. */
+const SCREEN_BY_MENU_KEY = {
+  home: 'home',
+  sniperStart: 'sniper_start',
+  sniperStop: 'sniper_stop',
+  wallet: 'wallet',
+  dashboard: 'dashboard',
+  positions: 'positions',
+  trades: 'trades',
+  leaderboard: 'leaderboard',
+  alerts: 'alerts',
+  settings: 'settings',
+  profile: 'profile',
+  portfolio: 'portfolio',
+  referrals: 'referrals',
+  help: 'help',
+  trending: 'trending',
+  arbitrage: 'arbitrage',
+  liveOpportunities: 'live_opportunities',
+  telegramTrends: 'telegram_trends',
+  trendSettings: 'trend_settings',
+  feeDashboard: 'fee_dashboard',
+} as const satisfies Record<string, ScreenId>;
 
-/** Maps each reply-keyboard label to the screen it opens. */
-export const LABEL_TO_SCREEN: Record<string, ScreenId> = {
-  [MENU_LABELS.home]: 'home',
-  [MENU_LABELS.sniperStart]: 'sniper_start',
-  [MENU_LABELS.sniperStop]: 'sniper_stop',
-  [MENU_LABELS.wallet]: 'wallet',
-  [MENU_LABELS.dashboard]: 'dashboard',
-  [MENU_LABELS.positions]: 'positions',
-  [MENU_LABELS.trades]: 'trades',
-  [MENU_LABELS.leaderboard]: 'leaderboard',
-  [MENU_LABELS.alerts]: 'alerts',
-  [MENU_LABELS.settings]: 'settings',
-  [MENU_LABELS.profile]: 'profile',
-  [MENU_LABELS.portfolio]: 'portfolio',
-  [MENU_LABELS.referrals]: 'referrals',
-  [MENU_LABELS.help]: 'help',
-  [MENU_LABELS.trending]: 'trending',
-  [MENU_LABELS.arbitrage]: 'arbitrage',
-  [MENU_LABELS.liveOpportunities]: 'live_opportunities',
-  [MENU_LABELS.telegramTrends]: 'telegram_trends',
-  [MENU_LABELS.trendSettings]: 'trend_settings',
-  [MENU_LABELS.feeDashboard]: 'fee_dashboard',
-};
+type MenuKey = keyof typeof SCREEN_BY_MENU_KEY;
+
+/** Maps every label in BOTH languages to the screen it opens, so a reply-keyboard
+ * tap matches regardless of which language keyboard the chat is currently showing
+ * (e.g. right after a language switch, before the new keyboard has been sent). */
+export const LABEL_TO_SCREEN: Record<string, ScreenId> = (() => {
+  const map: Record<string, ScreenId> = {};
+  for (const lang of ['en', 'fa'] as const) {
+    const labels = t(lang).common.menu;
+    for (const key of Object.keys(SCREEN_BY_MENU_KEY) as MenuKey[]) {
+      map[labels[key]] = SCREEN_BY_MENU_KEY[key];
+    }
+  }
+  return map;
+})();
 
 /** The persistent bottom keyboard — always visible, opens screens by label. */
-export function mainMenuKeyboard(): Keyboard {
+export function mainMenuKeyboard(lang: Locale): Keyboard {
+  const m = t(lang).common.menu;
   return new Keyboard()
-    .text(MENU_LABELS.home)
-    .text(MENU_LABELS.sniperStart)
+    .text(m.home)
+    .text(m.sniperStart)
     .row()
-    .text(MENU_LABELS.sniperStop)
-    .text(MENU_LABELS.wallet)
+    .text(m.sniperStop)
+    .text(m.wallet)
     .row()
-    .text(MENU_LABELS.dashboard)
-    .text(MENU_LABELS.positions)
+    .text(m.dashboard)
+    .text(m.positions)
     .row()
-    .text(MENU_LABELS.trades)
-    .text(MENU_LABELS.leaderboard)
+    .text(m.trades)
+    .text(m.leaderboard)
     .row()
-    .text(MENU_LABELS.alerts)
-    .text(MENU_LABELS.settings)
+    .text(m.alerts)
+    .text(m.settings)
     .row()
-    .text(MENU_LABELS.profile)
-    .text(MENU_LABELS.portfolio)
+    .text(m.profile)
+    .text(m.portfolio)
     .row()
-    .text(MENU_LABELS.referrals)
-    .text(MENU_LABELS.help)
+    .text(m.referrals)
+    .text(m.help)
     .row()
-    .text(MENU_LABELS.trending)
-    .text(MENU_LABELS.arbitrage)
+    .text(m.trending)
+    .text(m.arbitrage)
     .row()
-    .text(MENU_LABELS.liveOpportunities)
-    .text(MENU_LABELS.telegramTrends)
+    .text(m.liveOpportunities)
+    .text(m.telegramTrends)
     .row()
-    .text(MENU_LABELS.trendSettings)
-    .text(MENU_LABELS.feeDashboard)
+    .text(m.trendSettings)
+    .text(m.feeDashboard)
     .resized();
 }
 
 /** Appends the mandatory Back + Home row every non-home screen ends with. */
-export function withNav(keyboard: InlineKeyboard, backScreen: ScreenId): InlineKeyboard {
-  return keyboard.row().text('⬅️ Back', `s:${backScreen}`).text('🏠 Home', 's:home');
+export function withNav(
+  keyboard: InlineKeyboard,
+  backScreen: ScreenId,
+  lang: Locale,
+): InlineKeyboard {
+  const d = t(lang);
+  return keyboard.row().text(d.common.back, `s:${backScreen}`).text(d.common.menu.home, 's:home');
 }
 
 /** A screen with no actions of its own, just the nav row. */
-export function navOnly(backScreen: ScreenId): InlineKeyboard {
-  return withNav(new InlineKeyboard(), backScreen);
+export function navOnly(backScreen: ScreenId, lang: Locale): InlineKeyboard {
+  return withNav(new InlineKeyboard(), backScreen, lang);
 }
 
 /** The 2-column grid of every section, shown on the Home screen. */
-export function homeGrid(): InlineKeyboard {
+export function homeGrid(lang: Locale): InlineKeyboard {
+  const m = t(lang).common.menu;
   return new InlineKeyboard()
-    .text(MENU_LABELS.sniperStart, 's:sniper_start')
-    .text(MENU_LABELS.sniperStop, 's:sniper_stop')
+    .text(m.sniperStart, 's:sniper_start')
+    .text(m.sniperStop, 's:sniper_stop')
     .row()
-    .text(MENU_LABELS.wallet, 's:wallet')
-    .text(MENU_LABELS.dashboard, 's:dashboard')
+    .text(m.wallet, 's:wallet')
+    .text(m.dashboard, 's:dashboard')
     .row()
-    .text(MENU_LABELS.positions, 's:positions')
-    .text(MENU_LABELS.trades, 's:trades')
+    .text(m.positions, 's:positions')
+    .text(m.trades, 's:trades')
     .row()
-    .text(MENU_LABELS.leaderboard, 's:leaderboard')
-    .text(MENU_LABELS.alerts, 's:alerts')
+    .text(m.leaderboard, 's:leaderboard')
+    .text(m.alerts, 's:alerts')
     .row()
-    .text(MENU_LABELS.settings, 's:settings')
-    .text(MENU_LABELS.profile, 's:profile')
+    .text(m.settings, 's:settings')
+    .text(m.profile, 's:profile')
     .row()
-    .text(MENU_LABELS.portfolio, 's:portfolio')
-    .text(MENU_LABELS.referrals, 's:referrals')
+    .text(m.portfolio, 's:portfolio')
+    .text(m.referrals, 's:referrals')
     .row()
-    .text(MENU_LABELS.help, 's:help')
+    .text(m.help, 's:help')
     .row()
-    .text(MENU_LABELS.trending, 's:trending')
-    .text(MENU_LABELS.arbitrage, 's:arbitrage')
+    .text(m.trending, 's:trending')
+    .text(m.arbitrage, 's:arbitrage')
     .row()
-    .text(MENU_LABELS.liveOpportunities, 's:live_opportunities')
-    .text(MENU_LABELS.telegramTrends, 's:telegram_trends')
+    .text(m.liveOpportunities, 's:live_opportunities')
+    .text(m.telegramTrends, 's:telegram_trends')
     .row()
-    .text(MENU_LABELS.trendSettings, 's:trend_settings')
-    .text(MENU_LABELS.feeDashboard, 's:fee_dashboard');
+    .text(m.trendSettings, 's:trend_settings')
+    .text(m.feeDashboard, 's:fee_dashboard');
 }

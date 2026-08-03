@@ -23,18 +23,35 @@ export class TelegramTrendMonitor {
   private timer: ReturnType<typeof setInterval> | undefined;
   private readonly lastMessageId = new Map<string, number>();
   private polling = false;
+  private lastLoggedEnabledState: boolean | undefined;
 
   constructor(
     private readonly client: TelegramTrendClient,
     private readonly channels: string[],
     private readonly intervalMs: number,
     private readonly logger: Logger,
+    /** Live admin pause/resume — see packages/shared/src/telegramTrendToggle.ts.
+     * Checked on every tick so an admin's Telegram button takes effect on the
+     * very next poll, no restart needed. Defaults to always-enabled so tests
+     * and any caller that doesn't wire it up keep today's behavior. */
+    private readonly isEnabled: () => Promise<boolean> = async () => true,
   ) {}
 
   async pollOnce(onCandidate: TelegramSignalHandler): Promise<void> {
     if (this.polling) return;
     this.polling = true;
     try {
+      const enabled = await this.isEnabled();
+      if (enabled !== this.lastLoggedEnabledState) {
+        this.logger.info(
+          { channels: this.channels, enabled },
+          enabled
+            ? 'telegram trend monitor resumed polling'
+            : 'telegram trend monitor paused by admin — skipping polls until resumed',
+        );
+        this.lastLoggedEnabledState = enabled;
+      }
+      if (!enabled) return;
       for (const channel of this.channels) {
         try {
           const messages = await this.client.fetchMessages(

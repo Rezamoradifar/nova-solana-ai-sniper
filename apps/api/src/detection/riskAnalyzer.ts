@@ -2,6 +2,16 @@ import { Connection, PublicKey } from '@solana/web3.js';
 import type { RiskFlags, Logger } from '@nova/shared';
 import type { Dex } from '@prisma/client';
 import { getHolderConcentration, getMintAuthorityInfo } from './onchain.js';
+import {
+  analyzeHolderClustering,
+  DEFAULT_HOLDER_CLUSTERING_CONFIG,
+  type HolderClusteringConfig,
+} from './holderClustering.js';
+import {
+  isExtremePump,
+  DEFAULT_PUMP_PROTECTION_CONFIG,
+  type PumpProtectionConfig,
+} from './pumpProtection.js';
 import type { DexScreenerClient, DexScreenerPair } from '../solana/dexscreener.js';
 import type { JupiterClient } from '../solana/jupiter.js';
 import { SOL_MINT } from '../solana/jupiter.js';
@@ -19,6 +29,12 @@ export interface RiskAnalysisInput {
   /** Known venue + pool for this token, if already on file — enables the native-DEX liquidity reader as a fallback source. */
   dex?: Dex;
   poolAddress?: string;
+  /** Fee payer of the token's creation transaction, when known (see
+   * candidatePipeline.ts's CandidateInput) — threaded through to
+   * holderClustering.ts's analyzeHolderClustering so a detected bundle whose
+   * cluster includes the creator's own wallet is distinguishable in reasons.
+   * Optional; a missing value simply skips that one sub-check. */
+  deployerAddress?: string;
 }
 
 export type LiquiditySource =
@@ -73,6 +89,15 @@ export type LaunchableDex = Exclude<Dex, 'JUPITER'>;
  * `undefined`, which callers treat as "ignore this pool." Pure and exported
  * so the mapping can't silently regress, same convention as
  * resolveLiquidityUsd.
+ *
+ * 2026-07-29: deliberately NOT extended to recognize Lifinity/FluxBeam/
+ * OpenBook/Phoenix the way migrationMonitor.ts's mapDexIdToDex was — this
+ * function's only caller (cheapLiquidityPrecheck below) uses an unmapped
+ * `dexId` as an outright reject (`liquidityUsd: 0`) for a *fresh* candidate,
+ * so extending it would newly admit tokens on those 4 venues as buy
+ * candidates for the first time — a real trading-eligibility change, not
+ * "just labeling" (unlike mapDexIdToDex, which only relabels a token already
+ * being tracked after it migrates). Left as a deliberate scope boundary.
  */
 export function mapDexScreenerIdToDex(dexId: string | undefined): LaunchableDex | undefined {
   if (!dexId) return undefined;
@@ -119,6 +144,24 @@ export function resolveRecentActivity(pair: DexScreenerPair | undefined): Recent
 }
 
 /**
+ * Two-stage discovery pipeline (2026-07-22), FAST PATH classification: a
+ * candidate with rapidly accelerating recent buys/volume gets queued ahead of
+ * ordinary candidates for the AI-provider call — priority only, never a
+ * security bypass (see candidatePipeline.ts, which runs unconditionally
+ * before this is ever consulted). Pure and independently tested, same
+ * convention as resolveRecentActivity/resolveLiquidityUsd above.
+ */
+export function isFastPathCandidate(
+  activity: RecentActivity,
+  thresholds: { minRecentBuys: number; minRecentVolumeUsd: number },
+): boolean {
+  return (
+    (activity.recentBuys ?? 0) >= thresholds.minRecentBuys &&
+    (activity.recentVolumeUsd ?? 0) >= thresholds.minRecentVolumeUsd
+  );
+}
+
+/**
  * Rough constant-product liquidity estimate from a swap quote's price impact:
  * for a small probe trade, impact fraction ~= probeAmount / poolReserve, so
  * poolReserve ~= probeAmount / impact. Doubled to represent both sides of the
@@ -162,22 +205,40 @@ export class RiskAnalyzer {
     private readonly logger: Logger,
     /** Optional: enables the native-DEX liquidity reader as a fallback source. */
     private readonly dexRegistry?: DexRegistry,
+    /** Bundled-wallet clustering thresholds (2026-07-23 USOH incident
+     * follow-up) — operator-tunable via env (see config/env.ts), defaults to
+     * the values calibrated against the incident's own holder data. */
+    private readonly holderClusteringConfig: HolderClusteringConfig = DEFAULT_HOLDER_CLUSTERING_CONFIG,
+    /** Extreme-pump protection threshold — same convention as above. */
+    private readonly pumpProtectionConfig: PumpProtectionConfig = DEFAULT_PUMP_PROTECTION_CONFIG,
   ) {}
 
-  async analyze(input: RiskAnalysisInput): Promise<RiskFlags> {
+  /**
+   * bypassCache, if true, skips both the cache read and write — for a caller
+   * that specifically needs a fresh on-chain read every call (e.g.
+   * EmergencyExitMonitor, which would otherwise see whatever an unrelated
+   * AutoBuy/Discovery call cached for this same mint up to 60s ago).
+   * Optional and undefined by default so every existing single-arg caller
+   * keeps its exact current cached behavior.
+   */
+  async analyze(input: RiskAnalysisInput, opts?: { bypassCache?: boolean }): Promise<RiskFlags> {
     const cacheKey = `${input.mint}|${input.dex ?? ''}|${input.poolAddress ?? ''}`;
-    const cached = this.resultCache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) return cached.result;
+    if (!opts?.bypassCache) {
+      const cached = this.resultCache.get(cacheKey);
+      if (cached && cached.expiresAt > Date.now()) return cached.result;
+    }
 
     const result = await this.analyzeUncached(input);
 
-    if (this.resultCache.size >= RISK_RESULT_CACHE_SWEEP_THRESHOLD) {
-      const now = Date.now();
-      for (const [key, entry] of this.resultCache) {
-        if (entry.expiresAt <= now) this.resultCache.delete(key);
+    if (!opts?.bypassCache) {
+      if (this.resultCache.size >= RISK_RESULT_CACHE_SWEEP_THRESHOLD) {
+        const now = Date.now();
+        for (const [key, entry] of this.resultCache) {
+          if (entry.expiresAt <= now) this.resultCache.delete(key);
+        }
       }
+      this.resultCache.set(cacheKey, { result, expiresAt: Date.now() + RISK_RESULT_TTL_MS });
     }
-    this.resultCache.set(cacheKey, { result, expiresAt: Date.now() + RISK_RESULT_TTL_MS });
 
     return result;
   }
@@ -228,8 +289,12 @@ export class RiskAnalyzer {
     // call already ran after its getTokenSupply call, sequentially, so this just
     // reorders which sequential pair runs first) but one fewer RPC call overall.
     let mintAuthorityFetchFailed = false;
-    const mintAuthority = await getMintAuthorityInfo(this.connection, input.mint).catch(() => {
+    const mintAuthority = await getMintAuthorityInfo(this.connection, input.mint).catch((err) => {
       mintAuthorityFetchFailed = true;
+      this.logger.warn(
+        { mint: input.mint, err },
+        'mint-authority read failed — treating mint/freeze authority + holder data as UNKNOWN (fails closed, blocks buy, never assumed safe)',
+      );
       return {
         mintAuthorityRevoked: false,
         freezeAuthorityRevoked: false,
@@ -243,18 +308,27 @@ export class RiskAnalyzer {
     // as "0% concentrated" (looks safe) rather than "unknown" (should look
     // risky), inverting the fail-conservative fallback below. Skip the call
     // entirely in that case rather than let it run on bogus input.
+    let holderDataUnknown = mintAuthorityFetchFailed;
     const [holders, pair] = await Promise.all([
       mintAuthorityFetchFailed
-        ? Promise.resolve({ top10HolderPercent: 100, holderCount: 0 })
+        ? Promise.resolve({ top10HolderPercent: 100, holderCount: 0, holderBalances: [] })
         : getHolderConcentration(
             this.connection,
             input.mint,
             mintAuthority.supply,
             excludeAddresses,
-          ).catch(() => ({
-            top10HolderPercent: 100,
-            holderCount: 0,
-          })),
+          ).catch((err) => {
+            holderDataUnknown = true;
+            this.logger.warn(
+              { mint: input.mint, err },
+              'holder-concentration read failed — treating holder data as UNKNOWN (fails closed, blocks buy, never assumed safe)',
+            );
+            return {
+              top10HolderPercent: 100,
+              holderCount: 0,
+              holderBalances: [],
+            };
+          }),
       this.dexScreener.getBestSolanaPair(input.mint).catch((err: unknown) => {
         this.logger.debug({ mint: input.mint, err }, 'dexscreener lookup failed');
         return undefined;
@@ -293,7 +367,35 @@ export class RiskAnalyzer {
     const isHoneypotSuspected =
       !mintAuthority.mintAuthorityRevoked || holders.top10HolderPercent > 70 || liquidityUsd < 500;
 
+    // Only mark honeypot suspicion itself as "unknown" when it's true *solely*
+    // because an upstream input was unknown — a genuinely resolved low-liquidity
+    // reading (liquidityUsd < 500, always a real, known number) remains a
+    // confirmed reason even if mint/holder data also happens to be unknown.
+    const honeypotDueToLowLiquidity = liquidityUsd < 500;
+    const honeypotCheckUnknown =
+      isHoneypotSuspected &&
+      !honeypotDueToLowLiquidity &&
+      (mintAuthorityFetchFailed || holderDataUnknown);
+
     const recentActivity = resolveRecentActivity(pair);
+
+    // Bundled-wallet / holder-clustering detection (2026-07-23 audit): only
+    // evaluated when holder data itself genuinely resolved — if it didn't,
+    // holderDataUnknown above already blocks the buy for that reason, and
+    // clustering has nothing real to analyze (this.holders.holderBalances
+    // would be the empty fail-closed placeholder, not real data).
+    const clustering = holderDataUnknown
+      ? undefined
+      : analyzeHolderClustering(
+          holders.holderBalances,
+          mintAuthority.supply,
+          this.holderClusteringConfig,
+          {
+            creatorAddress: input.deployerAddress,
+          },
+        );
+
+    const extremePumpDetected = isExtremePump(pair?.priceChange?.h1, this.pumpProtectionConfig);
 
     return {
       mintAuthorityRevoked: mintAuthority.mintAuthorityRevoked,
@@ -310,6 +412,22 @@ export class RiskAnalyzer {
       holderCount: holders.holderCount,
       imageUrl: pair?.info?.imageUrl,
       liquiditySource: source,
+      mintAuthorityDataUnknown: mintAuthorityFetchFailed || undefined,
+      holderDataUnknown: holderDataUnknown || undefined,
+      honeypotCheckUnknown: honeypotCheckUnknown || undefined,
+      pairCreatedAt: pair?.pairCreatedAt,
+      holderClusteringState: clustering?.state,
+      holderClusteringReasons:
+        clustering && clustering.reasons.length > 0 ? clustering.reasons : undefined,
+      largestClusterWalletCount: clustering?.largestClusterWalletCount,
+      largestClusterSupplyPercent: clustering?.largestClusterSupplyPercent,
+      extremePumpDetected: extremePumpDetected || undefined,
+      // Production bug fix (2026-07-23 USOH post-mortem): real on-chain
+      // decimals, not the Token schema's `@default(9)` fallback — see
+      // RiskFlags.decimals' own doc comment. Undefined (not the dummy 9
+      // fallback) when the mint-authority read itself failed, so a caller
+      // never mistakes a placeholder for real data.
+      decimals: mintAuthorityFetchFailed ? undefined : mintAuthority.decimals,
       ...recentActivity,
     };
   }

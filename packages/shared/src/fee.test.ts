@@ -3,6 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import {
   calculatePerformanceFee,
   calculateReferralRewards,
+  calculateFixedProfitDistribution,
   getOrCreateBusinessSettings,
   isEligibleForFeeProcessing,
   resolveReferralChain,
@@ -142,6 +143,54 @@ describe('calculateReferralRewards', () => {
 
   it('returns nothing when the fee itself is zero', () => {
     expect(calculateReferralRewards(0, [{ userId: 'l1' }], levels, 2)).toEqual([]);
+  });
+});
+
+describe('calculateFixedProfitDistribution', () => {
+  it('splits 80/10/5/5 across user/L1/L2/platform when both referrers exist', () => {
+    const result = calculateFixedProfitDistribution(100, [
+      { userId: 'referrer-l1' },
+      { userId: 'referrer-l2' },
+    ]);
+    expect(result.userShareUsd).toBe(80);
+    expect(result.referralRewards).toEqual([
+      { referrerUserId: 'referrer-l1', level: 1, percentBps: 1000, rewardUsd: 10 },
+      { referrerUserId: 'referrer-l2', level: 2, percentBps: 500, rewardUsd: 5 },
+    ]);
+    expect(result.platformShareUsd).toBe(5);
+    // Always sums to exactly the original net profit.
+    const total =
+      result.userShareUsd +
+      result.platformShareUsd +
+      result.referralRewards.reduce((sum, r) => sum + r.rewardUsd, 0);
+    expect(total).toBeCloseTo(100);
+  });
+
+  it('rolls the unclaimed Level-2 share into the platform when only L1 exists', () => {
+    const result = calculateFixedProfitDistribution(100, [{ userId: 'referrer-l1' }]);
+    expect(result.userShareUsd).toBe(80);
+    expect(result.referralRewards).toEqual([
+      { referrerUserId: 'referrer-l1', level: 1, percentBps: 1000, rewardUsd: 10 },
+    ]);
+    expect(result.platformShareUsd).toBe(10); // 5% base + unclaimed 5% from L2
+  });
+
+  it('rolls the entire 20% pool to the platform when there is no referral chain at all', () => {
+    const result = calculateFixedProfitDistribution(100, []);
+    expect(result.userShareUsd).toBe(80);
+    expect(result.referralRewards).toEqual([]);
+    expect(result.platformShareUsd).toBe(20);
+  });
+
+  it('scales correctly for a small real-world profit amount', () => {
+    const result = calculateFixedProfitDistribution(0.01, [
+      { userId: 'referrer-l1' },
+      { userId: 'referrer-l2' },
+    ]);
+    expect(result.userShareUsd).toBeCloseTo(0.008);
+    expect(result.referralRewards[0]!.rewardUsd).toBeCloseTo(0.001);
+    expect(result.referralRewards[1]!.rewardUsd).toBeCloseTo(0.0005);
+    expect(result.platformShareUsd).toBeCloseTo(0.0005);
   });
 });
 

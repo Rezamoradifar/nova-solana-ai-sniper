@@ -3,6 +3,7 @@ import { walletBackupSchema } from '@nova/shared';
 import { LABEL_TO_SCREEN, mainMenuKeyboard } from './keyboards.js';
 import { resolveOrCreateUser } from './user.js';
 import { getPending, setPending, clearPending } from './pending.js';
+import { getLocale, t } from '../i18n/index.js';
 import type { ScreenDeps, ScreenId, ScreenResult, ScreenUser } from './types.js';
 
 import { renderHome } from './screens/home.js';
@@ -11,7 +12,12 @@ import {
   renderSniperStop,
   handleQuickStart,
   handleResumeAll,
-  handleStopAll,
+  handlePauseAll,
+  handleSelectConfig,
+  handlePauseConfig,
+  handleResumeConfig,
+  renderDeleteConfigConfirm,
+  handleDeleteConfig,
 } from './screens/sniper.js';
 import {
   renderWallet,
@@ -33,10 +39,15 @@ import {
 import { renderDashboard } from './screens/dashboard.js';
 import {
   renderPositions,
+  renderPositionsPage,
   takeProfitPrompt,
   stopLossPrompt,
   applyTakeProfit,
   applyStopLoss,
+  handleClosePositionAsk,
+  handleClosePositionConfirm,
+  handleCloseAllAsk,
+  handleCloseAllConfirm,
 } from './screens/positions.js';
 import { renderTrades } from './screens/trades.js';
 import { renderLeaderboard } from './screens/leaderboard.js';
@@ -56,11 +67,12 @@ import { renderTrending } from './screens/trending.js';
 import { renderArbitrage } from './screens/arbitrage.js';
 import { renderLiveOpportunities } from './screens/liveOpportunities.js';
 import { renderTelegramTrends } from './screens/telegramTrends.js';
-import { renderTrendSettings } from './screens/trendSettings.js';
+import { renderTrendSettings, handleToggleTrendMonitor } from './screens/trendSettings.js';
 import { renderFeeDashboard } from './screens/feeDashboard.js';
 import { renderReferralEarnings } from './screens/referralEarnings.js';
 import { renderReferralLeaderboard } from './screens/referralLeaderboard.js';
 import { handleAcceptFeePolicy, renderFeePolicyConsent } from './screens/feePolicyConsent.js';
+import { applyLanguage, renderLanguage } from './screens/language.js';
 
 async function renderScreen(
   screen: ScreenId,
@@ -115,6 +127,8 @@ async function renderScreen(
       return renderReferralLeaderboard(deps, user);
     case 'fee_policy_consent':
       return renderFeePolicyConsent(deps, user);
+    case 'language':
+      return renderLanguage(deps, user);
   }
 }
 
@@ -133,8 +147,18 @@ async function handleAction(
       return handleQuickStart(deps, user);
     case 'sniper:resumeall':
       return handleResumeAll(deps, user);
-    case 'sniper:stopall':
-      return handleStopAll(deps, user);
+    case 'sniper:pauseall':
+      return handlePauseAll(deps, user);
+    case 'sniper:selectconfig':
+      return handleSelectConfig(deps, user);
+    case 'sniper:pause':
+      return handlePauseConfig(deps, user, rest[0]!);
+    case 'sniper:resume':
+      return handleResumeConfig(deps, user, rest[0]!);
+    case 'sniper:delask':
+      return renderDeleteConfigConfirm(deps, user, rest[0]!);
+    case 'sniper:del':
+      return handleDeleteConfig(deps, user, rest[0]!);
     case 'sniper:acceptpolicy':
       // handleAcceptFeePolicy returns the freshly-updated user row — the
       // in-memory `user` param is stale the instant this resolves (still
@@ -145,7 +169,7 @@ async function handleAction(
       return handleCreateWallet(deps, user, ctx);
     case 'wallet:import':
       setPending(chatId, { type: 'wallet_import', returnTo: 'wallet' });
-      return importPrompt();
+      return importPrompt(getLocale(user));
     case 'wallet:deactivate':
       return handleDeactivateWallet(deps, user, rest[0]!);
     case 'wallet:backup':
@@ -154,10 +178,10 @@ async function handleAction(
         walletId: rest[0]!,
         returnTo: 'wallet',
       });
-      return backupPasswordPrompt();
+      return backupPasswordPrompt(getLocale(user));
     case 'wallet:restore':
       setPending(chatId, { type: 'wallet_restore_awaiting_file', returnTo: 'wallet' });
-      return restoreFilePrompt();
+      return restoreFilePrompt(getLocale(user));
     case 'wallet:deposit':
       return renderDeposit(deps, user, rest[0]!);
     case 'wallet:refreshbalance':
@@ -169,16 +193,26 @@ async function handleAction(
 
     case 'positions:edittp':
       setPending(chatId, { type: 'position_edit_tp', positionId: rest[0]!, returnTo: 'positions' });
-      return takeProfitPrompt();
+      return takeProfitPrompt(getLocale(user));
     case 'positions:editsl':
       setPending(chatId, { type: 'position_edit_sl', positionId: rest[0]!, returnTo: 'positions' });
-      return stopLossPrompt();
+      return stopLossPrompt(getLocale(user));
+    case 'positions:page':
+      return renderPositionsPage(deps, user, Number(rest[0] ?? 0));
+    case 'positions:closeask':
+      return handleClosePositionAsk(deps, user, rest[0]!);
+    case 'positions:close':
+      return handleClosePositionConfirm(deps, user, rest[0]!);
+    case 'positions:closeallask':
+      return handleCloseAllAsk(getLocale(user));
+    case 'positions:closeallconfirm':
+      return handleCloseAllConfirm(deps, user);
 
     case 'settings:edit': {
       const [field, snipeConfigId] = rest;
       if (typeof field !== 'string' || !isSettingsField(field) || !snipeConfigId) return undefined;
       setPending(chatId, { type: 'settings_edit', snipeConfigId, field, returnTo: 'settings' });
-      return promptFor(field);
+      return promptFor(field, getLocale(user));
     }
     case 'settings:preset': {
       const [preset, snipeConfigId] = rest;
@@ -188,6 +222,23 @@ async function handleAction(
 
     case 'referrals:refresh':
       return renderReferrals(deps, user, ctx);
+
+    case 'trend:toggle':
+      return handleToggleTrendMonitor(deps, user);
+
+    case 'lang:set': {
+      // Updates the reply-keyboard (bottom menu) via a fresh message — same
+      // reasoning as a:card:*/QR elsewhere in this file: editMessageText can
+      // only change the inline keyboard on the existing message, never the
+      // persistent bottom keyboard, which needs its own send.
+      const updated = await applyLanguage(deps, user, rest[0] ?? 'en');
+      const newLang = getLocale(updated);
+      await ctx.reply(t(newLang).welcome.text, {
+        parse_mode: 'Markdown',
+        reply_markup: mainMenuKeyboard(newLang),
+      });
+      return renderSettings(deps, updated);
+    }
 
     default:
       return undefined;
@@ -223,7 +274,7 @@ async function handleCardAction(
           })
         : null;
       if (!position || position.wallet.userId !== user.id || !position.shareCaption) {
-        await ctx.reply('⚠️ No share caption available for this trade.');
+        await ctx.reply(t(getLocale(user)).common.noShareCaption);
         return;
       }
       await ctx.reply(position.shareCaption);
@@ -234,6 +285,12 @@ async function handleCardAction(
 
 export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
   bot.command('start', async (ctx) => sendWelcomeAndHome(ctx, deps));
+
+  bot.command('language', async (ctx) => {
+    const user = await resolveOrCreateUser(deps, ctx);
+    const result = await renderLanguage(deps, user);
+    await ctx.reply(result.text, { parse_mode: 'Markdown', reply_markup: result.keyboard });
+  });
 
   // Consumes pending text-input flows (wallet import, TP/SL edits, settings edits)
   // before anything else gets a chance to interpret the message.
@@ -282,14 +339,12 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
         if (!outcome.ok) return void (await ctx.reply(outcome.message));
         clearPending(ctx.chat.id);
         await ctx.replyWithDocument(new InputFile(outcome.buffer, outcome.filename), {
-          caption: '💾 Encrypted wallet backup — store this file and its password somewhere safe.',
+          caption: t(getLocale(user)).wallet.backupCaption,
         });
         return;
       }
       case 'wallet_restore_awaiting_file':
-        return void (await ctx.reply(
-          'Send the backup file as a Telegram document (attach the .json file), not as text.',
-        ));
+        return void (await ctx.reply(t(getLocale(user)).wallet.sendAsDocumentNote));
       case 'wallet_restore_awaiting_password': {
         const outcome = await applyRestore(deps, user, pendingAction.backup, text);
         if (!outcome.ok) return void (await ctx.reply(outcome.message));
@@ -304,15 +359,15 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
     const pendingAction = getPending(ctx.chat.id);
     if (pendingAction?.type !== 'wallet_restore_awaiting_file') return next();
 
+    const user = await resolveOrCreateUser(deps, ctx);
+    const lang = getLocale(user);
     try {
       const file = await ctx.getFile();
       const res = await fetch(`https://api.telegram.org/file/bot${bot.token}/${file.file_path}`);
       const json = JSON.parse(await res.text());
       const parsed = walletBackupSchema.safeParse(json);
       if (!parsed.success) {
-        await ctx.reply(
-          "⚠️ That doesn't look like a valid Nova wallet backup file. Send the correct file, or ⬅️ Back to cancel.",
-        );
+        await ctx.reply(t(lang).wallet.invalidBackupFile);
         return;
       }
       setPending(ctx.chat.id, {
@@ -320,11 +375,11 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
         backup: parsed.data,
         returnTo: 'wallet',
       });
-      const prompt = restorePasswordPrompt();
+      const prompt = restorePasswordPrompt(lang);
       await ctx.reply(prompt.text, { parse_mode: 'Markdown', reply_markup: prompt.keyboard });
     } catch (err) {
       deps.logger.error({ err }, 'wallet restore file handling failed');
-      await ctx.reply('⚠️ Could not read that file. Try again, or ⬅️ Back to cancel.');
+      await ctx.reply(t(lang).wallet.couldNotReadFile);
     }
   });
 
@@ -333,21 +388,23 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
     const screen = LABEL_TO_SCREEN[ctx.message.text];
     if (!screen) return;
     clearPending(ctx.chat.id);
+    let user: ScreenUser | undefined;
     try {
-      const user = await resolveOrCreateUser(deps, ctx);
+      user = await resolveOrCreateUser(deps, ctx);
       const result = await renderScreen(screen, deps, user, ctx);
       await ctx.reply(result.text, { parse_mode: 'Markdown', reply_markup: result.keyboard });
     } catch (err) {
       deps.logger.error({ err, screen }, 'telegram ui menu tap failed');
-      await ctx.reply('⚠️ Something went wrong rendering that screen.').catch(() => {});
+      await ctx.reply(t(user ? getLocale(user) : 'en').common.somethingWrongScreen).catch(() => {});
     }
   });
 
   // Inline button taps — screen navigation (`s:*`) and actions (`a:*`), editing the message in place.
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data;
+    let user: ScreenUser | undefined;
     try {
-      const user = await resolveOrCreateUser(deps, ctx);
+      user = await resolveOrCreateUser(deps, ctx);
       let result: ScreenResult | undefined;
 
       if (data.startsWith('a:card:')) {
@@ -364,6 +421,13 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
         clearPending(ctx.chat!.id);
         result = await renderScreen(data.slice(2) as ScreenId, deps, user, ctx);
       } else if (data.startsWith('a:')) {
+        // Every button press exits whatever text-input flow was pending, same as
+        // screen navigation above — an action that wants a fresh flow (e.g.
+        // wallet:backup) still gets one, via its own setPending() right after this.
+        // Without this, tapping an unrelated action (e.g. Deactivate Wallet) while
+        // a flow like "awaiting backup password" was still open left it stuck: every
+        // later text message kept getting swallowed as a password attempt.
+        clearPending(ctx.chat!.id);
         result = await handleAction(data, deps, user, ctx);
       }
 
@@ -384,7 +448,10 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
       }
       deps.logger.error({ err, data }, 'telegram ui callback failed');
       await ctx
-        .answerCallbackQuery({ text: '⚠️ Something went wrong.', show_alert: true })
+        .answerCallbackQuery({
+          text: t(user ? getLocale(user) : 'en').common.somethingWrong,
+          show_alert: true,
+        })
         .catch(() => {});
     }
   });
@@ -393,9 +460,10 @@ export function registerUiRouter(bot: Bot, deps: ScreenDeps): void {
 /** Sends the welcome message (reply keyboard) followed by the Home screen. */
 export async function sendWelcomeAndHome(ctx: Context, deps: ScreenDeps): Promise<void> {
   const user = await resolveOrCreateUser(deps, ctx, ctx.match ? String(ctx.match) : undefined);
-  await ctx.reply('👋 *Nova Solana AI Sniper* is ready. Use the menu below to navigate.', {
+  const lang = getLocale(user);
+  await ctx.reply(t(lang).welcome.text, {
     parse_mode: 'Markdown',
-    reply_markup: mainMenuKeyboard(),
+    reply_markup: mainMenuKeyboard(lang),
   });
   const result = await renderHome(deps, user);
   await ctx.reply(result.text, { parse_mode: 'Markdown', reply_markup: result.keyboard });

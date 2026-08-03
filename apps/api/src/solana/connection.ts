@@ -36,6 +36,8 @@ export interface RpcEndpoint {
   url: string;
   /** Only meaningful for the primary (first) endpoint — see getConnection. */
   wsUrl?: string;
+  /** See RpcProviderConfig.tier's doc comment in resilientConnection.ts. */
+  tier: 'primary' | 'fallback';
 }
 
 /**
@@ -61,31 +63,59 @@ export interface RpcEndpoint {
  * still failed over fine), it silently killed launch detection entirely,
  * with zero events reaching any scanner, for hours. Helius was upgraded the
  * same day specifically to take over as the reliable primary.
+ *
+ * Every candidate whose URL resolves to Solana's shared public endpoint
+ * (`DEFAULT_PUBLIC_RPC` — including SOLANA_RPC_URL when a deployment leaves it
+ * pointed at that same public URL instead of a real dedicated provider, which
+ * is exactly what happened in production 2026-07-15: the two were byte-for-byte
+ * identical, so wrapWithMultiProviderFailover's round-robin gave the public
+ * endpoint an equal ~1/3 share of ALL ordinary RPC traffic, and its rate limit
+ * — far lower than a paid provider's — couldn't sustain that share, producing
+ * constant 429s) is tagged `tier: 'fallback'` rather than `'primary'`, so it's
+ * only ever reached once every paid/dedicated provider is unhealthy. If
+ * SOLANA_RPC_URL is ever pointed at a real distinct paid endpoint instead, it
+ * correctly gets `'primary'` — the tier follows the URL, not the label.
  */
 export function resolveAllRpcEndpoints(config: SolanaConfig): RpcEndpoint[] {
+  const tierFor = (url: string): 'primary' | 'fallback' =>
+    url === DEFAULT_PUBLIC_RPC ? 'fallback' : 'primary';
+
   const candidates: RpcEndpoint[] = [];
   if (config.heliusApiKey) {
-    candidates.push({ label: 'helius', url: resolveRpcUrl(config), wsUrl: resolveWsUrl(config) });
+    const url = resolveRpcUrl(config);
+    candidates.push({ label: 'helius', url, wsUrl: resolveWsUrl(config), tier: tierFor(url) });
   }
   if (config.quicknodeRpcUrl) {
     candidates.push({
       label: 'quicknode',
       url: config.quicknodeRpcUrl,
       wsUrl: config.quicknodeWsUrl,
+      tier: tierFor(config.quicknodeRpcUrl),
     });
   }
   if (config.chainstackRpcUrl) {
-    candidates.push({ label: 'chainstack', url: config.chainstackRpcUrl });
+    candidates.push({
+      label: 'chainstack',
+      url: config.chainstackRpcUrl,
+      tier: tierFor(config.chainstackRpcUrl),
+    });
   }
   const additional = (config.additionalRpcUrls ?? '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  additional.forEach((url, i) => candidates.push({ label: `custom-${i + 1}`, url }));
+  additional.forEach((url, i) =>
+    candidates.push({ label: `custom-${i + 1}`, url, tier: tierFor(url) }),
+  );
   if (config.rpcUrl) {
-    candidates.push({ label: 'configured-rpc', url: config.rpcUrl, wsUrl: config.wsUrl });
+    candidates.push({
+      label: 'configured-rpc',
+      url: config.rpcUrl,
+      wsUrl: config.wsUrl,
+      tier: tierFor(config.rpcUrl),
+    });
   }
-  candidates.push({ label: 'public', url: DEFAULT_PUBLIC_RPC });
+  candidates.push({ label: 'public', url: DEFAULT_PUBLIC_RPC, tier: 'fallback' });
 
   const seen = new Set<string>();
   return candidates.filter((c) => {
@@ -102,6 +132,7 @@ export function getConnection(config: SolanaConfig, logger?: Logger): Connection
     const endpoints = resolveAllRpcEndpoints(config);
     const providers: RpcProviderConfig[] = endpoints.map((endpoint) => ({
       label: endpoint.label,
+      tier: endpoint.tier,
       connection: new Connection(endpoint.url, {
         commitment: 'confirmed',
         // Only the primary (first) provider's subscriptions are ever used (see
@@ -109,10 +140,25 @@ export function getConnection(config: SolanaConfig, logger?: Logger): Connection
         // real wsEndpoint resolved; the rest are only ever called for ordinary
         // request/response RPC methods.
         wsEndpoint: endpoint === endpoints[0] ? endpoint.wsUrl : undefined,
+        // 2026-07-15 Helius credit audit: web3.js's own Connection has a built-in
+        // retry-on-429 loop (up to 5 attempts against the SAME endpoint, 500ms
+        // doubling to 8s, no jitter) that runs BEFORE resilientConnection.ts's own
+        // rotate-immediately-on-429 logic ever sees the error — so a rate-limited
+        // provider was getting hammered up to 5 more times by web3.js, then
+        // ALSO retried/rotated by resilientConnection.ts on top. Disabling it here
+        // makes resilientConnection.ts's own bounded retry+rotation the only retry
+        // layer, exactly as its module doc comment already assumes.
+        disableRetryOnRateLimit: true,
       }),
     }));
     connection = logger
-      ? wrapWithMultiProviderFailover(providers, logger)
+      ? wrapWithMultiProviderFailover(providers, logger, {
+          // Stage 2 (2026-07-14): only meaningfully active with 2+ providers
+          // (resolveAllRpcEndpoints always includes the public fallback, so
+          // this is realistically always true in production) — see
+          // resilientConnection.ts's ResilientConnectionOptions doc comment.
+          benchmarkIntervalMs: 20_000,
+        })
       : providers[0]!.connection;
   }
   return connection;

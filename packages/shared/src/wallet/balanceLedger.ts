@@ -31,12 +31,24 @@ export interface RefreshBalanceResult {
 export async function refreshWalletBalance(
   deps: RefreshBalanceDeps,
   walletId: string,
-  opts?: { ip?: string; source?: 'deposit_monitor' | 'refresh_endpoint' | 'telegram' },
+  opts?: {
+    ip?: string;
+    source?: 'deposit_monitor' | 'refresh_endpoint' | 'telegram';
+    // 2026-07-15 Helius credit audit: when the caller already has a fresh
+    // lamport balance for this wallet (e.g. DepositMonitor batching every
+    // active wallet into one getMultipleAccountsInfo call), skip the
+    // per-wallet getBalance RPC call entirely and use it directly — every
+    // other line here (diff, optimistic write, ledger entry) is unchanged,
+    // so this stays the single source of truth for what counts as a deposit.
+    prefetchedLamports?: bigint;
+  },
 ): Promise<RefreshBalanceResult | undefined> {
   const wallet = await deps.prisma.wallet.findUnique({ where: { id: walletId } });
   if (!wallet || !wallet.isActive) return undefined;
 
-  const lamports = BigInt(await deps.connection.getBalance(new PublicKey(wallet.publicKey)));
+  const lamports =
+    opts?.prefetchedLamports ??
+    BigInt(await deps.connection.getBalance(new PublicKey(wallet.publicKey)));
   const previous = wallet.lastKnownBalanceLamports;
 
   // First-ever read for this wallet (true for every existing wallet before

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AutoTrader } from './autoTrader.js';
+import { SellabilityCheckError } from './sellabilityCheck.js';
+import { SafetyCheckError } from './safety.js';
 
 function fakeLogger() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
@@ -13,6 +15,10 @@ const RISK_FLAGS = {
   isHoneypotSuspected: false,
   liquidityUsd: 50_000,
   liquiditySource: 'dexscreener' as const,
+  // Must clear criticalSecurityGate.ts's HARD_MIN_HOLDER_COUNT floor — every
+  // test in this file exercises logic *downstream* of that gate, so the
+  // shared fixture needs to represent a token the gate would actually pass.
+  holderCount: 50,
 };
 
 function fakeConfig(overrides: Partial<Record<string, unknown>> = {}) {
@@ -32,12 +38,17 @@ function fakeConfig(overrides: Partial<Record<string, unknown>> = {}) {
     minHolderCount: 0,
     minRecentVolumeUsd: 0,
     maxTop10HolderPercent: 100,
+    useOpportunityScoreGate: false,
     user: { wallets: [{ id: 'wallet-1', publicKey: 'Pubkey1', encryptedSecret: 'enc' }] },
     ...overrides,
   };
 }
 
-function setup(config: ReturnType<typeof fakeConfig>, entryFilterGloballyEnabled = false) {
+function setup(
+  config: ReturnType<typeof fakeConfig>,
+  entryFilterGloballyEnabled = false,
+  opportunityScoreGateGloballyEnabled = false,
+) {
   const openPosition = vi.fn().mockResolvedValue({ trade: {}, position: {} });
   const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([config]) } } as never;
   const positionManager = { openPosition } as never;
@@ -48,6 +59,7 @@ function setup(config: ReturnType<typeof fakeConfig>, entryFilterGloballyEnabled
     logger: fakeLogger(),
     encryptionKey: 'key',
     entryFilterGloballyEnabled,
+    opportunityScoreGateGloballyEnabled,
   });
   return { trader, openPosition };
 }
@@ -112,6 +124,27 @@ describe('AutoTrader — trailing-stop preset wiring (optional exit strategy)', 
   });
 });
 
+describe('AutoTrader — riskScoreAtEntry persistence (production bug fix 2026-07-18)', () => {
+  it('passes riskScoreAtEntry as min(ruleScore, aiScore) — the same value that gated the buy', async () => {
+    const { trader, openPosition } = setup(fakeConfig());
+
+    // RISK_FLAGS -> ruleScore 90 (top10HolderPercent=40 is in the >30 band, -10);
+    // aiScore passed here is 80, so min(90, 80) = 80.
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ riskScoreAtEntry: 80 }));
+  });
+
+  it('takes the rule score, not the AI score, when the rule score is the lower of the two', async () => {
+    const { trader, openPosition } = setup(fakeConfig());
+
+    // aiScore=95 > ruleScore=90 this time -> min(90, 95) = 90.
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 95);
+
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ riskScoreAtEntry: 90 }));
+  });
+});
+
 describe('AutoTrader — Smart Entry Filter (opt-in, additive gate)', () => {
   it('never blocks when the global flag is off, even if a config has opted in and would otherwise fail', async () => {
     const { trader, openPosition } = setup(
@@ -151,6 +184,99 @@ describe('AutoTrader — Smart Entry Filter (opt-in, additive gate)', () => {
     const { trader, openPosition } = setup(fakeConfig({ entryFilterEnabled: true }), true);
 
     await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(openPosition).toHaveBeenCalled();
+  });
+});
+
+describe('AutoTrader — Final Opportunity Score gate (Section 7, opt-in, additive)', () => {
+  // ruleScore for RISK_FLAGS is 90 (top10HolderPercent 40 > 30 => -10). aiScore
+  // 50 makes min(ruleScore, aiScore) = 50, which fails minAiScore=70; a
+  // finalOpportunityScore of 85 passes it — the two gates disagree on purpose,
+  // so a passing test proves which one actually decided the outcome.
+  it('never uses the opportunity score when the global flag is off, even if the config opted in', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ useOpportunityScoreGate: true, minAiScore: 70 }),
+      false,
+      false,
+    );
+
+    const results = await trader.evaluateAndMaybeBuy(
+      'MintABC',
+      'token-1',
+      RISK_FLAGS,
+      50,
+      undefined,
+      85,
+    );
+
+    expect(openPosition).not.toHaveBeenCalled();
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'score_below_threshold' }]);
+  });
+
+  it('never uses the opportunity score when the config itself has not opted in, even if the global flag is on', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ useOpportunityScoreGate: false, minAiScore: 70 }),
+      false,
+      true,
+    );
+
+    const results = await trader.evaluateAndMaybeBuy(
+      'MintABC',
+      'token-1',
+      RISK_FLAGS,
+      50,
+      undefined,
+      85,
+    );
+
+    expect(openPosition).not.toHaveBeenCalled();
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'score_below_threshold' }]);
+  });
+
+  it('uses the opportunity score instead of min(ruleScore, aiScore) once both are opted in', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ useOpportunityScoreGate: true, minAiScore: 70 }),
+      true,
+      true,
+    );
+
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 50, undefined, 85);
+
+    expect(openPosition).toHaveBeenCalled();
+  });
+
+  it('can also block a buy the old gate would have allowed, proving the switch runs both ways', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ useOpportunityScoreGate: true, minAiScore: 70 }),
+      true,
+      true,
+    );
+
+    // min(ruleScore=90, aiScore=95) = 90, which would pass minAiScore=70 —
+    // but a low finalOpportunityScore still blocks the buy.
+    const results = await trader.evaluateAndMaybeBuy(
+      'MintABC',
+      'token-1',
+      RISK_FLAGS,
+      95,
+      undefined,
+      50,
+    );
+
+    expect(openPosition).not.toHaveBeenCalled();
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'score_below_threshold' }]);
+  });
+
+  it('falls back to min(ruleScore, aiScore) when no opportunity score was computed upstream, even with both flags on', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ useOpportunityScoreGate: true, minAiScore: 70 }),
+      true,
+      true,
+    );
+
+    // finalOpportunityScore omitted entirely (undefined) — min(90, 95) = 90 passes.
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 95);
 
     expect(openPosition).toHaveBeenCalled();
   });
@@ -304,5 +430,233 @@ describe('AutoTrader — root-cause investigation 2026-07-12: an accepted token 
       expect.anything(),
       expect.stringMatching(/^BUY CANCELLED\nReason:\nno active SnipeConfig/),
     );
+  });
+});
+
+describe('AutoTrader — per-config wallet selection (SnipeConfig.walletId)', () => {
+  const wallet1 = { id: 'wallet-1', publicKey: 'Pubkey1', encryptedSecret: 'enc1' };
+  const wallet2 = { id: 'wallet-2', publicKey: 'Pubkey2', encryptedSecret: 'enc2' };
+
+  it('old/existing configs (walletId null) buy from the first active wallet — unchanged behavior', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ walletId: null, user: { wallets: [wallet1, wallet2] } }),
+    );
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+    expect(openPosition).toHaveBeenCalledWith(
+      expect.objectContaining({ walletId: 'wallet-1', walletPublicKey: 'Pubkey1' }),
+    );
+  });
+
+  it('a config pinned to a specific still-active wallet buys from that wallet, not the first one', async () => {
+    const { trader, openPosition } = setup(
+      fakeConfig({ walletId: 'wallet-2', user: { wallets: [wallet1, wallet2] } }),
+    );
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+    expect(openPosition).toHaveBeenCalledWith(
+      expect.objectContaining({ walletId: 'wallet-2', walletPublicKey: 'Pubkey2' }),
+    );
+  });
+
+  it('falls back to the first active wallet when the pinned wallet is no longer active', async () => {
+    const { trader, openPosition } = setup(
+      // wallet-2 was deactivated — the `user.wallets` include already filters
+      // to isActive:true, so a deactivated pinned wallet simply isn't in this list.
+      fakeConfig({ walletId: 'wallet-2', user: { wallets: [wallet1] } }),
+    );
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ walletId: 'wallet-1' }));
+  });
+});
+
+// The critical-security-gate and pre-buy-sellability-precheck behavior
+// previously tested here moved with the checks themselves to
+// candidatePipeline.ts (2026-07-22) — see candidatePipeline.test.ts. This
+// function no longer runs those checks at all (it assumes upstream already
+// passed them for this token), so those scenarios no longer apply here.
+
+describe('AutoTrader — pre-buy sellability failure categorization (2026-07-21 audit, section D)', () => {
+  function setupWithOpenPositionError(err: Error) {
+    const config = fakeConfig();
+    const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([config]) } } as never;
+    const positionManager = { openPosition: vi.fn().mockRejectedValue(err) } as never;
+    return new AutoTrader({
+      prisma,
+      riskAnalyzer: {} as never,
+      positionManager,
+      logger: fakeLogger(),
+      encryptionKey: 'key',
+    });
+  }
+
+  it('reports a SellabilityCheckError as reason "not_sellable", distinct from a generic execution error', async () => {
+    const trader = setupWithOpenPositionError(new SellabilityCheckError('no_sell_route'));
+
+    const results = await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'not_sellable' }]);
+  });
+
+  it('still categorizes a genuine SafetyCheckError as "safety_blocked", unaffected by the new sellability handling', async () => {
+    const trader = setupWithOpenPositionError(new SafetyCheckError('daily loss limit reached'));
+
+    const results = await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(results).toEqual([{ userId: 'user-1', bought: false, reason: 'safety_blocked' }]);
+  });
+});
+
+describe('AutoTrader — Dynamic Risk Tiers (2026-07-23 USOH incident follow-up)', () => {
+  const FIVE_MIN_MS = 5 * 60 * 1000;
+  const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+
+  it('omitting tokenAgeMs entirely (every pre-existing caller/test) reproduces exactly the configured buyAmountSol — no behavior change', async () => {
+    const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80);
+
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.1 }));
+  });
+
+  it("a token under 5 minutes old (Tier A: ULTRA_EARLY) gets the smallest position size, scaled off the user's own buyAmountSol", async () => {
+    const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+
+    await trader.evaluateAndMaybeBuy(
+      'MintABC',
+      'token-1',
+      RISK_FLAGS,
+      80,
+      undefined,
+      undefined,
+      FIVE_MIN_MS - 1,
+    );
+
+    // Default ultraEarlySizeBps = 2500 (25%) of 0.1 SOL.
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.025 }));
+  });
+
+  it('a token between 5 and 15 minutes old (Tier B: EARLY) gets a smaller-than-full but larger-than-ultra-early size', async () => {
+    const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+
+    await trader.evaluateAndMaybeBuy(
+      'MintABC',
+      'token-1',
+      RISK_FLAGS,
+      80,
+      undefined,
+      undefined,
+      FIVE_MIN_MS + 1,
+    );
+
+    // Default earlySizeBps = 5000 (50%) of 0.1 SOL.
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.05 }));
+  });
+
+  it("a token 15+ minutes old (Tier C: ESTABLISHED) gets the user's full configured size, unchanged", async () => {
+    const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+
+    await trader.evaluateAndMaybeBuy(
+      'MintABC',
+      'token-1',
+      RISK_FLAGS,
+      80,
+      undefined,
+      undefined,
+      FIFTEEN_MIN_MS + 1,
+    );
+
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.1 }));
+  });
+
+  it('a custom risk-tier size config (operator-tunable, never hardcoded) is honored', async () => {
+    const openPosition = vi.fn().mockResolvedValue({ trade: {}, position: {} });
+    const config = fakeConfig({ buyAmountSol: 1 });
+    const prisma = { snipeConfig: { findMany: vi.fn().mockResolvedValue([config]) } } as never;
+    const trader = new AutoTrader({
+      prisma,
+      riskAnalyzer: {} as never,
+      positionManager: { openPosition } as never,
+      logger: fakeLogger(),
+      encryptionKey: 'key',
+      riskTierSizeConfig: { ultraEarlySizeBps: 500, earlySizeBps: 2500, establishedSizeBps: 10000 },
+    });
+
+    await trader.evaluateAndMaybeBuy('MintABC', 'token-1', RISK_FLAGS, 80, undefined, undefined, 0);
+
+    expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.05 }));
+  });
+
+  describe('extreme-pump escalation (do not rely on price increase alone)', () => {
+    it('escalates an ESTABLISHED (15min+) token to EARLY-level sizing when an extreme pump is detected, without blocking the buy', async () => {
+      const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+      const pumpedFlags = { ...RISK_FLAGS, extremePumpDetected: true };
+
+      const results = await trader.evaluateAndMaybeBuy(
+        'MintABC',
+        'token-1',
+        pumpedFlags,
+        80,
+        undefined,
+        undefined,
+        FIFTEEN_MIN_MS + 1,
+      );
+
+      expect(results).toEqual([{ userId: 'user-1', bought: true }]);
+      // Escalated ESTABLISHED -> EARLY: 50% of 0.1 SOL, not the full 0.1.
+      expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.05 }));
+    });
+
+    it('an extreme pump on an already-ULTRA_EARLY token stays at the smallest size (cannot escalate further)', async () => {
+      const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+      const pumpedFlags = { ...RISK_FLAGS, extremePumpDetected: true };
+
+      await trader.evaluateAndMaybeBuy(
+        'MintABC',
+        'token-1',
+        pumpedFlags,
+        80,
+        undefined,
+        undefined,
+        0,
+      );
+
+      expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.025 }));
+    });
+
+    it('an extreme pump WITHOUT any manipulation signal (holderClusteringState SAFE) still buys — only reduces size, never blocks on price alone', async () => {
+      const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+      const cleanButPumped = {
+        ...RISK_FLAGS,
+        extremePumpDetected: true,
+        holderClusteringState: 'SAFE' as const,
+      };
+
+      const results = await trader.evaluateAndMaybeBuy(
+        'MintABC',
+        'token-1',
+        cleanButPumped,
+        80,
+        undefined,
+        undefined,
+        FIFTEEN_MIN_MS + 1,
+      );
+
+      expect(results).toEqual([{ userId: 'user-1', bought: true }]);
+    });
+
+    it('ordinary price movement (no extreme pump) does not affect sizing for an ESTABLISHED token', async () => {
+      const { trader, openPosition } = setup(fakeConfig({ buyAmountSol: 0.1 }));
+
+      await trader.evaluateAndMaybeBuy(
+        'MintABC',
+        'token-1',
+        RISK_FLAGS,
+        80,
+        undefined,
+        undefined,
+        FIFTEEN_MIN_MS + 1,
+      );
+
+      expect(openPosition).toHaveBeenCalledWith(expect.objectContaining({ amountSol: 0.1 }));
+    });
   });
 });

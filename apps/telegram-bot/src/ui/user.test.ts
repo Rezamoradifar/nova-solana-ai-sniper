@@ -90,7 +90,13 @@ describe('resolveOrCreateUser', () => {
 
     await resolveOrCreateUser({ prisma, logger: fakeLogger }, ctx, 'ABCD1234');
 
-    expect(sendReferralRewardNotification).toHaveBeenCalledWith(ctx.api, '999', 3, fakeLogger);
+    expect(sendReferralRewardNotification).toHaveBeenCalledWith(
+      ctx.api,
+      '999',
+      3,
+      fakeLogger,
+      'en',
+    );
   });
 
   it('does not attempt a Telegram notification if the newly-rewarded referrer has no telegramId', async () => {

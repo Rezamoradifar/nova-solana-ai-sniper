@@ -1,0 +1,974 @@
+<title>Nova Solana AI Sniper — AI-gated Solana token sniper</title>
+<meta
+  name="description"
+  content="AI-gated Solana token sniper: deterministic risk screening + AI second opinion before every auto-buy. Your own encrypted wallet. Telegram &amp; dashboard."
+/>
+<style>
+  :root {
+    --ground: #eef0f2;
+    --ground-panel: #ffffff;
+    --ground-panel-2: #f7f8fa;
+    --ink: #12161c;
+    --ink-soft: #454c56;
+    --border: #d5d9de;
+    --accent: #c9711f;
+    --accent-strong: #a85e15;
+    --accent-tint: #fbeada;
+    --caution: #b23b30;
+    --caution-tint: #fbe9e6;
+    --scope-dim: #b9bfc6;
+    --mono:
+      ui-monospace, 'SF Mono', 'Cascadia Code', 'Roboto Mono', 'JetBrains Mono', Consolas, monospace;
+    --serif: Charter, 'Iowan Old Style', 'Georgia Pro', Georgia, 'Times New Roman', serif;
+    --radius: 3px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0b0f14;
+      --ground-panel: #121821;
+      --ground-panel-2: #0e131a;
+      --ink: #e7eaed;
+      --ink-soft: #a4acb6;
+      --border: #262e38;
+      --accent: #ff9f45;
+      --accent-strong: #ffb469;
+      --accent-tint: #2a1f14;
+      --caution: #ff8a7a;
+      --caution-tint: #2a1613;
+      --scope-dim: #3a4552;
+    }
+  }
+  :root[data-theme='dark'] {
+    --ground: #0b0f14;
+    --ground-panel: #121821;
+    --ground-panel-2: #0e131a;
+    --ink: #e7eaed;
+    --ink-soft: #a4acb6;
+    --border: #262e38;
+    --accent: #ff9f45;
+    --accent-strong: #ffb469;
+    --accent-tint: #2a1f14;
+    --caution: #ff8a7a;
+    --caution-tint: #2a1613;
+    --scope-dim: #3a4552;
+  }
+  :root[data-theme='light'] {
+    --ground: #eef0f2;
+    --ground-panel: #ffffff;
+    --ground-panel-2: #f7f8fa;
+    --ink: #12161c;
+    --ink-soft: #454c56;
+    --border: #d5d9de;
+    --accent: #c9711f;
+    --accent-strong: #a85e15;
+    --accent-tint: #fbeada;
+    --caution: #b23b30;
+    --caution-tint: #fbe9e6;
+    --scope-dim: #b9bfc6;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+  html,
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    overflow-x: hidden;
+  }
+  a {
+    color: inherit;
+  }
+  ::selection {
+    background: var(--accent);
+    color: #0b0f14;
+  }
+
+  .wrap {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-size: 0.72rem;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+  }
+  .eyebrow::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+    flex: none;
+  }
+
+  header.top {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: color-mix(in srgb, var(--ground) 88%, transparent);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 28px;
+    max-width: 1040px;
+    margin: 0 auto;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+    font-weight: 600;
+  }
+  .brand .mark {
+    width: 22px;
+    height: 22px;
+  }
+  .cta-mini {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    text-decoration: none;
+    border: 1px solid var(--border);
+    padding: 7px 14px;
+    border-radius: var(--radius);
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+  .cta-mini:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ---------- HERO ---------- */
+  .hero {
+    padding: 76px 0 60px;
+    display: grid;
+    grid-template-columns: 1.15fr 0.85fr;
+    gap: 48px;
+    align-items: center;
+  }
+  h1 {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: clamp(2.1rem, 4.6vw, 3.35rem);
+    line-height: 1.06;
+    letter-spacing: -0.01em;
+    margin: 18px 0 20px;
+    text-wrap: balance;
+  }
+  h1 .accent-word {
+    color: var(--accent);
+  }
+  .lede {
+    font-size: 1.14rem;
+    line-height: 1.62;
+    color: var(--ink-soft);
+    max-width: 46ch;
+    margin: 0 0 30px;
+  }
+  .hero-ctas {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .btn-primary {
+    font-family: var(--mono);
+    font-size: 0.88rem;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    background: var(--accent);
+    color: #16130d;
+    padding: 13px 22px;
+    border-radius: var(--radius);
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn-primary:hover {
+    background: var(--accent-strong);
+  }
+  .btn-secondary {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    text-decoration: none;
+    color: var(--ink-soft);
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 2px;
+  }
+  .btn-secondary:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .scope-frame {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%, var(--ground-panel-2) 0%, var(--ground) 78%);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+  }
+  .scope-frame canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .scope-caption {
+    position: absolute;
+    bottom: 14px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  /* ---------- READOUT STRIP ---------- */
+  .readouts {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 84px;
+  }
+  .readout {
+    padding: 20px 18px;
+    border-left: 1px solid var(--border);
+    background: var(--ground-panel);
+  }
+  .readout:first-child {
+    border-left: none;
+  }
+  .readout .num {
+    font-family: var(--mono);
+    font-size: 1.7rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .readout .label {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-soft);
+    margin-top: 6px;
+  }
+
+  section {
+    margin-bottom: 92px;
+  }
+  .section-head {
+    max-width: 62ch;
+    margin-bottom: 34px;
+  }
+  h2 {
+    font-family: var(--mono);
+    font-size: clamp(1.5rem, 2.6vw, 1.9rem);
+    margin: 12px 0 14px;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  .section-dek {
+    font-size: 1.03rem;
+    line-height: 1.65;
+    color: var(--ink-soft);
+    max-width: 60ch;
+  }
+
+  /* ---------- HOW IT WORKS ---------- */
+  .steps {
+    display: flex;
+    flex-direction: column;
+  }
+  .step {
+    display: grid;
+    grid-template-columns: 64px 1fr;
+    gap: 22px;
+    padding: 22px 0;
+    border-top: 1px solid var(--border);
+  }
+  .step:last-child {
+    border-bottom: 1px solid var(--border);
+  }
+  .step .idx {
+    font-family: var(--mono);
+    font-size: 0.95rem;
+    color: var(--accent);
+    padding-top: 2px;
+  }
+  .step h3 {
+    font-family: var(--mono);
+    font-size: 1rem;
+    margin: 0 0 6px;
+    font-weight: 700;
+  }
+  .step p {
+    margin: 0;
+    color: var(--ink-soft);
+    line-height: 1.6;
+    max-width: 62ch;
+  }
+
+  /* ---------- FEATURES ---------- */
+  .grid-features {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .feature {
+    background: var(--ground-panel);
+    padding: 24px 22px;
+  }
+  .feature h3 {
+    font-family: var(--mono);
+    font-size: 0.92rem;
+    margin: 0 0 10px;
+    letter-spacing: 0.01em;
+  }
+  .feature p {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 0.94rem;
+    line-height: 1.58;
+  }
+
+  /* ---------- SPLIT (custody / profit) ---------- */
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .split > div {
+    background: var(--ground-panel);
+    padding: 30px 28px;
+  }
+  .split h3 {
+    font-family: var(--mono);
+    font-size: 1rem;
+    margin: 0 0 12px;
+  }
+  .split p {
+    color: var(--ink-soft);
+    line-height: 1.65;
+    margin: 0 0 14px;
+  }
+  .split-bar {
+    display: flex;
+    height: 34px;
+    border-radius: var(--radius);
+    overflow: hidden;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    color: #16130d;
+    margin-top: 4px;
+  }
+  .split-bar span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+  }
+  .split-bar .b1 {
+    background: var(--accent);
+    width: 80%;
+  }
+  .split-bar .b2 {
+    background: color-mix(in srgb, var(--accent) 55%, var(--ink-soft) 45%);
+    width: 10%;
+    color: var(--ink);
+  }
+  .split-bar .b3 {
+    background: color-mix(in srgb, var(--accent) 30%, var(--ink-soft) 70%);
+    width: 5%;
+    color: var(--ink);
+    font-size: 0;
+  }
+  .split-bar .b4 {
+    background: var(--ground-panel-2);
+    width: 5%;
+    color: var(--ink-soft);
+    font-size: 0;
+  }
+  .split-legend {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    color: var(--ink-soft);
+  }
+  .split-legend li {
+    list-style: none;
+  }
+
+  /* ---------- RISK PANEL ---------- */
+  .risk-panel {
+    border: 1px solid color-mix(in srgb, var(--caution) 55%, var(--border));
+    background: var(--caution-tint);
+    border-radius: var(--radius);
+    padding: 30px 30px 8px;
+  }
+  .risk-panel .eyebrow {
+    color: var(--caution);
+  }
+  .risk-panel .eyebrow::before {
+    background: var(--caution);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--caution) 22%, transparent);
+  }
+  .risk-panel h2 {
+    margin-top: 12px;
+  }
+  .risk-list {
+    margin: 18px 0 26px;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 14px;
+  }
+  .risk-list li {
+    padding-left: 20px;
+    position: relative;
+    color: var(--ink);
+    line-height: 1.6;
+    font-size: 0.96rem;
+  }
+  .risk-list li::before {
+    content: '—';
+    position: absolute;
+    left: 0;
+    color: var(--caution);
+    font-family: var(--mono);
+  }
+  .risk-list strong {
+    font-weight: 700;
+  }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 34px 0 46px;
+  }
+  .footer-row {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    color: var(--ink-soft);
+  }
+  .footer-row a {
+    text-decoration: none;
+  }
+  .footer-row a:hover {
+    color: var(--accent);
+  }
+  .footer-note {
+    max-width: 70ch;
+    margin-top: 18px;
+    font-size: 0.76rem;
+    color: var(--ink-soft);
+    line-height: 1.6;
+  }
+
+  @media (max-width: 820px) {
+    .hero {
+      grid-template-columns: 1fr;
+    }
+    .scope-frame {
+      max-width: 340px;
+      margin: 0 auto;
+    }
+    .readouts {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .readout:nth-child(3) {
+      border-left: none;
+    }
+    .grid-features {
+      grid-template-columns: 1fr;
+    }
+    .split {
+      grid-template-columns: 1fr;
+    }
+    .step {
+      grid-template-columns: 40px 1fr;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      animation: none !important;
+      transition: none !important;
+    }
+  }
+
+  a:focus-visible,
+  button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+</style>
+
+<header class="top">
+  <div class="topbar">
+    <div class="brand">
+      <svg
+        class="mark"
+        viewBox="0 0 24 24"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+      >
+        <circle cx="12" cy="12" r="10.25" stroke="var(--accent)" stroke-width="1.5" />
+        <circle cx="12" cy="12" r="5.5" stroke="var(--accent)" stroke-width="1.5" />
+        <line x1="12" y1="1" x2="12" y2="5.2" stroke="var(--accent)" stroke-width="1.5" />
+        <line x1="12" y1="18.8" x2="12" y2="23" stroke="var(--accent)" stroke-width="1.5" />
+        <line x1="1" y1="12" x2="5.2" y2="12" stroke="var(--accent)" stroke-width="1.5" />
+        <line x1="18.8" y1="12" x2="23" y2="12" stroke="var(--accent)" stroke-width="1.5" />
+        <circle cx="12" cy="12" r="1.6" fill="var(--accent)" />
+      </svg>
+      NOVA SNIPER AI
+    </div>
+    <a class="cta-mini" href="https://t.me/Solanxaxsniper_bot" target="_blank" rel="noopener"
+      >Open Telegram bot →</a
+    >
+  </div>
+</header>
+
+<div class="wrap">
+  <section class="hero" style="margin-bottom: 56px">
+    <div>
+      <div class="eyebrow">Solana · Live on Telegram</div>
+      <h1>Speed doesn't have to skip <span class="accent-word">the safety check.</span></h1>
+      <p class="lede">
+        Nova Sniper AI watches new Solana token launches across nine-plus venues at once, screens
+        every candidate with a deterministic risk engine before an optional AI second opinion ever
+        runs, and trades automatically from a wallet that's yours alone — never pooled.
+      </p>
+      <div class="hero-ctas">
+        <a
+          class="btn-primary"
+          href="https://t.me/Solanxaxsniper_bot"
+          target="_blank"
+          rel="noopener"
+        >
+          Open @Solanxaxsniper_bot →
+        </a>
+        <a class="btn-secondary" href="#risk">Read the risk disclosure first</a>
+      </div>
+    </div>
+    <div
+      class="scope-frame"
+      role="img"
+      aria-label="Radar-style animation representing continuous multi-source token-launch detection"
+    >
+      <canvas id="scope" width="480" height="480"></canvas>
+      <div class="scope-caption">detection · in progress</div>
+    </div>
+  </section>
+
+  <div class="readouts">
+    <div class="readout">
+      <div class="num">9+</div>
+      <div class="label">Discovery venues</div>
+    </div>
+    <div class="readout">
+      <div class="num">960</div>
+      <div class="label">Automated tests passing</div>
+    </div>
+    <div class="readout">
+      <div class="num">80%</div>
+      <div class="label">Realized profit kept by you</div>
+    </div>
+    <div class="readout">
+      <div class="num">1:1</div>
+      <div class="label">Wallets — never pooled</div>
+    </div>
+  </div>
+
+  <section id="how">
+    <div class="section-head">
+      <div class="eyebrow">How it works</div>
+      <h2>Eight steps from launch detection to a closed position.</h2>
+      <p class="section-dek">
+        This is a genuine sequence — each step depends on the one before it. Nothing here is
+        simulated: it's the same pipeline every live trade goes through.
+      </p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="idx">01</div>
+        <div>
+          <h3>Start the bot</h3>
+          <p>
+            Open @Solanxaxsniper_bot on Telegram and complete onboarding. A dedicated, encrypted
+            Solana wallet is generated for you alone.
+          </p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="idx">02</div>
+        <div>
+          <h3>Deposit SOL</h3>
+          <p>Send SOL to your own wallet address, shown in the bot or dashboard.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="idx">03</div>
+        <div>
+          <h3>Configure your snipe settings</h3>
+          <p>Set buy size, take-profit/stop-loss, or switch on the adaptive trailing stop.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="idx">04</div>
+        <div>
+          <h3>The system watches, continuously</h3>
+          <p>Every enabled discovery source is monitored in real time for new launches.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="idx">05</div>
+        <div>
+          <h3>Every candidate is screened first</h3>
+          <p>
+            Mint/freeze authority, LP lock/burn, holder concentration, honeypot heuristics — before
+            any AI call, before any buy.
+          </p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="idx">06</div>
+        <div>
+          <h3>Qualifying tokens are bought automatically</h3>
+          <p>
+            Only tokens that clear every gate reach an automated buy, sized to your configuration.
+          </p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="idx">07</div>
+        <div>
+          <h3>Exits run on their own</h3>
+          <p>
+            Take-profit, stop-loss, trailing stop, or the Emergency Exit Engine act without waiting
+            on you — or close manually anytime.
+          </p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="idx">08</div>
+        <div>
+          <h3>Withdraw whenever you like</h3>
+          <p>
+            A request goes through an automated risk score and admin review before on-chain
+            execution.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="section-head">
+      <div class="eyebrow">What's actually built</div>
+      <h2>Every claim below maps to a running system, not a roadmap slide.</h2>
+    </div>
+    <div class="grid-features">
+      <div class="feature">
+        <h3>Multi-source discovery</h3>
+        <p>
+          pump.fun, PumpSwap, Raydium, Orca, Meteora, OpenBook v2, Moonshot, Phoenix, Fluxbeam —
+          plus DexScreener, Birdeye, X, and Telegram trend signals. One source failing never stops
+          the rest.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Two-layer risk &amp; AI scoring</h3>
+        <p>
+          A deterministic engine runs on every token, unconditionally. An optional AI opinion can
+          only lower the score — never raise it — and fails closed on timeout.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Verified execution</h3>
+        <p>
+          Jupiter aggregator as primary route, native per-DEX fallback, every fill checked against
+          the real on-chain balance delta.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Configurable exits</h3>
+        <p>
+          Fixed take-profit/stop-loss, adaptive trailing stop, an optional partial-exit ladder, and
+          a price-independent Emergency Exit Engine.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Immutable ledger</h3>
+        <p>
+          Every deposit, withdrawal, fee, and referral reward is a database-enforced, append-only
+          record — not just application-level bookkeeping.
+        </p>
+      </div>
+      <div class="feature">
+        <h3>Reviewed withdrawals</h3>
+        <p>
+          Request → automated risk score → admin review → on-chain execution → reconciliation, with
+          duplicate-request protection and daily limits.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section id="custody">
+    <div class="split">
+      <div>
+        <h3>Your wallet. Not a pool.</h3>
+        <p>
+          Every user gets an individually AES-256-GCM-encrypted Solana wallet at signup. Funds are
+          never commingled with any other user's funds — there is no shared treasury.
+        </p>
+        <p>
+          This is still a <strong>custodial</strong> model: the platform holds your encrypted key so
+          it can trade on your behalf. Read the risk disclosure below before depositing.
+        </p>
+      </div>
+      <div>
+        <h3>Where profit actually goes</h3>
+        <p>A fixed split, computed only on realized profit — nothing is taken on a loss.</p>
+        <div class="split-bar">
+          <span class="b1">80% you</span><span class="b2">10%</span><span class="b3"></span
+          ><span class="b4"></span>
+        </div>
+        <ul class="split-legend">
+          <li>80% — you</li>
+          <li>10% — Level-1 referrer</li>
+          <li>5% — Level-2 referrer</li>
+          <li>5% — platform</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="risk">
+    <div class="risk-panel">
+      <div class="eyebrow">Read before depositing</div>
+      <h2>Security &amp; risk disclosure</h2>
+      <ul class="risk-list">
+        <li>
+          <strong
+            >No independent security audit exists for this codebase as of this writing.</strong
+          >
+          That's stated plainly here, not left implied.
+        </li>
+        <li>
+          <strong>This is a custodial service.</strong> Your key is generated and encrypted by the
+          platform to enable automated trading — a different trust model from a wallet you hold
+          yourself.
+        </li>
+        <li>
+          <strong>Automated screening reduces, but cannot eliminate, risk.</strong> Rug, honeypot,
+          and total loss remain possible on any single position.
+        </li>
+        <li>
+          <strong>New-token trading is inherently volatile.</strong> No profit or performance
+          outcome is promised anywhere in this page.
+        </li>
+        <li>
+          <strong>Fees apply only to realized profit</strong> — nothing on a loss — and on-chain
+          gas/priority fees are separate from the platform's split.
+        </li>
+        <li>
+          <strong>Withdrawals are reviewed, not instant</strong>, by design, as a fraud/abuse
+          control.
+        </li>
+        <li>
+          <strong>Not affiliated with, endorsed by, or registered with</strong> Solana
+          Labs/Foundation or any financial regulator. You're responsible for confirming lawful use
+          in your jurisdiction.
+        </li>
+        <li><strong>Only deposit what you can afford to lose.</strong></li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <div class="footer-row">
+      <span>NOVA SNIPER AI</span>
+      <a href="https://t.me/Solanxaxsniper_bot" target="_blank" rel="noopener"
+        >t.me/Solanxaxsniper_bot</a
+      >
+    </div>
+    <p class="footer-note">
+      Nova Solana AI Sniper is an independent project and is not affiliated with, endorsed by, or
+      sponsored by Solana Labs, the Solana Foundation, or any exchange named on this page. Automated
+      trading of volatile digital assets carries a real risk of loss. Nothing on this page is
+      financial advice.
+    </p>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var canvas = document.getElementById('scope');
+    var ctx = canvas.getContext('2d');
+    var W = canvas.width,
+      H = canvas.height;
+    var cx = W / 2,
+      cy = H / 2,
+      R = W / 2 - 14;
+    var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function getVar(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    var blips = [
+      { a: 0.3, d: 0.72, born: 0 },
+      { a: 2.1, d: 0.45, born: 0 },
+      { a: 4.0, d: 0.85, born: 0 },
+      { a: 5.1, d: 0.58, born: 0 },
+    ];
+
+    var sweepAngle = 0;
+    var last = 0;
+
+    function draw(t) {
+      var accent = getVar('--accent') || '#ff9f45';
+      var scopeDim = getVar('--scope-dim') || '#3a4552';
+
+      ctx.clearRect(0, 0, W, H);
+
+      // range rings
+      ctx.strokeStyle = scopeDim;
+      ctx.lineWidth = 1;
+      for (var r = 1; r <= 4; r++) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, (R / 4) * r, 0, Math.PI * 2);
+        ctx.globalAlpha = 0.55;
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+
+      // crosshair
+      ctx.beginPath();
+      ctx.moveTo(cx - R, cy);
+      ctx.lineTo(cx + R, cy);
+      ctx.moveTo(cx, cy - R);
+      ctx.lineTo(cx, cy + R);
+      ctx.globalAlpha = 0.35;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      // blips
+      blips.forEach(function (b) {
+        var age = t - b.born;
+        var life = 3200;
+        if (age > life) {
+          b.born = t + Math.random() * 900;
+          b.a = Math.random() * Math.PI * 2;
+          b.d = 0.35 + Math.random() * 0.55;
+          age = 0;
+        }
+        var fade = Math.max(0, 1 - age / life);
+        var x = cx + Math.cos(b.a) * R * b.d;
+        var y = cy + Math.sin(b.a) * R * b.d;
+        ctx.beginPath();
+        ctx.arc(x, y, 5 + (1 - fade) * 3, 0, Math.PI * 2);
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = fade * 0.9;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      });
+
+      // sweep
+      var grad = ctx.createConicGradient
+        ? ctx.createConicGradient(sweepAngle - Math.PI / 2, cx, cy)
+        : null;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, R, sweepAngle - 0.55, sweepAngle);
+      ctx.closePath();
+      if (grad) {
+        grad.addColorStop(0, 'transparent');
+        grad.addColorStop(0.85, 'transparent');
+        grad.addColorStop(1, accent);
+        ctx.fillStyle = grad;
+      } else {
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = 0.18;
+      }
+      ctx.fill();
+      ctx.restore();
+      ctx.globalAlpha = 1;
+
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(sweepAngle) * R, cy + Math.sin(sweepAngle) * R);
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // center dot
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+      ctx.fillStyle = accent;
+      ctx.fill();
+    }
+
+    function frame(t) {
+      if (!last) last = t;
+      var dt = t - last;
+      last = t;
+      sweepAngle += dt * 0.0011;
+      draw(t);
+      if (!reduced) requestAnimationFrame(frame);
+    }
+
+    if (reduced) {
+      draw(0);
+    } else {
+      requestAnimationFrame(frame);
+    }
+  })();
+</script>

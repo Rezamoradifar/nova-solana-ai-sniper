@@ -1,6 +1,11 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { User } from '@prisma/client';
 import { z } from 'zod';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import {
+  validate as validateTelegramInitData,
+  parse as parseTelegramInitData,
+} from '@tma.js/init-data-node';
 import { generateUniqueReferralCode, maybeActivateReferralReward } from '@nova/shared';
 import { createBot, sendReferralRewardNotification } from '@nova/telegram-bot';
 import type { Bot } from 'grammy';
@@ -26,6 +31,13 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+export const telegramAuthSchema = z.object({
+  // The raw, signed initData string handed to the Mini App by Telegram's
+  // WebView (window.Telegram.WebApp.initData) — never parsed/trusted client
+  // side, verified here via HMAC-SHA256 against the bot token.
+  initData: z.string().min(1),
+});
+
 function hashPassword(password: string): string {
   const salt = randomBytes(16);
   const hash = scryptSync(password, salt, 64);
@@ -39,6 +51,80 @@ function verifyPassword(password: string, stored: string): boolean {
   const hash = Buffer.from(hashHex, 'hex');
   const candidate = scryptSync(password, salt, 64);
   return candidate.length === hash.length && timingSafeEqual(candidate, hash);
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === 'P2002';
+}
+
+/**
+ * Mini App counterpart of the Telegram bot's own resolveOrCreateUser
+ * (apps/telegram-bot/src/ui/user.ts) — deliberately not imported/shared with
+ * it directly, since that function takes a grammy `Context` (a bot update),
+ * not a bare telegramId, and apps/api has no reason to depend on
+ * @nova/telegram-bot's grammy plumbing just to reuse this one shape. Same
+ * find-or-create-by-telegramId behavior, same referral-activation trigger
+ * point, so a user who first opens the Mini App vs. first messages the bot
+ * ends up with an identical kind of account either way — just adapted to
+ * this route's inputs and wrapped in a unique-constraint race guard the bot
+ * path doesn't need (a Telegram update is processed one-at-a-time per chat;
+ * two Mini App launches for a brand-new user can race concurrently).
+ */
+export async function resolveOrCreateTelegramUser(
+  fastify: Pick<FastifyInstance, 'prisma' | 'config' | 'log'>,
+  req: Pick<FastifyRequest, 'ip'>,
+  telegramId: string,
+  referralPayload: string | undefined,
+): Promise<User> {
+  const existing = await fastify.prisma.user.findUnique({ where: { telegramId } });
+  if (existing) return existing;
+
+  let referrer: { id: string; referralCode: string | null; telegramId: string | null } | null =
+    null;
+  if (referralPayload) {
+    referrer = await fastify.prisma.user.findUnique({
+      where: { referralCode: referralPayload.trim().toUpperCase() },
+      select: { id: true, referralCode: true, telegramId: true },
+    });
+  }
+
+  let user: User;
+  try {
+    user = await fastify.prisma.user.create({
+      data: {
+        telegramId,
+        referralCode: await generateUniqueReferralCode(fastify.prisma),
+        referredByCode: referrer?.referralCode ?? undefined,
+      },
+    });
+  } catch (err) {
+    if (!isUniqueConstraintError(err)) throw err;
+    // Lost a create race against a second concurrent launch for the same
+    // brand-new telegramId — the other request's row is the real one; use it
+    // rather than erroring out the user's first-ever open of the Mini App.
+    return fastify.prisma.user.findUniqueOrThrow({ where: { telegramId } });
+  }
+
+  await fastify.prisma.auditLog.create({
+    data: { userId: user.id, action: 'auth.telegram_register', ip: req.ip },
+  });
+
+  // Same trigger point as /auth/register above and the bot's own
+  // resolveOrCreateUser: right after a new referred user is created.
+  if (referrer) {
+    const reward = await maybeActivateReferralReward(fastify.prisma, referrer.id);
+    if (reward.activated && referrer.telegramId && fastify.config.TELEGRAM_BOT_TOKEN) {
+      const bot = getReferralNotifierBot(fastify.config.TELEGRAM_BOT_TOKEN, fastify.log);
+      await sendReferralRewardNotification(
+        bot.api,
+        referrer.telegramId,
+        reward.referredCount,
+        fastify.log as never,
+      );
+    }
+  }
+
+  return user;
 }
 
 // Credential-stuffing/brute-force guard, tighter than the global 100/min limit.
@@ -107,6 +193,37 @@ export default async function authRoutes(fastify: FastifyInstance) {
     await fastify.prisma.auditLog.create({
       data: { userId: user.id, action: 'auth.login', ip: req.ip },
     });
+    const token = fastify.jwt.sign({ userId: user.id, role: user.role });
+    return reply.send({ token });
+  });
+
+  fastify.post('/auth/telegram', { config: { rateLimit: AUTH_RATE_LIMIT } }, async (req, reply) => {
+    if (!fastify.config.TELEGRAM_BOT_TOKEN) {
+      return reply.code(503).send({ error: 'Telegram authentication is not configured' });
+    }
+    const body = telegramAuthSchema.parse(req.body);
+
+    try {
+      // Throws (SignatureMissingError/SignatureInvalidError/AuthDateInvalidError/
+      // ExpiredError) on anything that isn't a genuine, fresh (default: <24h old,
+      // see @tma.js/init-data-node's expiresIn default) initData signed by this
+      // exact bot token — never trust the payload before this line succeeds.
+      validateTelegramInitData(body.initData, fastify.config.TELEGRAM_BOT_TOKEN);
+    } catch {
+      return reply.code(401).send({ error: 'Invalid or expired Telegram authentication data' });
+    }
+
+    const parsed = parseTelegramInitData(body.initData);
+    if (!parsed.user) {
+      return reply.code(400).send({ error: 'initData has no user payload' });
+    }
+    const telegramId = parsed.user.id.toString();
+
+    const user = await resolveOrCreateTelegramUser(fastify, req, telegramId, parsed.start_param);
+    await fastify.prisma.auditLog.create({
+      data: { userId: user.id, action: 'auth.telegram_login', ip: req.ip },
+    });
+
     const token = fastify.jwt.sign({ userId: user.id, role: user.role });
     return reply.send({ token });
   });

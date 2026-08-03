@@ -1,28 +1,51 @@
-import { randomBytes } from 'node:crypto';
-import bs58 from 'bs58';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Connection, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import { getMint } from '@solana/spl-token';
-import type { Dex, PrismaClient } from '@prisma/client';
+import type { Dex, Prisma, PrismaClient } from '@prisma/client';
 import { unsealKeypair, type Logger } from '@nova/shared';
 import type { NotificationService } from '@nova/telegram-bot';
-import { JupiterClient, SOL_MINT } from '../solana/jupiter.js';
+import { JupiterClient, SOL_MINT, type PriorityLevel } from '../solana/jupiter.js';
 import type { DexScreenerClient } from '../solana/dexscreener.js';
-import { sharedSolPriceOracle, type SolPriceOracle } from '../solana/pumpfunBondingCurve.js';
+import {
+  sharedSolPriceOracle,
+  getBondingCurveVaultAta,
+  type SolPriceOracle,
+} from '../solana/pumpfunBondingCurve.js';
+import { getTopHolder } from '../detection/onchain.js';
 import type { DexRegistry } from '../solana/dex/registry.js';
+import { NotImplementedNativeExecutor } from '../solana/dex/types.js';
 import { JitoClient } from '../solana/jito.js';
-import { evaluateExit, type ExitReason } from './exitEngine.js';
+import { broadcastTransaction as broadcastTransactionShared } from '../solana/broadcast.js';
+import { evaluateExit, resolveEffectiveStopLossPercent, type ExitReason } from './exitEngine.js';
+import { positionCloseLock } from './positionCloseLock.js';
+import {
+  classifySellFailure,
+  type SellFailureCategory,
+  type SellFailureClassification,
+} from './sellFailureClassifier.js';
+import { computeSellRetryBackoffMs } from './sellRetryBackoff.js';
 import { computeTrailingStopDisplay, defaultExitParams } from './adaptiveTrailingStop.js';
 import { eventBus } from '../lib/eventBus.js';
+import { latencyTracker, getTraceLatencySummary } from '../lib/latencyTracker.js';
+import { TtlCache } from '../lib/ttlCache.js';
 import { TradingSafety, SafetyCheckError } from './safety.js';
+import {
+  evaluateNextPartialExit,
+  DEFAULT_PARTIAL_EXIT_TIERS,
+  type PartialExitTier,
+} from './partialExitEngine.js';
+import {
+  computeInstitutionalTrailingStopPriceUsd,
+  INSTITUTIONAL_STOP_LOSS_PERCENT,
+} from './institutionalTrailingStop.js';
+import {
+  evaluateTp1TrailingStrategy,
+  DEFAULT_TP1_TRAILING_CONFIG,
+  type Tp1TrailingConfig,
+} from './tp1TrailingStrategy.js';
 
 const LAMPORTS_PER_SOL = 1_000_000_000;
 const DEFAULT_MAX_PRIORITY_FEE_LAMPORTS = 1_000_000;
-// Modest fixed tip — Jito bundles need a nonzero tip to be considered by
-// validators, but this is a fallback-with-graceful-degradation path (a rejected
-// or unlanded bundle just falls through to a plain send), not the only way a
-// trade can land, so a small fixed amount is a reasonable default over adding
-// another tunable for this pass.
-const JITO_TIP_LAMPORTS = 100_000;
 
 /**
  * Never trust a pre-trade Jupiter quote for bookkeeping — actual execution almost
@@ -82,6 +105,26 @@ async function withVerificationRetry<T>(
   throw lastErr;
 }
 
+/**
+ * Production Bug Fix (2026-07-14): tags a thrown error with its classified
+ * SELL-failure category so callers further up the stack (PriceMonitor's tick
+ * loop, EmergencyExitMonitor's tick loop) can log something more useful than
+ * a raw, unclassified `err` — without those callers needing to re-import or
+ * re-run the classifier themselves. Never changes the error's message/type,
+ * only attaches metadata; existing `.rejects.toThrow(/pattern/)` assertions
+ * in tests are unaffected.
+ */
+function tagSellFailure<E>(err: E, category: SellFailureCategory): E {
+  if (err && typeof err === 'object') {
+    (err as { sellFailureCategory?: SellFailureCategory }).sellFailureCategory = category;
+  }
+  return err;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Same idea as getActualTokenDelta, but for native SOL (lamports), which isn't an SPL token balance. */
 async function getActualSolDelta(
   connection: Connection,
@@ -112,7 +155,7 @@ async function getActualSolDelta(
  * of truth for "how much can we actually sell." Never sell a stored/estimated
  * amount without checking this first.
  */
-async function getRealTokenBalance(
+export async function getRealTokenBalance(
   connection: Connection,
   ownerPubkey: string,
   mint: string,
@@ -140,8 +183,87 @@ export interface OpenPositionParams {
   trailingStopPercent?: number;
   /** Optional exit strategy — see adaptiveTrailingStop.ts. Frozen onto the Position at open time. */
   trailingStopPreset?: string;
+  /** TP1 / Breakeven / Trailing exit strategy (2026-07-28/29) — 'tp1_trailing_v1'
+   * or undefined (today's exact unchanged behavior). Frozen onto the
+   * Position at open time, same convention as trailingStopPreset. Mutually
+   * exclusive with trailingStopPreset/institutionalModeEnabled in practice
+   * (autoTrader.ts only ever sets one), though this method itself doesn't
+   * enforce that — it just freezes whatever the caller passed. */
+  exitStrategy?: string;
   /** Display-only, for the BUY trade card — the score that actually gated this buy. */
   aiScore?: number;
+  /** Institutional Mode — "max 3 simultaneous positions," see safety.ts's CheckOpenParams. */
+  maxOpenPositionsOverride?: number;
+  /** Institutional Mode — gates safety.ts's capital-reserve + daily-loss-%
+   * checks, AND is frozen onto the Position at open time (see schema.prisma). */
+  institutionalModeEnabled?: boolean;
+  /** moonbagPercent (0-100, from SnipeConfig) is converted to a token-amount
+   * floor here, once the actual bought amount is known post-swap. */
+  moonbagPercent?: number;
+  /** Frozen at open — the combined min(ruleScore, aiScore) that gated+sized
+   * this trade, for later trade-report display (Position.riskScoreAtEntry). */
+  riskScoreAtEntry?: number;
+  /** Frozen at open — see partialExitEngine.ts. Undefined/omitted means "not
+   * an institutional position," same as every other institutional field here. */
+  partialTakeProfitTiers?: readonly PartialExitTier[];
+  /**
+   * Latency Optimization Stage 1 (2026-07-14): epoch-ms timestamps captured
+   * upstream (worker.ts's handleNewTokenLaunch) for the token-level stages
+   * that happen before any per-user buy attempt exists — token detection and
+   * AI scoring are shared across every user's SnipeConfig fan-out for this
+   * mint, so they're passed in rather than re-measured per attempt. All
+   * optional: a caller that omits them (copyTrading.ts, every existing test)
+   * simply doesn't get those two stages in its latency trace — everything
+   * else about the buy is unaffected.
+   */
+  tokenDetectedAt?: number;
+  aiScoringStartAt?: number;
+  aiScoringEndAt?: number;
+  /**
+   * Two-stage discovery pipeline (2026-07-22): epoch-ms timestamps for the
+   * candidatePipeline.ts checkpoints (queue pickup, DexScreener validation,
+   * critical-security-gate completion, sellability verification) and the
+   * decision/buy-submission checkpoints captured in worker.ts/autoTrader.ts —
+   * all upstream of any per-user buy attempt, same optional/pass-through
+   * convention as the three fields above.
+   */
+  analysisStartedAt?: number;
+  dexValidatedAt?: number;
+  safetyCompletedAt?: number;
+  sellabilityVerifiedAt?: number;
+  decisionAt?: number;
+  buySubmittedAt?: number;
+}
+
+/**
+ * Production Bug Fix (2026-07-14): opt-in tuning for sendSwap, undefined by
+ * default so every field individually preserves today's behavior. See
+ * PositionManager.SELL_SEND_SWAP_OPTIONS for the concrete SELL-only values.
+ */
+interface SendSwapOptions {
+  side?: 'BUY' | 'SELL';
+  /** Total attempts (including the first) at the pre-broadcast quote+build step. */
+  maxAttempts?: number;
+  retryDelayMs?: number;
+  timeoutMs?: number;
+  priorityLevel?: PriorityLevel;
+  /**
+   * BUY Engine V2 (2026-07-14): explicit override of which classifySellFailure
+   * categories are safe to retry pre-broadcast for this call. Undefined falls
+   * back to the classifier's own `retryablePreBroadcast` flag — the exact
+   * behavior SELL_SEND_SWAP_OPTIONS already relied on, unchanged. Named after
+   * the SELL classifier (it's the same taxonomy reused for BUY failures, not
+   * a separate one) — see sellFailureClassifier.ts.
+   */
+  retryableCategories?: readonly SellFailureCategory[];
+  /**
+   * Latency Optimization Stage 1 (2026-07-14): when set, threaded into
+   * jupiter.prepareSwap (quote_request/quote_received/tx_build/tx_sign
+   * marks) and into broadcastTransaction (broadcast/rpc_confirmation marks)
+   * — pure measurement, see latencyTracker.ts's doc comment. Undefined for
+   * every caller that hasn't opted in.
+   */
+  traceId?: string;
 }
 
 /** A random-looking signature so paper trades are visually distinct from real (base58) ones. */
@@ -182,6 +304,34 @@ export class PositionManager {
    */
   private readonly unverifiedSwapLocks = new Map<string, number>();
 
+  /**
+   * 2026-07-21 audit (section F): the swap-broadcast-failure catch below used
+   * to log but never alert — unlike the verification-failure catch a few
+   * lines further down, which already does. A position stuck on a transient
+   * failure (blockhash expiry, simulation rejection) can retry every price
+   * tick — live-verified 2026-07-21, one real position had 6 failures ~1
+   * minute apart before succeeding — so this is deduped per position for an
+   * hour rather than firing on every single retry.
+   */
+  private readonly sellFailureAlerted = new TtlCache<string>(60 * 60 * 1000);
+
+  /**
+   * BUY Engine V2 (2026-07-14): guards against two concurrent openPosition
+   * calls for the same wallet+token both passing safety checks and both
+   * submitting a real on-chain swap before either's Position row exists to
+   * be caught by the DB's own one-open-position-per-token unique index (see
+   * schema.prisma's doc comment on that index) — the BUY-side counterpart to
+   * positionCloseLock.ts's concurrent-close guard. Deliberately a plain
+   * in-process Set, not a DB-backed claim like positionCloseLock: unlike a
+   * close (which can be raced by independent tick loops over a position's
+   * entire OPEN lifetime — hours to days), an open's critical section is
+   * only the duration of one openPosition() call (seconds), and this process
+   * is the only writer (nova-api runs as a single pm2 fork instance, not a
+   * cluster — see ecosystem.config.cjs), so an in-process lock already
+   * covers every real race without a schema migration for it.
+   */
+  private readonly openLocks = new Set<string>();
+
   /** How long a stuck reconciliation lock is honored before auto-recovering. */
   private static readonly RECONCILIATION_LOCK_TTL_MS = 10 * 60 * 1000;
 
@@ -220,6 +370,44 @@ export class PositionManager {
     private readonly maxPriorityFeeLamports: number = DEFAULT_MAX_PRIORITY_FEE_LAMPORTS,
     /** Delay between verification retries (withVerificationRetry) — overridable so tests don't wait on real timers. */
     private readonly verificationRetryDelayMs: number = 2000,
+    /** Institutional Mode master switches — see autoTrader.ts's AutoTraderDeps
+     * for the same double-opt-in convention. Both default false, so existing
+     * callers/tests that don't pass them get exactly today's checkAndMaybeClose
+     * behavior (plain evaluateExit, no partial-exit branch). */
+    private readonly institutionalModeGloballyEnabled: boolean = false,
+    private readonly partialExitsGloballyEnabled: boolean = false,
+    /**
+     * SELL_MAX_PERMANENT_ROUTE_RETRIES (2026-07-26): how many consecutive
+     * `permanent` (no-route) SELL failures — see sellFailureClassifier.ts —
+     * a position may accumulate before it's marked unsellable and stops
+     * being retried. Fixes a production bug where a position with no
+     * Jupiter route was retried forever, once per price tick, with its
+     * failure counter reaching the thousands.
+     */
+    private readonly maxPermanentRouteRetries: number = 3,
+    /**
+     * SELL_PERMANENT_RETRY_BACKOFF_BASE_MS/MAX_MS (2026-07-26, Phase 6): how
+     * long checkAndMaybeClose must wait after a position's most recent
+     * permanent (no-route) SELL failure before attempting another sell for
+     * it — see sellRetryBackoff.ts. Doubles each consecutive permanent
+     * failure, capped at the Max. Defaults match sellRetryBackoff.ts's own
+     * production defaults (1min doubling up to 30min) so every existing
+     * caller/test that omits these gets the real production cadence, not an
+     * arbitrary test-only value.
+     */
+    private readonly sellPermanentRetryBackoffBaseMs: number = 60_000,
+    private readonly sellPermanentRetryBackoffMaxMs: number = 1_800_000,
+    /**
+     * TP1 / Breakeven / Trailing exit strategy (2026-07-28) — same
+     * double-opt-in convention as institutionalModeGloballyEnabled above:
+     * defaults false, so every existing caller/test that omits this gets
+     * exactly today's checkAndMaybeClose behavior even for a position whose
+     * exitStrategy happens to be set. exitV2Config bundles the operator-
+     * tunable numeric knobs (see tp1TrailingStrategy.ts's own doc comment on
+     * why this is one object rather than 7 more positional params).
+     */
+    private readonly exitStrategyV2GloballyEnabled: boolean = false,
+    private readonly exitV2Config: Tp1TrailingConfig = DEFAULT_TP1_TRAILING_CONFIG,
   ) {}
 
   /**
@@ -229,44 +417,36 @@ export class PositionManager {
    * swap transaction's own signature either way, since a Jito-landed transaction
    * still appears on-chain under its normal signature once it lands.
    */
+  /**
+   * `lastValidBlockHeight`, when known (Jupiter returns it alongside the built
+   * transaction — see JupiterClient.buildSwapTransaction), lets confirmTransaction
+   * use the precise blockhash-expiry confirmation strategy instead of the
+   * bare-signature one. Optional and unused unless a caller passes it, so the
+   * native-DEX-fallback path (which has no such value) keeps today's exact
+   * behavior. This changes only how fast/precisely a *failure* is detected —
+   * never what counts as a successful send.
+   */
+  /**
+   * 2026-07-23 audit (real on-chain referral/owner payout): the actual logic
+   * (Jito-bundle-first, direct-send fallback, explicit on-chain revert check
+   * on both paths) now lives in the standalone `../solana/broadcast.ts`, so
+   * the new payout-transfer code can reuse it verbatim instead of a second,
+   * potentially-drifting copy. This method is now a pure delegate — same
+   * signature, same behavior, zero semantic change.
+   */
   private async broadcastTransaction(
     transaction: VersionedTransaction,
     signer: Keypair,
+    lastValidBlockHeight?: number,
+    traceId?: string,
   ): Promise<string> {
-    const signature = bs58.encode(transaction.signatures[0]!);
-
-    if (this.jito) {
-      try {
-        const { blockhash } = await this.connection.getLatestBlockhash();
-        const tipTx = JitoClient.buildTipTransaction(signer, JITO_TIP_LAMPORTS, blockhash);
-        await this.jito.sendBundle([tipTx, transaction]);
-        const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
-        if (confirmation.value.err) {
-          throw new Error(
-            `Transaction ${signature} landed but reverted on-chain: ${JSON.stringify(confirmation.value.err)}`,
-          );
-        }
-        return signature;
-      } catch (err) {
-        this.logger.warn({ err }, 'Jito bundle submission failed — falling back to a direct send');
-      }
-    }
-
-    await this.connection.sendTransaction(transaction);
-    // A confirmed transaction can still have landed with an on-chain error (e.g.
-    // slippage exceeded, a program-level revert) — confirmTransaction only rejects
-    // on timeout/expiry, never on this. Live-verified gap: without this check, a
-    // reverted swap was recorded as a successful buy/sell (a Position "opened"
-    // with 0 tokens actually received, or "closed" with a fabricated PnL) since
-    // getActualTokenDelta/getActualSolDelta both computed a real delta of 0/refund
-    // rather than surfacing the revert itself.
-    const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
-    if (confirmation.value.err) {
-      throw new Error(
-        `Transaction ${signature} landed but reverted on-chain: ${JSON.stringify(confirmation.value.err)}`,
-      );
-    }
-    return signature;
+    return broadcastTransactionShared(
+      { connection: this.connection, logger: this.logger, jito: this.jito },
+      transaction,
+      signer,
+      lastValidBlockHeight,
+      traceId,
+    );
   }
 
   /**
@@ -312,6 +492,215 @@ export class PositionManager {
   }
 
   /**
+   * Permanent (no-route) SELL failure tracking (2026-07-26 fix): called only
+   * when classifySellFailure marked the failure `permanent: true` — currently
+   * just `route_unavailable` (NO_ROUTES_FOUND / ROUTE_NOT_FOUND / a Jupiter
+   * failure whose message indicates no route exists — see
+   * sellFailureClassifier.ts). Unlike the generic sellFailureCount tracked
+   * alongside this, that counter never gated a retry; this one does. Once
+   * noRouteSellFailureCount reaches maxPermanentRouteRetries
+   * (SELL_MAX_PERMANENT_ROUTE_RETRIES, default 3), the position is marked
+   * sellUnsellable so checkAndMaybeClose/closePositionLocked/
+   * executePartialSellLocked all refuse to attempt another sell for it —
+   * fixing the production bug where a routeless position retried forever,
+   * once per price tick, with its failure count reaching the thousands.
+   */
+  private async recordPermanentSellFailure(
+    positionId: string,
+    mint: string,
+    symbolOrMint: string,
+    classification: SellFailureClassification,
+  ): Promise<void> {
+    const updated = await this.prisma.position.update({
+      where: { id: positionId },
+      data: { noRouteSellFailureCount: { increment: 1 } },
+      select: { noRouteSellFailureCount: true, sellUnsellable: true },
+    });
+    if (updated.sellUnsellable || updated.noRouteSellFailureCount < this.maxPermanentRouteRetries) {
+      return;
+    }
+    await this.prisma.position.update({
+      where: { id: positionId },
+      data: {
+        sellUnsellable: true,
+        unsellableAt: new Date(),
+        unsellableReason: classification.detail,
+      },
+    });
+    this.logger.error(
+      {
+        positionId,
+        mint,
+        attempts: updated.noRouteSellFailureCount,
+        category: classification.category,
+        detail: classification.detail,
+      },
+      'Skipping position permanently because no Jupiter route exists.',
+    );
+    await this.notifier?.notifyError(
+      'Position marked unsellable — no Jupiter route',
+      `Position ${positionId} (${symbolOrMint}) failed to sell ${updated.noRouteSellFailureCount} consecutive times because no Jupiter (or fallback) route exists for this mint [${classification.category}]. Stop-loss/take-profit/trailing-stop auto-sell is now permanently disabled and this position is archived from active price monitoring — manual intervention required. This is a one-time alert; it will not repeat for this position.`,
+    );
+    eventBus.publish('position.updated', { positionId, status: 'OPEN' });
+  }
+
+  /**
+   * Production Bug Fix (2026-07-14): SELL-only tuning, threaded through as an
+   * options object so the BUY call site (openPosition) — which never passes
+   * this — is byte-identical to its pre-fix behavior: single attempt, 'high'
+   * priority, no fetch timeout. Only closePositionLocked/executePartialSellLocked
+   * opt in, since SELL failures are the ones under investigation here and a
+   * stuck SELL (unlike a stuck BUY) leaves capital exposed to further downside.
+   */
+  private static readonly SELL_SEND_SWAP_OPTIONS: SendSwapOptions = {
+    side: 'SELL',
+    maxAttempts: 2,
+    retryDelayMs: 300,
+    timeoutMs: 8_000,
+    priorityLevel: 'veryHigh',
+  };
+
+  /**
+   * Broadcast-stage SELL retry (2026-07-23, USOH incident production fix).
+   *
+   * Root cause: sendSwap's own retry loop (maxAttempts above) only covers a
+   * failure at the pre-broadcast quote/build step (this.jupiter.prepareSwap)
+   * — broadcastTransaction is called exactly once, outside that loop, by
+   * deliberate 2026-07-14 design (see sendSwap's own doc comment) so an
+   * ambiguous confirmation-timeout can never trigger a second, potentially
+   * double-selling broadcast. But a blockhash that expires AT the broadcast
+   * stage (built fine, then the Jito-bundle attempt + fallback direct send in
+   * broadcast.ts took long enough that the blockhash was no longer valid by
+   * the time it was actually sent) was never retried at all — confirmed live
+   * 2026-07-23: two USOH positions retried their SELL every ~45-70s (one full
+   * price-monitor cycle apart) for over 10 minutes straight, each attempt
+   * dying the exact same way, because nothing inside sendSwap ever rebuilt
+   * with a fresh blockhash after a broadcast-stage failure.
+   *
+   * This wraps sendSwap in an outer loop that, ONLY for the categories
+   * classifySellFailure marks `retryablePreBroadcast: true` (blockhash_expired,
+   * rpc_timeout, jupiter_failure — see that module's own doc comment: each is
+   * a GUARANTEED-never-landed rejection, not merely a likely one), calls
+   * sendSwap again from scratch — a fresh prepareSwap call means a fresh quote
+   * AND a fresh blockhash, not a resend of the same stale transaction.
+   *
+   * Duplicate-sell safety (2026-07-23 requirement): before every retry, this
+   * re-verifies the wallet's real on-chain token balance still covers the
+   * amount being sold. classifySellFailure's guarantee already makes this
+   * belt-and-braces rather than load-bearing, but it costs one cheap RPC read
+   * and closes the gap completely — if the balance has dropped, some other
+   * transaction must have actually landed, and this aborts further retries
+   * immediately rather than risking a second sell of tokens already gone.
+   */
+  private static readonly SELL_BROADCAST_RETRY_MAX_ATTEMPTS = 3;
+  private static readonly SELL_BROADCAST_RETRY_DELAY_MS = 500;
+  private static readonly SELL_BROADCAST_RETRYABLE_CATEGORIES: readonly SellFailureCategory[] = [
+    'blockhash_expired',
+    'rpc_timeout',
+    'jupiter_failure',
+  ];
+
+  private async sendSwapWithBroadcastRetry(
+    keypair: Keypair,
+    swapParams: {
+      inputMint: string;
+      outputMint: string;
+      amountLamports: bigint;
+      slippageBps: number;
+    },
+    getFallbackTarget: () => Promise<{ dex: Dex; poolAddress: string | null } | undefined>,
+    options: SendSwapOptions,
+    duplicateGuard: { mint: string; expectedAtLeastRaw: bigint; positionId: string },
+  ): Promise<string> {
+    const maxAttempts = PositionManager.SELL_BROADCAST_RETRY_MAX_ATTEMPTS;
+    let lastErr: unknown;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.sendSwap(keypair, swapParams, getFallbackTarget, options);
+      } catch (err) {
+        lastErr = err;
+        const classification = classifySellFailure(err);
+        const isBroadcastRetryable = PositionManager.SELL_BROADCAST_RETRYABLE_CATEGORIES.includes(
+          classification.category,
+        );
+        if (!isBroadcastRetryable || attempt >= maxAttempts) throw err;
+
+        const realBalance = await getRealTokenBalance(
+          this.connection,
+          keypair.publicKey.toBase58(),
+          duplicateGuard.mint,
+        ).catch((balanceErr) => {
+          this.logger.warn(
+            { err: balanceErr, positionId: duplicateGuard.positionId },
+            'sendSwapWithBroadcastRetry: balance recheck failed — proceeding with retry anyway (classifier already guarantees this category never landed)',
+          );
+          return duplicateGuard.expectedAtLeastRaw; // treat as "still there" — don't block a legitimate retry on an unrelated RPC hiccup
+        });
+        if (realBalance < duplicateGuard.expectedAtLeastRaw) {
+          this.logger.error(
+            {
+              positionId: duplicateGuard.positionId,
+              mint: duplicateGuard.mint,
+              expected: duplicateGuard.expectedAtLeastRaw.toString(),
+              realBalance: realBalance.toString(),
+              category: classification.category,
+            },
+            'sendSwapWithBroadcastRetry: wallet balance dropped mid-retry — a prior attempt may have actually landed; aborting further retries to avoid a duplicate sell',
+          );
+          throw err;
+        }
+
+        this.logger.warn(
+          {
+            err,
+            positionId: duplicateGuard.positionId,
+            category: classification.category,
+            attempt,
+            maxAttempts,
+          },
+          'sendSwap: broadcast-stage failure is safely retryable (classifier guarantees it never landed) — rebuilding with a fresh quote/blockhash and retrying',
+        );
+        await sleep(PositionManager.SELL_BROADCAST_RETRY_DELAY_MS);
+      }
+    }
+    // Unreachable — the loop above always either returns or throws.
+    throw lastErr;
+  }
+
+  /**
+   * BUY Engine V2 (2026-07-14): BUY-side counterpart to SELL_SEND_SWAP_OPTIONS
+   * above. Added after live production BUY failures (2026-07-14, post SELL
+   * fix deploy) went straight to a permanent BUY CANCELLED on the first
+   * attempt: "Simulation failed. Transaction simulation failed: Blockhash not
+   * found" and a bare "Simulation failed" with no further detail — both
+   * guaranteed pre-broadcast (simulateTransaction never reaches a validator),
+   * so retrying with a fresh quote/blockhash carries the exact same "can
+   * never cause a double-buy" safety property SELL's blockhash_expired retry
+   * already had. retryableCategories explicitly widens past the classifier's
+   * default retryablePreBroadcast set to also include 'simulation_failed' —
+   * see SendSwapOptions.retryableCategories's doc comment. maxAttempts=3
+   * (one more than SELL's 2): a missed BUY only costs a trading opportunity,
+   * never leaves capital already at risk the way a stuck SELL does, so an
+   * extra attempt is pure upside. priorityLevel stays 'high' (openPosition's
+   * pre-existing default) rather than SELL's 'veryHigh' — a BUY has no
+   * capital-already-exposed urgency to justify outbidding other traffic.
+   */
+  private static readonly BUY_SEND_SWAP_OPTIONS: SendSwapOptions = {
+    side: 'BUY',
+    maxAttempts: 3,
+    retryDelayMs: 300,
+    timeoutMs: 8_000,
+    priorityLevel: 'high',
+    retryableCategories: [
+      'blockhash_expired',
+      'simulation_failed',
+      'rpc_timeout',
+      'jupiter_failure',
+    ],
+  };
+
+  /**
    * Jupiter first, always — it already aggregates every DEX this platform knows
    * about and is the far more battle-tested path. Only on a Jupiter failure (e.g.
    * "no route found," which can happen for a token that's too new for Jupiter's
@@ -319,6 +708,29 @@ export class PositionManager {
    * and only if one is registered and the token's pool is known. The native
    * builder's own simulation gate (mirroring JupiterClient.prepareSwap's) means a
    * malformed fallback transaction is caught here, never sent.
+   *
+   * `options.maxAttempts > 1` retries ONLY the pre-broadcast quote+build+sign+
+   * simulate step (nothing has touched the network in a way that could land on
+   * mainnet), and only when the failure classifies as `retryablePreBroadcast`
+   * (see sellFailureClassifier.ts) — e.g. a transient RPC/Jupiter 5xx or a
+   * blockhash rejected before ever reaching a block.
+   *
+   * Production Bug Fix (2026-07-14): broadcastTransaction is called exactly
+   * ONCE per sendSwap invocation, and it sits OUTSIDE the retry/fallback try
+   * block below — not inside it. The pre-fix version called
+   * `return await this.broadcastTransaction(...)` from directly inside the
+   * try, which meant ANY broadcastTransaction failure (including an ambiguous
+   * confirmation timeout, where the transaction may have already landed and
+   * simply wasn't observed in time) fell into the same catch as a genuine
+   * pre-broadcast Jupiter failure and triggered a second, fully independent
+   * broadcast via the native-DEX fallback — a real double-sell path with
+   * dexRegistry configured (production always configures it; the existing
+   * unit tests happened to leave it undefined, which is why this never
+   * surfaced there). Building the transaction (with retry/fallback) and
+   * broadcasting it are now two separate phases, so a broadcast failure can
+   * never cause a second broadcast from within this function — it always
+   * propagates straight to the caller, which already has the correct
+   * ambiguous-landing handling (unverifiedSwapLocks + manual reconciliation).
    */
   private async sendSwap(
     keypair: Keypair,
@@ -329,41 +741,127 @@ export class PositionManager {
       slippageBps: number;
     },
     getFallbackTarget: () => Promise<{ dex: Dex; poolAddress: string | null } | undefined>,
+    options?: SendSwapOptions,
   ): Promise<string> {
-    try {
-      const { transaction } = await this.jupiter.prepareSwap(this.connection, keypair, swapParams, {
-        maxPriorityFeeLamports: this.maxPriorityFeeLamports,
-        priorityLevel: 'high',
-        dynamicSlippage: true,
-      });
-      return await this.broadcastTransaction(transaction, keypair);
-    } catch (jupiterErr) {
-      const target = await getFallbackTarget();
-      const executor = target ? this.dexRegistry?.getExecutor(target.dex) : undefined;
-      if (!executor || !target?.poolAddress) throw jupiterErr;
+    const maxAttempts = Math.max(1, options?.maxAttempts ?? 1);
+    let lastErr: unknown;
+    let transaction: VersionedTransaction | undefined;
+    let lastValidBlockHeight: number | undefined;
 
-      this.logger.warn(
-        { err: jupiterErr, dex: target.dex, poolAddress: target.poolAddress },
-        'Jupiter could not route this swap — falling back to the native DEX executor',
-      );
+    buildLoop: for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const prepared = await this.jupiter.prepareSwap(this.connection, keypair, swapParams, {
+          maxPriorityFeeLamports: this.maxPriorityFeeLamports,
+          priorityLevel: options?.priorityLevel ?? 'high',
+          dynamicSlippage: true,
+          timeoutMs: options?.timeoutMs,
+          traceId: options?.traceId,
+        });
+        transaction = prepared.transaction;
+        lastValidBlockHeight = prepared.lastValidBlockHeight;
+        break buildLoop;
+      } catch (jupiterErr) {
+        lastErr = jupiterErr;
+        const classification = classifySellFailure(jupiterErr);
+        const isRetryable = options?.retryableCategories
+          ? options.retryableCategories.includes(classification.category)
+          : classification.retryablePreBroadcast;
 
-      const tx = await executor.buildSwap({
-        connection: this.connection,
-        signer: keypair,
-        ...swapParams,
-        poolAddress: target.poolAddress,
-      });
-      if (!(tx instanceof VersionedTransaction)) {
-        throw new Error(`Native ${target.dex} executor returned an unsupported transaction type`);
-      }
-      const sim = await this.connection.simulateTransaction(tx, { sigVerify: false });
-      if (sim.value.err) {
-        throw new Error(
-          `Native ${target.dex} swap simulation failed: ${JSON.stringify(sim.value.err)}`,
+        if (isRetryable && attempt < maxAttempts) {
+          this.logger.warn(
+            {
+              err: jupiterErr,
+              category: classification.category,
+              attempt,
+              maxAttempts,
+              side: options?.side,
+              // For a BUY, inputMint is always SOL_MINT — the token being
+              // traded is outputMint. For a SELL it's the reverse. Logging
+              // whichever one is the actual token keeps this line useful for
+              // either side (pre-fix this always logged inputMint, which was
+              // fine for SELL-only but would have been SOL_MINT for BUY).
+              mint: options?.side === 'BUY' ? swapParams.outputMint : swapParams.inputMint,
+            },
+            'sendSwap: pre-broadcast failure is safely retryable (nothing broadcast yet) — retrying with a fresh quote',
+          );
+          await sleep(options?.retryDelayMs ?? 300);
+          continue buildLoop;
+        }
+
+        const target = await getFallbackTarget();
+        const executor = target ? this.dexRegistry?.getExecutor(target.dex) : undefined;
+        // Production bug fix (2026-07-26): DexRegistry always registers SOME
+        // executor for every Dex — one with no override configured defaults
+        // to NotImplementedNativeExecutor (see registry.ts), which is truthy
+        // and so passed the `!executor` check below, but its buildSwap always
+        // rejects with a generic "not implemented yet" error whose message
+        // happens to contain the word "Jupiter." That error — not the
+        // original, correctly-classified jupiterErr (e.g. route_unavailable,
+        // permanent — see sellFailureClassifier.ts) — was what propagated out
+        // of this method and got (mis)classified by every caller as the
+        // ordinary retryable jupiter_failure category. Net effect, confirmed
+        // live: a SELL with no real route on a DEX with no real fallback
+        // executor (today: RAYDIUM/ORCA/METEORA, only PUMPSWAP has one) never
+        // reached SELL_MAX_PERMANENT_ROUTE_RETRIES and retried forever, once
+        // per price tick, every notifyError still saying "Will keep retrying
+        // on the next price tick." A stub executor has zero real fallback
+        // capability, so it's treated identically to no executor at all —
+        // this always throws the ORIGINAL classified error instead of ever
+        // invoking the stub.
+        if (!executor || !target?.poolAddress || executor instanceof NotImplementedNativeExecutor) {
+          throw tagSellFailure(jupiterErr, classification.category);
+        }
+
+        this.logger.warn(
+          {
+            err: jupiterErr,
+            dex: target.dex,
+            poolAddress: target.poolAddress,
+            category: classification.category,
+          },
+          'Jupiter could not route this swap — falling back to the native DEX executor',
         );
+
+        const tx = await executor.buildSwap({
+          connection: this.connection,
+          signer: keypair,
+          ...swapParams,
+          poolAddress: target.poolAddress,
+        });
+        if (!(tx instanceof VersionedTransaction)) {
+          throw tagSellFailure(
+            new Error(`Native ${target.dex} executor returned an unsupported transaction type`),
+            'other',
+          );
+        }
+        const sim = await this.connection.simulateTransaction(tx, { sigVerify: false });
+        if (sim.value.err) {
+          throw tagSellFailure(
+            new Error(
+              `Native ${target.dex} swap simulation failed: ${JSON.stringify(sim.value.err)}`,
+            ),
+            'simulation_failed',
+          );
+        }
+        transaction = tx;
+        lastValidBlockHeight = undefined;
+        break buildLoop;
       }
-      return await this.broadcastTransaction(tx, keypair);
     }
+
+    if (!transaction) {
+      // Unreachable in practice (the loop above always either sets
+      // `transaction` and breaks, or throws) — kept for TypeScript's
+      // control-flow analysis and as a defensive backstop.
+      throw tagSellFailure(lastErr, classifySellFailure(lastErr).category);
+    }
+
+    return await this.broadcastTransaction(
+      transaction,
+      keypair,
+      lastValidBlockHeight,
+      options?.traceId,
+    );
   }
 
   /**
@@ -411,7 +909,37 @@ export class PositionManager {
     return 0;
   }
 
+  /**
+   * BUY Engine V2 (2026-07-14): the real open logic moved to
+   * openPositionLocked below, unchanged — this wrapper's only job is
+   * acquiring openLocks before it and releasing it after, no matter which of
+   * openPositionLocked's many return/throw paths fires. Mirrors
+   * closePosition/closePositionLocked's split above exactly.
+   */
   async openPosition(params: OpenPositionParams) {
+    const lockKey = `${params.walletId}:${params.tokenId}`;
+    if (this.openLocks.has(lockKey)) {
+      const reason = `A buy for wallet ${params.walletId} / token ${params.tokenId} is already in progress — refusing to start a second concurrent attempt (prevents duplicate positions).`;
+      this.logger.warn(
+        {
+          walletId: params.walletId,
+          mint: params.mint,
+          tokenId: params.tokenId,
+          location: 'apps/api/src/trading/positionManager.ts:openPosition',
+        },
+        `BUY CANCELLED (concurrent open)\nReason:\n${reason}`,
+      );
+      throw new Error(reason);
+    }
+    this.openLocks.add(lockKey);
+    try {
+      return await this.openPositionLocked(params);
+    } finally {
+      this.openLocks.delete(lockKey);
+    }
+  }
+
+  private async openPositionLocked(params: OpenPositionParams) {
     const lockKey = `${params.walletId}:${params.tokenId}`;
     if (this.isLockActive(lockKey)) {
       const reason = `A previous buy for wallet ${params.walletId} / token ${params.tokenId} landed on-chain but could not be verified — refusing to submit another swap until this is manually reconciled (or until the lock auto-expires).`;
@@ -425,6 +953,41 @@ export class PositionManager {
         `BUY CANCELLED\nReason:\n${reason}`,
       );
       throw new Error(reason);
+    }
+
+    // Latency Optimization Stage 1 (2026-07-14): only real swaps get a trace —
+    // a paper fill never reaches broadcast/rpc_confirmation, so mixing it into
+    // the same report would understate real BUY latency. traceId stays
+    // undefined in paper mode, and every latencyTracker call below is already
+    // a no-op on undefined, so nothing else needs to branch on this.
+    const traceId = this.paperTrading ? undefined : randomUUID();
+    latencyTracker.start(traceId, 'BUY', { mint: params.mint, walletId: params.walletId });
+    if (params.tokenDetectedAt !== undefined) {
+      latencyTracker.mark(traceId, 'token_detected', params.tokenDetectedAt);
+    }
+    if (params.aiScoringStartAt !== undefined) {
+      latencyTracker.mark(traceId, 'ai_scoring_start', params.aiScoringStartAt);
+    }
+    if (params.aiScoringEndAt !== undefined) {
+      latencyTracker.mark(traceId, 'ai_scoring_end', params.aiScoringEndAt);
+    }
+    if (params.analysisStartedAt !== undefined) {
+      latencyTracker.mark(traceId, 'analysis_started', params.analysisStartedAt);
+    }
+    if (params.dexValidatedAt !== undefined) {
+      latencyTracker.mark(traceId, 'dex_validated', params.dexValidatedAt);
+    }
+    if (params.safetyCompletedAt !== undefined) {
+      latencyTracker.mark(traceId, 'safety_completed', params.safetyCompletedAt);
+    }
+    if (params.sellabilityVerifiedAt !== undefined) {
+      latencyTracker.mark(traceId, 'sellability_verified', params.sellabilityVerifiedAt);
+    }
+    if (params.decisionAt !== undefined) {
+      latencyTracker.mark(traceId, 'decision', params.decisionAt);
+    }
+    if (params.buySubmittedAt !== undefined) {
+      latencyTracker.mark(traceId, 'buy_submitted', params.buySubmittedAt);
     }
 
     const check = await this.safety.checkBeforeOpen(
@@ -448,8 +1011,10 @@ export class PositionManager {
         },
         `BUY CANCELLED\nReason:\n${reason}`,
       );
-      throw new SafetyCheckError(reason);
+      latencyTracker.finish(traceId, 'failure');
+      throw new SafetyCheckError(reason, check.code, check.details);
     }
+    latencyTracker.mark(traceId, 'filters_complete');
     this.logger.debug(
       { walletId: params.walletId, mint: params.mint, paperTrading: this.paperTrading },
       'Wallet: safety check passed — Buy Executor starting',
@@ -490,8 +1055,31 @@ export class PositionManager {
             const token = await this.prisma.token.findUnique({ where: { id: params.tokenId } });
             return token ? { dex: token.dex, poolAddress: token.poolAddress } : undefined;
           },
+          { ...PositionManager.BUY_SEND_SWAP_OPTIONS, traceId },
         );
       } catch (err) {
+        // BUY Engine V2 (2026-07-14): pre-fix this branch had no logger call
+        // at all — sendSwap's own retry attempts (now covering BUY too, see
+        // BUY_SEND_SWAP_OPTIONS) are already exhausted or the failure was
+        // non-retryable by the time execution reaches here, so this really is
+        // "BUY definitively failed," not a transient blip. Same classified
+        // logging SELL already had (closePositionLocked), so "why do BUYs
+        // fail" is answerable from production logs without re-reading stack
+        // traces — the exact gap this codebase's SELL failure classifier was
+        // built to close, now closed for BUY too.
+        const classification = classifySellFailure(err);
+        this.logger.error(
+          {
+            err,
+            walletId: params.walletId,
+            tokenId: params.tokenId,
+            mint: params.mint,
+            category: classification.category,
+            detail: classification.detail,
+            location: 'apps/api/src/trading/positionManager.ts:openPositionLocked',
+          },
+          `BUY FAILED\nCategory: ${classification.category}\nReason:\n${classification.detail}`,
+        );
         await this.recordFailedTrade({
           walletId: params.walletId,
           tokenId: params.tokenId,
@@ -500,7 +1088,8 @@ export class PositionManager {
           slippageBps: params.slippageBps,
           err,
         });
-        throw err;
+        latencyTracker.finish(traceId, 'failure');
+        throw tagSellFailure(err, classification.category);
       }
 
       // The swap itself landed on-chain from here on — any further failure is a
@@ -550,6 +1139,7 @@ export class PositionManager {
           err,
         });
         await this.notifier?.notifyError('openPosition verification', reason);
+        latencyTracker.finish(traceId, 'failure');
         throw err;
       }
     }
@@ -559,22 +1149,6 @@ export class PositionManager {
       params.amountSol,
       BigInt(outAmount),
     );
-
-    const trade = await this.prisma.trade.create({
-      data: {
-        walletId: params.walletId,
-        tokenId: params.tokenId,
-        side: 'BUY',
-        status: 'CONFIRMED',
-        amountSol: params.amountSol,
-        amountToken: Number(outAmount),
-        priceUsd: entryPriceUsd,
-        txSignature: signature,
-        slippageBps: params.slippageBps,
-        isPaperTrade: this.paperTrading,
-        confirmedAt: new Date(),
-      },
-    });
 
     // Never allow a position to be created with no exit strategy at all — a
     // position with every TP/SL/trailing field null can only ever be closed
@@ -596,21 +1170,134 @@ export class PositionManager {
       );
     }
 
-    const position = await this.prisma.position.create({
-      data: {
-        walletId: params.walletId,
-        tokenId: params.tokenId,
-        entryPriceUsd,
-        amountToken: Number(outAmount),
-        amountSolInvested: params.amountSol,
-        highWaterMarkUsd: entryPriceUsd,
-        takeProfitPercent: params.takeProfitPercent ?? fallbackExit?.takeProfitPercent,
-        stopLossPercent: params.stopLossPercent ?? fallbackExit?.stopLossPercent,
-        trailingStopPercent: params.trailingStopPercent ?? fallbackExit?.trailingStopPercent,
-        trailingStopPreset: params.trailingStopPreset ?? (fallbackExit ? 'balanced' : undefined),
-        isPaperTrade: this.paperTrading,
-      },
-    });
+    // Emergency Exit Engine's "developer wallet" dump proxy — resolved for
+    // every position (2026-07-28: previously institutional-mode-only, but
+    // EmergencyExitMonitor now watches every OPEN position, not just
+    // institutional ones — see its own doc comment), best-effort: a failure
+    // here never blocks the buy, it just means the dev-wallet-dump check is
+    // unavailable for this position (see schema.prisma's devWalletAddress doc
+    // comment on the real limitation — this is the largest real holder, not a
+    // verified deployer identity). Only the bonding-curve vault is excluded
+    // (cheap, no RPC) — this function has no dex/poolAddress to also exclude
+    // a post-migration AMM pool's vaults the way riskAnalyzer.ts's
+    // resolveExcludedVaultAddresses does, a known imprecision for entries
+    // that happen post-migration.
+    let devWalletAddress: string | undefined;
+    let devWalletAmountRawAtEntry: string | undefined;
+    try {
+      const excludeAddresses = [getBondingCurveVaultAta(new PublicKey(params.mint)).toBase58()];
+      const topHolder = await getTopHolder(this.connection, params.mint, excludeAddresses);
+      if (topHolder) {
+        devWalletAddress = topHolder.address;
+        devWalletAmountRawAtEntry = topHolder.amountRaw.toString();
+      }
+    } catch (err) {
+      this.logger.debug(
+        { mint: params.mint, err },
+        'dev-wallet-proxy resolution failed at open — emergency exit dev-dump signal unavailable for this position',
+      );
+    }
+
+    const tradeData = {
+      walletId: params.walletId,
+      tokenId: params.tokenId,
+      side: 'BUY' as const,
+      status: 'CONFIRMED' as const,
+      amountSol: params.amountSol,
+      amountToken: Number(outAmount),
+      priceUsd: entryPriceUsd,
+      txSignature: signature,
+      slippageBps: params.slippageBps,
+      isPaperTrade: this.paperTrading,
+      confirmedAt: new Date(),
+    };
+    // Hard Loss Ceiling (2026-07-18): the one choke point every open (auto-buy,
+    // copy-trade, any future caller) already passes through, so this can never
+    // be bypassed by a caller forgetting to clamp its own exit params — see
+    // exitEngine.ts's resolveEffectiveStopLossPercent doc comment.
+    const { effectiveStopLossPercent, isSystemDefault } = resolveEffectiveStopLossPercent(
+      params.stopLossPercent ?? fallbackExit?.stopLossPercent,
+    );
+    const positionData = {
+      walletId: params.walletId,
+      tokenId: params.tokenId,
+      entryPriceUsd,
+      amountToken: Number(outAmount),
+      amountSolInvested: params.amountSol,
+      highWaterMarkUsd: entryPriceUsd,
+      takeProfitPercent: params.takeProfitPercent ?? fallbackExit?.takeProfitPercent,
+      stopLossPercent: effectiveStopLossPercent,
+      stopLossIsSystemDefault: isSystemDefault,
+      trailingStopPercent: params.trailingStopPercent ?? fallbackExit?.trailingStopPercent,
+      trailingStopPreset: params.trailingStopPreset ?? (fallbackExit ? 'balanced' : undefined),
+      exitStrategy: params.exitStrategy,
+      isPaperTrade: this.paperTrading,
+      // Institutional Mode — frozen at open time, same convention as
+      // trailingStopPreset above. originalAmountToken/remainingAmountToken
+      // both start equal to the bought amount; remainingAmountToken is the
+      // one partial sells (executePartialSell) decrement going forward.
+      institutionalModeEnabled: params.institutionalModeEnabled ?? false,
+      originalAmountToken: Number(outAmount),
+      remainingAmountToken: Number(outAmount),
+      moonbagReserveAmountToken:
+        params.moonbagPercent && params.moonbagPercent > 0
+          ? Number(outAmount) * (params.moonbagPercent / 100)
+          : undefined,
+      riskScoreAtEntry: params.riskScoreAtEntry,
+      partialTakeProfitTiers: params.institutionalModeEnabled
+        ? ((params.partialTakeProfitTiers ?? DEFAULT_PARTIAL_EXIT_TIERS) as unknown as object)
+        : undefined,
+      devWalletAddress,
+      devWalletAmountRawAtEntry,
+    };
+
+    // BUY Engine V2 (2026-07-14): the Trade and Position rows for one buy are
+    // written atomically — previously two independent awaited creates, so a
+    // crash (or, now that duplicate-position creation is DB-enforced via a
+    // partial unique index, a rejected second-create) between them left a
+    // CONFIRMED Trade with no Position ever tracking it for exit: real SOL
+    // spent, real tokens sitting in the wallet, and nothing watching TP/SL/
+    // trailing-stop for them. `$transaction([...])` makes the pair all-or-
+    // nothing. On failure, the swap has already landed on-chain — real money
+    // already moved — so this falls back to recording the Trade alone
+    // (outside the failed transaction) rather than losing all record of it,
+    // then notifies and rethrows for manual reconciliation, exactly like the
+    // existing post-broadcast verification-failure branch above.
+    const [trade, position] = await this.prisma
+      .$transaction([
+        this.prisma.trade.create({ data: tradeData }),
+        this.prisma.position.create({ data: positionData }),
+      ])
+      .catch(async (err) => {
+        this.logger.error(
+          {
+            err,
+            walletId: params.walletId,
+            tokenId: params.tokenId,
+            mint: params.mint,
+            signature,
+            location: 'apps/api/src/trading/positionManager.ts:openPositionLocked',
+          },
+          'openPosition: atomic trade+position write failed after a real swap already landed on-chain — recording the trade alone, manual reconciliation required',
+        );
+        await this.prisma.trade.create({ data: tradeData });
+        await this.notifier?.notifyError(
+          'openPosition atomic write',
+          `BUY for wallet ${params.walletId} / token ${params.tokenId} (signature ${signature}) landed on-chain but position bookkeeping failed (${err instanceof Error ? err.message : String(err)}). No TP/SL/trailing-stop is tracking this position — manual reconciliation required.`,
+        );
+        latencyTracker.finish(traceId, 'failure');
+        throw err;
+      });
+
+    latencyTracker.mark(traceId, 'position_opened');
+    const latencyRecord = latencyTracker.finish(traceId, 'success');
+
+    // Logging enrichment (2026-07-29, requirement #7's detection/buy latency
+    // fields) — merges the same trace latencyTracker was already recording
+    // (see latencyTracker.ts's own doc comment: measurement-only, never
+    // affects control flow) directly into this line rather than requiring a
+    // separate report lookup to answer "how long did this specific buy take."
+    const { detectionLatencyMs, buyLatencyMs } = getTraceLatencySummary(latencyRecord);
 
     this.logger.info(
       {
@@ -619,6 +1306,9 @@ export class PositionManager {
         signature,
         walletId: params.walletId,
         mint: params.mint,
+        entryPriceUsd,
+        detectionLatencyMs,
+        buyLatencyMs,
       },
       `BUY EXECUTED\nSignature:\n${signature}`,
     );
@@ -692,12 +1382,94 @@ export class PositionManager {
     currentPriceUsd: number,
     encryptedSecret: string,
     encryptionKey: string,
+    /** volatilityStdDevPercent: rolling stddev of recent percent-returns for
+     * this position (see priceVolatilityTracker.ts), only meaningful for a
+     * tp1_trailing_v1 position — optional so every existing call site/test
+     * stays source-compatible without passing it. */
+    opts?: { volatilityStdDevPercent?: number },
   ) {
     const position = await this.prisma.position.findUniqueOrThrow({
       where: { id: positionId },
       include: { token: true },
     });
     if (position.status !== 'OPEN') return { closed: false as const };
+
+    // Permanent (no-route) SELL failure gate (2026-07-26 fix) — see
+    // recordPermanentSellFailure's doc comment. Checked here, once per tick,
+    // before evaluateExit/the institutional branch even run, so a position
+    // with no Jupiter route stops costing a lock acquisition + swap attempt
+    // every tick instead of just being marked unsellable inside the deeper
+    // swap-execution path (kept there too, as defense-in-depth for callers
+    // that reach closePosition/executePartialSell directly, e.g.
+    // EmergencyExitMonitor or a manual sell).
+    if (position.sellUnsellable) {
+      this.logger.debug(
+        { positionId, mint: position.token.mint, reason: position.unsellableReason },
+        'Skipping position permanently because no Jupiter route exists.',
+      );
+      return { closed: false as const };
+    }
+
+    // Exponential retry backoff (2026-07-26, Phase 6) — a position that has
+    // already failed with a permanent (no-route) classification at least once
+    // but hasn't yet crossed maxPermanentRouteRetries must still wait out a
+    // growing delay before the next attempt, instead of retrying on the very
+    // next price tick with zero delay (the original NO_SELL_ROUTE production
+    // bug: a routeless position's entire retry budget burned in well under a
+    // minute). lastSellFailureAt is set by the exact same failure event that
+    // increments noRouteSellFailureCount (see the catch block in
+    // closePositionLocked/executePartialSellLocked), so the two stay in sync —
+    // no separate "when was the last permanent failure" column is needed.
+    // Only gates the automatic tick path here; a direct manual/emergency sell
+    // (closePosition/executePartialSell called outside this method) is an
+    // explicit, infrequent, human-initiated action and is deliberately not
+    // subject to this backoff.
+    if (position.noRouteSellFailureCount > 0 && position.lastSellFailureAt) {
+      const backoffMs = computeSellRetryBackoffMs(
+        position.noRouteSellFailureCount,
+        this.sellPermanentRetryBackoffBaseMs,
+        this.sellPermanentRetryBackoffMaxMs,
+      );
+      const elapsedMs = Date.now() - position.lastSellFailureAt.getTime();
+      if (elapsedMs < backoffMs) {
+        this.logger.debug(
+          {
+            positionId,
+            mint: position.token.mint,
+            noRouteSellFailureCount: position.noRouteSellFailureCount,
+            elapsedMs,
+            backoffMs,
+          },
+          'Deferring SELL retry — exponential backoff window for a prior permanent-route failure has not elapsed yet.',
+        );
+        return { closed: false as const };
+      }
+    }
+
+    const institutionalActive =
+      position.institutionalModeEnabled && this.institutionalModeGloballyEnabled;
+
+    if (institutionalActive) {
+      return this.checkAndMaybeCloseInstitutional(
+        position,
+        currentPriceUsd,
+        encryptedSecret,
+        encryptionKey,
+      );
+    }
+
+    const usesTp1TrailingStrategy =
+      position.exitStrategy === 'tp1_trailing_v1' && this.exitStrategyV2GloballyEnabled;
+
+    if (usesTp1TrailingStrategy) {
+      return this.checkAndMaybeCloseTp1Trailing(
+        position,
+        currentPriceUsd,
+        encryptedSecret,
+        encryptionKey,
+        opts?.volatilityStdDevPercent,
+      );
+    }
 
     const decision = evaluateExit({
       entryPriceUsd: position.entryPriceUsd,
@@ -732,6 +1504,568 @@ export class PositionManager {
     });
   }
 
+  /**
+   * Institutional Mode's own tick evaluation — kept as a separate method
+   * rather than branches sprinkled through the generic path above, so the
+   * non-institutional behavior above is trivially unchanged/unaffected.
+   *
+   * Order: (1) partial-exit ladder (never past the moonbag reserve), then
+   * (2) a fixed stop-loss (disabled once the position is moonbag-only — "the
+   * moonbag may never exit on a normal pullback") and the profit-tiered
+   * institutional trailing stop (recomputed fresh every tick, "never cap
+   * upside" — takeProfitPercent is never used here at all).
+   */
+  private async checkAndMaybeCloseInstitutional(
+    position: NonNullable<Awaited<ReturnType<typeof this.prisma.position.findUniqueOrThrow>>>,
+    currentPriceUsd: number,
+    encryptedSecret: string,
+    encryptionKey: string,
+  ) {
+    const entryPriceUsd = position.entryPriceUsd;
+    const originalAmountToken = position.originalAmountToken ?? position.amountToken;
+    const remainingAmountToken = position.remainingAmountToken ?? position.amountToken;
+    const moonbagReserveAmountToken = position.moonbagReserveAmountToken ?? 0;
+    const inMoonbagOnlyMode =
+      moonbagReserveAmountToken > 0 && remainingAmountToken <= moonbagReserveAmountToken;
+    const pnlPercent =
+      entryPriceUsd > 0 ? ((currentPriceUsd - entryPriceUsd) / entryPriceUsd) * 100 : 0;
+
+    if (this.partialExitsGloballyEnabled && !inMoonbagOnlyMode) {
+      const tiersAlreadyTaken = (
+        await this.prisma.positionPartialExit.findMany({
+          where: { positionId: position.id },
+          select: { tierIndex: true },
+        })
+      ).map((t) => t.tierIndex);
+      const tiers =
+        (position.partialTakeProfitTiers as unknown as PartialExitTier[] | null) ??
+        DEFAULT_PARTIAL_EXIT_TIERS;
+
+      const partialDecision = evaluateNextPartialExit({
+        pnlPercent,
+        originalAmountToken,
+        remainingAmountToken,
+        moonbagReserveAmountToken,
+        tiers,
+        tiersAlreadyTaken,
+      });
+      if (partialDecision) {
+        return this.executePartialSell(
+          position.id,
+          position.walletId,
+          partialDecision.tierIndex,
+          partialDecision.sellAmountToken,
+          currentPriceUsd,
+          encryptedSecret,
+          encryptionKey,
+        );
+      }
+    }
+
+    // takeProfitPercent is never passed — "never cap upside." stopLossPercent
+    // is disabled entirely once only the moonbag remains — a normal pullback
+    // must never sell it; only the trailing stop / emergency exit can.
+    const decision = evaluateExit({
+      entryPriceUsd,
+      currentPriceUsd,
+      highWaterMarkUsd: position.highWaterMarkUsd ?? entryPriceUsd,
+      takeProfitPercent: undefined,
+      stopLossPercent: inMoonbagOnlyMode ? undefined : INSTITUTIONAL_STOP_LOSS_PERCENT,
+      trailingStopPercent: undefined,
+    });
+
+    if (decision.shouldExit) {
+      // Fired on the fixed institutional stop-loss above.
+      return this.closePosition(position.id, position.walletId, encryptedSecret, encryptionKey, {
+        currentPriceUsd,
+        reason: decision.reason,
+      });
+    }
+
+    const peakRoiPercent =
+      entryPriceUsd > 0
+        ? ((decision.newHighWaterMarkUsd - entryPriceUsd) / entryPriceUsd) * 100
+        : 0;
+    const trailingStopPriceUsd = computeInstitutionalTrailingStopPriceUsd(
+      entryPriceUsd,
+      decision.newHighWaterMarkUsd,
+      peakRoiPercent,
+    );
+    this.logger.debug(
+      {
+        positionId: position.id,
+        currentPriceUsd,
+        pnlPercent,
+        peakRoiPercent,
+        trailingStopPriceUsd,
+        inMoonbagOnlyMode,
+      },
+      'Sell Executor checkpoint: institutional trailing-stop evaluation',
+    );
+
+    if (trailingStopPriceUsd !== undefined && currentPriceUsd <= trailingStopPriceUsd) {
+      return this.closePosition(position.id, position.walletId, encryptedSecret, encryptionKey, {
+        currentPriceUsd,
+        reason: 'trailing_stop',
+      });
+    }
+
+    await this.prisma.position.update({
+      where: { id: position.id },
+      data: { highWaterMarkUsd: decision.newHighWaterMarkUsd },
+    });
+    return { closed: false as const };
+  }
+
+  /**
+   * TP1 / Breakeven / Trailing exit strategy's own tick evaluation
+   * (2026-07-28) — a new, dedicated path, deliberately separate from
+   * checkAndMaybeCloseInstitutional above (see tp1TrailingStrategy.ts's own
+   * doc comment on why this isn't built on Institutional Mode's machinery).
+   * Delegates every actual decision to the pure evaluateTp1TrailingStrategy
+   * — this method only translates its result into DB writes/real sells,
+   * exactly the same "pure decision, impure execution" split every other
+   * exit path in this class already follows.
+   */
+  private async checkAndMaybeCloseTp1Trailing(
+    position: Prisma.PositionGetPayload<{ include: { token: true } }>,
+    currentPriceUsd: number,
+    encryptedSecret: string,
+    encryptionKey: string,
+    volatilityStdDevPercent: number | undefined,
+  ) {
+    const action = evaluateTp1TrailingStrategy({
+      entryPriceUsd: position.entryPriceUsd,
+      currentPriceUsd,
+      highWaterMarkUsd: position.highWaterMarkUsd ?? position.entryPriceUsd,
+      initialStopLossPercent: position.stopLossPercent ?? this.exitV2Config.initialStopLossPercent,
+      breakevenStopLossPercent: this.exitV2Config.breakevenStopLossPercent,
+      tp1RoiPercent: this.exitV2Config.tp1RoiPercent,
+      tp1SellFraction: this.exitV2Config.tp1SellFraction,
+      baseTrailingPercent: this.exitV2Config.baseTrailingPercent,
+      trailingMinPercent: this.exitV2Config.trailingMinPercent,
+      trailingMaxPercent: this.exitV2Config.trailingMaxPercent,
+      volatilityReferenceStdDevPercent: this.exitV2Config.volatilityReferenceStdDevPercent,
+      volatilityStdDevPercent,
+      state: { trailingActivatedAt: position.trailingActivatedAt?.getTime() ?? null },
+    });
+
+    if (action.type === 'none') {
+      await this.prisma.position.update({
+        where: { id: position.id },
+        data: { highWaterMarkUsd: action.newHighWaterMarkUsd },
+      });
+      return { closed: false as const };
+    }
+
+    if (action.type === 'close') {
+      return this.closePosition(position.id, position.walletId, encryptedSecret, encryptionKey, {
+        currentPriceUsd,
+        reason: action.reason,
+      });
+    }
+
+    // 'tp1_partial_exit' — sell the configured fraction via the existing,
+    // generic (no institutional-specific logic) partial-sell path, then move
+    // the stop-loss to breakeven and activate trailing.
+    const originalAmountToken = position.originalAmountToken ?? position.amountToken;
+    const sellAmountToken = Math.floor(originalAmountToken * action.sellFraction);
+    const TP1_TIER_INDEX = 0; // this strategy only ever has one partial-exit event.
+
+    const result = await this.executePartialSell(
+      position.id,
+      position.walletId,
+      TP1_TIER_INDEX,
+      sellAmountToken,
+      currentPriceUsd,
+      encryptedSecret,
+      encryptionKey,
+    );
+
+    if (result.sold) {
+      const trailingActivatedAt = new Date();
+      await this.prisma.position.update({
+        where: { id: position.id },
+        data: {
+          stopLossPercent: this.exitV2Config.breakevenStopLossPercent,
+          stopLossIsSystemDefault: false,
+          trailingActivatedAt,
+          highWaterMarkUsd: action.newHighWaterMarkUsd,
+        },
+      });
+      this.logger.info(
+        {
+          positionId: position.id,
+          mint: position.token.mint,
+          trailingActivatedAt,
+          breakevenStopLossPercent: this.exitV2Config.breakevenStopLossPercent,
+        },
+        'TRAILING ACTIVATED',
+      );
+    }
+
+    return result;
+  }
+
+  /**
+   * Sells one partial-exit tier's worth of tokens, keeps the position OPEN,
+   * and records the slice in PositionPartialExit — structurally mirroring
+   * closePosition's live-swap/paper-fill branches, but never marks the
+   * position CLOSED and never sells past what the caller already computed
+   * (evaluateNextPartialExit already clamped to the moonbag reserve).
+   *
+   * Production blocking fix (2026-07-14): shares positionCloseLock with
+   * closePosition — a partial sell and a full close (e.g. EmergencyExitMonitor
+   * firing on an institutional-mode position mid-ladder) must never run
+   * concurrently against the same position, since both read/write
+   * remainingAmountToken and the wallet's real on-chain balance.
+   */
+  async executePartialSell(
+    positionId: string,
+    walletId: string,
+    tierIndex: number,
+    sellAmountToken: number,
+    currentPriceUsd: number,
+    encryptedSecret: string,
+    encryptionKey: string,
+  ) {
+    // Production Bug Fix (2026-07-14): closePosition already refused to run
+    // while a previous swap for this position landed on-chain but couldn't be
+    // verified (see unverifiedSwapLocks's doc comment on the class) — this
+    // sibling entry point didn't have the same check, so a partial-sell tick
+    // firing in the same window as an unverified full-close could submit a
+    // second real sell against a wallet balance the bot no longer had an
+    // accurate read on. Mirrors closePosition's check exactly.
+    if (this.isLockActive(positionId)) {
+      const reason = `A previous sell for position ${positionId} landed on-chain but could not be verified — refusing to submit another swap until this is manually reconciled (or until the lock auto-expires).`;
+      this.logger.warn(
+        {
+          positionId,
+          walletId,
+          tierIndex,
+          category: 'position_lock' satisfies SellFailureCategory,
+          location: 'apps/api/src/trading/positionManager.ts:executePartialSell',
+        },
+        `SELL CANCELLED\nReason:\n${reason}`,
+      );
+      throw tagSellFailure(new Error(reason), 'position_lock');
+    }
+
+    const lock = await positionCloseLock.acquire(this.prisma, positionId, this.logger);
+    if (!lock) {
+      this.logger.warn(
+        {
+          positionId,
+          walletId,
+          tierIndex,
+          location: 'apps/api/src/trading/positionManager.ts:executePartialSell',
+        },
+        'PARTIAL SELL SKIPPED (concurrent close/partial-sell already in flight for this position)',
+      );
+      return { sold: false as const };
+    }
+
+    // Latency Optimization Stage 1 (2026-07-14) — same convention as
+    // closePosition's traceId above, a partial exit just never gets a
+    // position_closed mark (the position stays OPEN).
+    const traceId = this.paperTrading ? undefined : randomUUID();
+    latencyTracker.start(traceId, 'SELL', { positionId, walletId });
+    latencyTracker.mark(traceId, 'exit_decision');
+
+    try {
+      return await this.executePartialSellLocked(
+        positionId,
+        walletId,
+        tierIndex,
+        sellAmountToken,
+        currentPriceUsd,
+        encryptedSecret,
+        encryptionKey,
+        traceId,
+      );
+    } finally {
+      await lock.release();
+    }
+  }
+
+  private async executePartialSellLocked(
+    positionId: string,
+    walletId: string,
+    tierIndex: number,
+    sellAmountToken: number,
+    currentPriceUsd: number,
+    encryptedSecret: string,
+    encryptionKey: string,
+    traceId?: string,
+  ) {
+    const position = await this.prisma.position.findUniqueOrThrow({
+      where: { id: positionId },
+      include: { token: true },
+    });
+
+    // Re-checked now that positionCloseLock is held — a full close that won
+    // the race (or a duplicate partial-sell decision queued behind the lock)
+    // must make this a no-op rather than selling out of a position that's
+    // already CLOSED or has already taken this exact tier.
+    if (position.status !== 'OPEN') {
+      this.logger.info(
+        { positionId, status: position.status },
+        'executePartialSell: position is no longer OPEN once the close lock was acquired — skipping',
+      );
+      latencyTracker.finish(traceId, 'failure');
+      return { sold: false as const };
+    }
+    // Permanent (no-route) SELL failure gate — see recordPermanentSellFailure's
+    // doc comment / checkAndMaybeClose's matching gate above. Defense-in-depth
+    // here since executePartialSell can also be reached with the lock already
+    // held by a caller that skipped checkAndMaybeClose's own check.
+    if (position.sellUnsellable) {
+      this.logger.warn(
+        { positionId, tierIndex, mint: position.token.mint, reason: position.unsellableReason },
+        'Skipping position permanently because no Jupiter route exists.',
+      );
+      latencyTracker.finish(traceId, 'failure');
+      return { sold: false as const };
+    }
+    const tierAlreadyTaken = await this.prisma.positionPartialExit.findFirst({
+      where: { positionId, tierIndex },
+      select: { id: true },
+    });
+    if (tierAlreadyTaken) {
+      this.logger.info(
+        { positionId, tierIndex },
+        'executePartialSell: this tier was already sold by a queued/earlier attempt — skipping duplicate',
+      );
+      latencyTracker.finish(traceId, 'failure');
+      return { sold: false as const };
+    }
+
+    let outAmountLamports: number;
+    let signature: string;
+
+    if (this.paperTrading) {
+      const quote = await this.jupiter.getQuote({
+        inputMint: position.token.mint,
+        outputMint: SOL_MINT,
+        amountLamports: BigInt(Math.floor(sellAmountToken)),
+        slippageBps: 300,
+      });
+      outAmountLamports = Number(quote.outAmount);
+      signature = paperSignature();
+    } else {
+      const keypair = unsealKeypair(encryptedSecret, encryptionKey);
+      const realBalance = await getRealTokenBalance(
+        this.connection,
+        keypair.publicKey.toBase58(),
+        position.token.mint,
+      );
+      const sellAmountRaw = BigInt(Math.min(Math.floor(sellAmountToken), Number(realBalance)));
+      if (sellAmountRaw <= 0n) {
+        this.logger.warn(
+          { positionId, tierIndex, realBalance: realBalance.toString() },
+          'executePartialSell: wallet holds 0 sellable tokens for this tier — skipping, position stays OPEN',
+        );
+        latencyTracker.finish(traceId, 'failure');
+        return { sold: false as const };
+      }
+
+      const sendSwapStartedAt = Date.now();
+      try {
+        signature = await this.sendSwapWithBroadcastRetry(
+          keypair,
+          {
+            inputMint: position.token.mint,
+            outputMint: SOL_MINT,
+            amountLamports: sellAmountRaw,
+            slippageBps: 300,
+          },
+          async () => ({ dex: position.token.dex, poolAddress: position.token.poolAddress }),
+          { ...PositionManager.SELL_SEND_SWAP_OPTIONS, traceId },
+          { mint: position.token.mint, expectedAtLeastRaw: sellAmountRaw, positionId },
+        );
+      } catch (err) {
+        const classification = classifySellFailure(err);
+        this.logger.error(
+          {
+            err,
+            positionId,
+            tierIndex,
+            walletId,
+            category: classification.category,
+            detail: classification.detail,
+            latencyMs: Date.now() - sendSwapStartedAt,
+            location: 'apps/api/src/trading/positionManager.ts:executePartialSellLocked',
+          },
+          `SELL FAILED (partial exit)\nCategory: ${classification.category}\nReason:\n${classification.detail}`,
+        );
+        await this.recordFailedTrade({
+          walletId,
+          tokenId: position.tokenId,
+          side: 'SELL',
+          amountSol: 0,
+          amountToken: Number(sellAmountRaw),
+          err,
+        });
+        if (classification.permanent) {
+          await this.recordPermanentSellFailure(
+            positionId,
+            position.token.mint,
+            position.token.symbol ?? position.token.mint,
+            classification,
+          );
+        }
+        latencyTracker.finish(traceId, 'failure');
+        throw tagSellFailure(err, classification.category);
+      }
+
+      try {
+        const actualSolReceived = await withVerificationRetry(
+          () => getActualSolDelta(this.connection, signature, keypair.publicKey.toBase58()),
+          3,
+          this.verificationRetryDelayMs,
+        );
+        outAmountLamports = Number(actualSolReceived);
+      } catch (err) {
+        this.logger.error(
+          {
+            err,
+            positionId,
+            tierIndex,
+            signature,
+            category: 'confirmation_timeout' satisfies SellFailureCategory,
+          },
+          'executePartialSell: SELL landed on-chain but could not be verified — position left OPEN with stale remainingAmountToken, manual reconciliation required',
+        );
+        await this.recordFailedTrade({
+          walletId,
+          tokenId: position.tokenId,
+          side: 'SELL',
+          amountSol: 0,
+          amountToken: Number(sellAmountRaw),
+          signature,
+          err,
+        });
+        latencyTracker.finish(traceId, 'failure');
+        throw tagSellFailure(err, 'confirmation_timeout');
+      }
+      sellAmountToken = Number(sellAmountRaw);
+    }
+
+    const realizedPnlUsdThisTier =
+      (currentPriceUsd - position.entryPriceUsd) *
+      (sellAmountToken / 10 ** position.token.decimals);
+
+    const sellTrade = await this.prisma.trade.create({
+      data: {
+        walletId,
+        tokenId: position.tokenId,
+        side: 'SELL',
+        status: 'CONFIRMED',
+        amountSol: outAmountLamports / LAMPORTS_PER_SOL,
+        amountToken: sellAmountToken,
+        priceUsd: currentPriceUsd,
+        txSignature: signature,
+        isPaperTrade: this.paperTrading,
+        confirmedAt: new Date(),
+      },
+    });
+
+    await this.prisma.positionPartialExit.create({
+      data: {
+        positionId,
+        tierIndex,
+        gainPercent:
+          position.entryPriceUsd > 0
+            ? ((currentPriceUsd - position.entryPriceUsd) / position.entryPriceUsd) * 100
+            : 0,
+        tokenAmountSold: sellAmountToken,
+        priceUsd: currentPriceUsd,
+        realizedPnlUsd: realizedPnlUsdThisTier,
+        txSignature: signature,
+      },
+    });
+    latencyTracker.finish(traceId, 'success');
+
+    const newRemainingAmountToken =
+      (position.remainingAmountToken ?? position.amountToken) - sellAmountToken;
+    const updated = await this.prisma.position.update({
+      where: { id: positionId },
+      data: {
+        remainingAmountToken: Math.max(0, newRemainingAmountToken),
+        realizedPnlUsd: (position.realizedPnlUsd ?? 0) + realizedPnlUsdThisTier,
+      },
+    });
+
+    // Logging enrichment (2026-07-29, requirement #7's "remaining position"
+    // field) — remainingPositionPercent was previously only computed later,
+    // for notifyPartialExit's payload; hoisted here so both the log line and
+    // that notification use the same value instead of two copies of the
+    // same formula.
+    const remainingPositionPercent =
+      ((position.originalAmountToken ?? position.amountToken) > 0
+        ? Math.max(0, newRemainingAmountToken) /
+          (position.originalAmountToken ?? position.amountToken)
+        : 0) * 100;
+
+    this.logger.info(
+      {
+        positionId,
+        tierIndex,
+        sellAmountToken,
+        signature,
+        realizedPnlUsdThisTier,
+        remainingAmountToken: updated.remainingAmountToken,
+        remainingPositionPercent,
+      },
+      'PARTIAL EXIT EXECUTED',
+    );
+
+    eventBus.publish('trade.created', {
+      tradeId: sellTrade.id,
+      side: 'SELL',
+      mint: position.token.mint,
+    });
+    eventBus.publish('position.updated', { positionId: updated.id, status: 'OPEN' });
+
+    // Isolated SELL-fix build note: cast to a local structural type instead of
+    // @nova/telegram-bot's NotificationService — this deploy intentionally
+    // excludes telegram-bot's uncommitted changes (which add notifyPartialExit
+    // to that interface), so this shim lets institutional-mode partial-exit
+    // notifications keep working at runtime (optional chaining already made
+    // them a no-op on any notifier that lacks the method) without touching
+    // telegram-bot's source at all.
+    await (
+      this.notifier as unknown as
+        | {
+            notifyPartialExit?: (params: Record<string, unknown>) => Promise<void>;
+          }
+        | undefined
+    )?.notifyPartialExit?.({
+      symbol: position.token.symbol ?? position.token.mint.slice(0, 8),
+      mint: position.token.mint,
+      dex: position.token.dex,
+      tierIndex,
+      pnlPercent:
+        position.entryPriceUsd > 0
+          ? ((currentPriceUsd - position.entryPriceUsd) / position.entryPriceUsd) * 100
+          : 0,
+      realizedPnlUsd: realizedPnlUsdThisTier,
+      remainingPositionPercent,
+      isPaperTrade: this.paperTrading,
+    });
+
+    return { sold: true as const, position: updated, signature };
+  }
+
+  /**
+   * Production blocking fix (2026-07-14): the real close logic moved to
+   * closePositionLocked below, unchanged — this wrapper's only job is
+   * acquiring positionCloseLock before it, and releasing it after, no matter
+   * which of closePositionLocked's many return/throw paths fires. Every
+   * caller (PriceMonitor's normal TP/SL, EmergencyExitMonitor, and any future
+   * manual-close route) goes through this same single entry point, so
+   * guarding here covers all of them at once.
+   */
   async closePosition(
     positionId: string,
     walletId: string,
@@ -748,10 +2082,88 @@ export class PositionManager {
       throw new Error(reason);
     }
 
+    const lock = await positionCloseLock.acquire(this.prisma, positionId, this.logger);
+    if (!lock) {
+      const reason = `Position ${positionId} is already being closed or partially sold by another in-flight operation — refusing to submit a duplicate close.`;
+      this.logger.warn(
+        { positionId, walletId, location: 'apps/api/src/trading/positionManager.ts:closePosition' },
+        `SELL CANCELLED (concurrent close)\nReason:\n${reason}`,
+      );
+      throw new Error(reason);
+    }
+    // Latency Optimization Stage 1 (2026-07-14): only real sells get a trace
+    // — same reasoning as openPositionLocked's traceId above. "exit_decision"
+    // is marked here (the moment closePosition was actually invoked) rather
+    // than back in checkAndMaybeClose/evaluateExit — negligible difference in
+    // practice (they're synchronous, back-to-back), and keeping trace
+    // creation at this one single entry point (shared by every caller —
+    // normal TP/SL, EmergencyExitMonitor, any future manual close) is
+    // simpler than threading a traceId through each of them individually.
+    const traceId = this.paperTrading ? undefined : randomUUID();
+    latencyTracker.start(traceId, 'SELL', { positionId, walletId });
+    latencyTracker.mark(traceId, 'exit_decision');
+
+    try {
+      return await this.closePositionLocked(
+        positionId,
+        walletId,
+        encryptedSecret,
+        encryptionKey,
+        exit,
+        traceId,
+      );
+    } finally {
+      await lock.release();
+    }
+  }
+
+  private async closePositionLocked(
+    positionId: string,
+    walletId: string,
+    encryptedSecret: string,
+    encryptionKey: string,
+    exit: { currentPriceUsd: number; reason?: ExitReason },
+    traceId?: string,
+  ) {
     const position = await this.prisma.position.findUniqueOrThrow({
       where: { id: positionId },
       include: { token: true },
     });
+
+    // Re-checked now that positionCloseLock is held (not just at whatever
+    // moment the caller decided to close): a second, now-redundant close
+    // attempt that queued up behind the lock — e.g. two ticks that both saw
+    // this position OPEN before either could claim the lock — must be a
+    // no-op once it's this attempt's turn, not a second real sell.
+    if (position.status !== 'OPEN') {
+      this.logger.info(
+        { positionId, status: position.status },
+        'closePosition: position is no longer OPEN once the close lock was acquired — skipping duplicate close',
+      );
+      latencyTracker.finish(traceId, 'failure');
+      return { closed: false as const, position, signature: null };
+    }
+    // Permanent (no-route) SELL failure gate — see recordPermanentSellFailure's
+    // doc comment / checkAndMaybeClose's matching gate above. Defense-in-depth
+    // here for callers that reach closePosition directly (EmergencyExitMonitor,
+    // a manual sell) without going through checkAndMaybeClose's own check.
+    if (position.sellUnsellable) {
+      this.logger.warn(
+        { positionId, mint: position.token.mint, reason: position.unsellableReason },
+        'Skipping position permanently because no Jupiter route exists.',
+      );
+      latencyTracker.finish(traceId, 'failure');
+      return { closed: false as const, position, signature: null };
+    }
+
+    // A position that already had one or more partial exits (institutional
+    // mode's profit ladder — see partialExitEngine.ts) has fewer tokens left
+    // to sell than it originally bought: position.amountToken always means
+    // "the amount bought" (frozen at open), never "what's left." Falls back
+    // to the full original amount for a position that never partially
+    // exited (remainingAmountToken null), so this is byte-identical to the
+    // old behavior for every non-institutional close.
+    const remainingAmountToken = position.remainingAmountToken ?? position.amountToken;
 
     let outAmountLamports: number;
     let soldAmountToken: number;
@@ -761,11 +2173,11 @@ export class PositionManager {
       const quote = await this.jupiter.getQuote({
         inputMint: position.token.mint,
         outputMint: SOL_MINT,
-        amountLamports: BigInt(Math.floor(position.amountToken)),
+        amountLamports: BigInt(Math.floor(remainingAmountToken)),
         slippageBps: 300,
       });
       outAmountLamports = Number(quote.outAmount);
-      soldAmountToken = position.amountToken;
+      soldAmountToken = remainingAmountToken;
       signature = paperSignature();
     } else {
       const keypair = unsealKeypair(encryptedSecret, encryptionKey);
@@ -777,7 +2189,7 @@ export class PositionManager {
         keypair.publicKey.toBase58(),
         position.token.mint,
       );
-      const recordedAmount = BigInt(Math.floor(position.amountToken));
+      const recordedAmount = BigInt(Math.floor(remainingAmountToken));
       const sellAmountRaw = realBalance < recordedAmount ? realBalance : recordedAmount;
       this.logger.debug(
         {
@@ -830,11 +2242,13 @@ export class PositionManager {
           'closePosition zero-balance reconciliation',
           `Position ${positionId} (${position.token.symbol ?? position.token.mint}) was recorded OPEN with ${recordedAmount} tokens on file, but the wallet holds 0. Closed automatically to stop the retry loop — no realized PnL was recorded since the actual disposition of the tokens is unknown. Manual reconciliation required.`,
         );
+        latencyTracker.finish(traceId, 'failure');
         return { closed: true as const, position: reconciled, signature: null };
       }
 
+      const sendSwapStartedAt = Date.now();
       try {
-        signature = await this.sendSwap(
+        signature = await this.sendSwapWithBroadcastRetry(
           keypair,
           {
             inputMint: position.token.mint,
@@ -843,12 +2257,27 @@ export class PositionManager {
             slippageBps: 300,
           },
           async () => ({ dex: position.token.dex, poolAddress: position.token.poolAddress }),
+          { ...PositionManager.SELL_SEND_SWAP_OPTIONS, traceId },
+          { mint: position.token.mint, expectedAtLeastRaw: sellAmountRaw, positionId },
         );
       } catch (err) {
         // Position deliberately stays OPEN here — nothing below this point runs,
         // so status/realizedPnlUsd are never touched. The caller (checkAndMaybeClose
         // via priceMonitor, or a manual sell) retries on its own next pass. Safe to
         // retry freely: the swap itself never landed, so nothing real happened yet.
+        const classification = classifySellFailure(err);
+        this.logger.error(
+          {
+            err,
+            positionId,
+            walletId,
+            category: classification.category,
+            detail: classification.detail,
+            latencyMs: Date.now() - sendSwapStartedAt,
+            location: 'apps/api/src/trading/positionManager.ts:closePositionLocked',
+          },
+          `SELL FAILED\nCategory: ${classification.category}\nReason:\n${classification.detail}`,
+        );
         await this.recordFailedTrade({
           walletId,
           tokenId: position.tokenId,
@@ -857,7 +2286,53 @@ export class PositionManager {
           amountToken: Number(sellAmountRaw),
           err,
         });
-        throw err;
+        // Persisted retry-state fix (2026-07-23, USOH incident follow-up):
+        // an in-memory-only counter loses its history on every process
+        // restart, which would silently understate how many times a
+        // stop-loss has already failed to execute — see schema.prisma's
+        // Position.sellFailureCount doc comment. Never gates whether a retry
+        // happens (that's still purely the next price tick), only alerting.
+        const updatedPosition = await this.prisma.position.update({
+          where: { id: positionId },
+          data: { sellFailureCount: { increment: 1 }, lastSellFailureAt: new Date() },
+          select: { sellFailureCount: true },
+        });
+        const totalFailures = updatedPosition.sellFailureCount;
+        // Same TTL-deduped "don't spam the same ongoing failure" gate as
+        // before (regression 2026-07-21 audit) is still the primary rule —
+        // ONLY overridden at escalation milestones, where a persisted,
+        // restart-proof count crossing a threshold re-alerts even within the
+        // same hour, since "still failing after 10+ attempts" is materially
+        // more urgent than "failed once."
+        const isEscalationMilestone =
+          totalFailures === 10 ||
+          totalFailures === 25 ||
+          (totalFailures > 50 && totalFailures % 25 === 0);
+        const shouldAlert = !this.sellFailureAlerted.has(positionId) || isEscalationMilestone;
+        if (shouldAlert) {
+          this.sellFailureAlerted.add(positionId);
+          const severity = totalFailures >= 10 ? 'CRITICAL — ' : '';
+          const retryOutlook = classification.permanent
+            ? `This failure has no route to retry successfully — it counts toward the ${this.maxPermanentRouteRetries}-attempt permanent-failure threshold before auto-sell is disabled for this position.`
+            : 'Will keep retrying on the next price tick.';
+          await this.notifier?.notifyError(
+            'SELL execution failed',
+            `${severity}Position ${positionId} (${position.token.symbol ?? position.token.mint}): stop-loss/take-profit/trailing-stop should sell but the swap failed [${classification.category}]: ${classification.detail}. This is failure #${totalFailures} for this position. ${retryOutlook}`,
+          );
+        }
+        // Permanent (no-route) failure gate (2026-07-26 fix) — unlike
+        // sellFailureCount above, this DOES eventually stop future retries.
+        // See recordPermanentSellFailure's doc comment.
+        if (classification.permanent) {
+          await this.recordPermanentSellFailure(
+            positionId,
+            position.token.mint,
+            position.token.symbol ?? position.token.mint,
+            classification,
+          );
+        }
+        latencyTracker.finish(traceId, 'failure');
+        throw tagSellFailure(err, classification.category);
       }
 
       // The swap itself landed on-chain from here on — any further failure is a
@@ -902,19 +2377,37 @@ export class PositionManager {
           err,
         });
         await this.notifier?.notifyError('closePosition verification', reason);
+        latencyTracker.finish(traceId, 'failure');
         throw err;
       }
     }
 
-    // position.amountToken is the RAW on-chain integer amount (e.g. 32678849019 for
-    // a 9-decimal token) — must be decimal-adjusted before multiplying by a USD
-    // price delta, exactly like computeTrailingStopDisplay's currentProfitUsd does.
-    // Live-verified failure: an un-adjusted calc here produced a phantom
-    // -$395,414.07 "loss" on a real ~-$0.04 close, which then tripped the daily
-    // loss safety limit and blocked every subsequent trade for the rest of the day.
-    const realizedPnlUsd =
+    // soldAmountToken is the RAW on-chain integer amount actually sold in THIS
+    // closing leg (already the remaining/moonbag amount for a position with
+    // prior partial exits, not the original full amountToken — see
+    // remainingAmountToken above) — must be decimal-adjusted before
+    // multiplying by a USD price delta, exactly like
+    // computeTrailingStopDisplay's currentProfitUsd does. Live-verified
+    // failure: an un-adjusted calc here produced a phantom -$395,414.07
+    // "loss" on a real ~-$0.04 close, which then tripped the daily loss
+    // safety limit and blocked every subsequent trade for the rest of the day.
+    //
+    // Production bug fixed here (Profit Distribution Audit, 2026-07-12): this
+    // used to compute PnL against the FULL original amountToken and then
+    // OVERWRITE position.realizedPnlUsd with it — for any position with
+    // prior partial exits (institutional mode), that discarded the real,
+    // already-recorded profit from each earlier tier (sold at their own,
+    // different prices) and replaced it with a fabricated "what if the
+    // entire original position sold at today's price" number. Fixed to
+    // ADD this leg's real PnL to whatever partial exits already
+    // accumulated — for a position with no partial exits,
+    // position.realizedPnlUsd is null (?? 0) and soldAmountToken already
+    // equals the full amountToken, so this is byte-identical to the old
+    // result in that case.
+    const finalLegPnlUsd =
       (exit.currentPriceUsd - position.entryPriceUsd) *
-      (position.amountToken / 10 ** position.token.decimals);
+      (soldAmountToken / 10 ** position.token.decimals);
+    const realizedPnlUsd = (position.realizedPnlUsd ?? 0) + finalLegPnlUsd;
 
     const sellTrade = await this.prisma.trade.create({
       data: {
@@ -937,11 +2430,43 @@ export class PositionManager {
         status: 'CLOSED',
         realizedPnlUsd,
         closedAt: new Date(),
+        // Previously computed (line below, for the SellCardData notification)
+        // but never actually persisted onto the row the schema documents it
+        // for — fixed here so Position.exitReason is real, queryable history,
+        // not just a transient notification field.
+        exitReason: exit.reason ?? 'manual',
       },
     });
 
+    latencyTracker.mark(traceId, 'position_closed');
+    latencyTracker.finish(traceId, 'success');
+
+    // Logging enrichment (2026-07-29, requirement #7): this line used to
+    // carry only {positionId, signature, reason, realizedPnlUsd} — far
+    // thinner than the BUY EXECUTED line gets. roiPercent/holdingTimeMs here
+    // are a simple, single-leg computation (entry vs. this exit's price/time)
+    // — deliberately NOT the more elaborate multi-leg sum the sell-card
+    // notification below computes (which needs extra DB queries for prior
+    // partial-exit legs) — kept independent so this log line can never be
+    // blocked by, or accidentally alter, that proven notification path.
+    const holdingTimeMs = (updated.closedAt ?? new Date()).getTime() - position.createdAt.getTime();
+    const roiPercent =
+      position.entryPriceUsd > 0
+        ? ((exit.currentPriceUsd - position.entryPriceUsd) / position.entryPriceUsd) * 100
+        : 0;
     this.logger.info(
-      { positionId, signature, reason: exit.reason, realizedPnlUsd },
+      {
+        positionId,
+        signature,
+        reason: exit.reason,
+        realizedPnlUsd,
+        entryPriceUsd: position.entryPriceUsd,
+        exitPriceUsd: exit.currentPriceUsd,
+        roiPercent,
+        holdingTimeMs,
+        exitStrategy: position.exitStrategy ?? undefined,
+        trailingActivatedAt: position.trailingActivatedAt ?? undefined,
+      },
       'position closed',
     );
 
@@ -1019,6 +2544,32 @@ export class PositionManager {
           (updated.closedAt ?? new Date()).getTime() - position.createdAt.getTime();
         const pnlPercentForCard =
           ((exit.currentPriceUsd - position.entryPriceUsd) / position.entryPriceUsd) * 100;
+
+        // Production bug fixed here (Profit Distribution Audit, 2026-07-12):
+        // profitSol/roiPercent below used to be computed from ONLY this final
+        // leg's outAmountLamports vs. the position's FULL original
+        // amountSolInvested — for a position with prior partial exits, that
+        // silently dropped the SOL already returned by each earlier tier,
+        // understating the sell card's shown profit/ROI. Sum every CONFIRMED
+        // SELL trade for this wallet+token since this position was opened
+        // (the just-created final-leg trade is already in this set) instead
+        // of just the final leg. Scoped to createdAt >= position.createdAt so
+        // a prior, already-closed position for the same wallet+token (no
+        // Trade->Position FK exists) is never double-counted here.
+        const allSellTradesThisPosition = await this.prisma.trade.findMany({
+          where: {
+            walletId,
+            tokenId: position.tokenId,
+            side: 'SELL',
+            status: 'CONFIRMED',
+            createdAt: { gte: position.createdAt },
+          },
+        });
+        const totalSellAmountSol = allSellTradesThisPosition.reduce(
+          (sum, t) => sum + t.amountSol,
+          0,
+        );
+        const totalProfitSol = totalSellAmountSol - position.amountSolInvested;
         const displayForCard = computeTrailingStopDisplay({
           entryPriceUsd: position.entryPriceUsd,
           currentPriceUsd: exit.currentPriceUsd,
@@ -1047,14 +2598,12 @@ export class PositionManager {
           entryPriceUsd: position.entryPriceUsd,
           exitPriceUsd: exit.currentPriceUsd,
           buyAmountSol: position.amountSolInvested,
-          sellAmountSol: outAmountLamports / LAMPORTS_PER_SOL,
-          profitSol: outAmountLamports / LAMPORTS_PER_SOL - position.amountSolInvested,
+          sellAmountSol: totalSellAmountSol,
+          profitSol: totalProfitSol,
           profitUsd: realizedPnlUsd,
           roiPercent:
             position.amountSolInvested > 0
-              ? ((outAmountLamports / LAMPORTS_PER_SOL - position.amountSolInvested) /
-                  position.amountSolInvested) *
-                100
+              ? (totalProfitSol / position.amountSolInvested) * 100
               : 0,
           pnlPercent: pnlPercentForCard,
           holdingTimeMs,

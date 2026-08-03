@@ -1,4 +1,6 @@
+import { getTelegramTrendEnabled } from '@nova/shared';
 import { navOnly } from '../keyboards.js';
+import { getLocale, t } from '../../i18n/index.js';
 import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
 
 interface MetricsSnapshot {
@@ -21,10 +23,20 @@ interface MetricsSnapshot {
  * reachable, this shows a clear error rather than crashing the screen. */
 export async function renderTelegramTrends(
   deps: ScreenDeps,
-  _user: ScreenUser,
+  user: ScreenUser,
 ): Promise<ScreenResult> {
+  const lang = getLocale(user);
+  const c = t(lang).common;
+  const d = t(lang).telegramTrends;
   const { telegramTrend } = deps;
-  const statusLine = telegramTrend.enabled ? '🟢 Enabled' : '🔴 Disabled';
+  // Same live-state check as trendSettings.ts's status line — this screen
+  // must never show a boot-time env snapshot as if it were current, since an
+  // admin can pause/resume the monitor live via Redis without a restart.
+  const liveEnabled =
+    telegramTrend.enabled && deps.redis
+      ? await getTelegramTrendEnabled(deps.redis)
+      : telegramTrend.enabled;
+  const statusLine = liveEnabled ? c.enabled : c.disabled;
 
   let metrics: MetricsSnapshot | undefined;
   let fetchError = false;
@@ -40,22 +52,22 @@ export async function renderTelegramTrends(
     fetchError = true;
   }
 
-  let text = `📡 *Telegram Trends*\n\nSource status: ${statusLine}\nChannels: ${telegramTrend.channels.map((c) => `t.me/${c}`).join(', ') || '—'}\n\n`;
+  let text = d.header(statusLine, telegramTrend.channels.map((c) => `t.me/${c}`).join(', ') || '—');
 
   if (fetchError || !metrics) {
-    text += '⚠️ Could not reach the metrics service right now — try again shortly.';
+    text += d.fetchError;
   } else {
     text +=
-      `📥 Signals received: *${metrics.telegramSignalsReceived}*\n` +
-      `🪙 Mints extracted: *${metrics.mintsExtracted}*\n` +
-      `♻️ Duplicate rejected: *${metrics.duplicateRejected}*\n` +
-      `🚫 Blacklist rejected: *${metrics.blacklistRejected}*\n` +
-      `💧 Liquidity=0 rejected: *${metrics.liquidityZeroRejected}*\n` +
-      `🤖 AI rejected: *${metrics.aiRejected}*\n` +
-      `✅ Qualified opportunities: *${metrics.qualifiedOpportunities}*\n` +
-      `💰 Executed trades: *${metrics.executedTrades}*\n` +
-      `📉 RPC calls saved (est.): *${metrics.rpcCallsSavedEstimate}*`;
+      `${d.signalsReceived(metrics.telegramSignalsReceived)}\n` +
+      `${d.mintsExtracted(metrics.mintsExtracted)}\n` +
+      `${d.duplicateRejected(metrics.duplicateRejected)}\n` +
+      `${d.blacklistRejected(metrics.blacklistRejected)}\n` +
+      `${d.liquidityZeroRejected(metrics.liquidityZeroRejected)}\n` +
+      `${d.aiRejected(metrics.aiRejected)}\n` +
+      `${d.qualifiedOpportunities(metrics.qualifiedOpportunities)}\n` +
+      `${d.executedTrades(metrics.executedTrades)}\n` +
+      `${d.rpcSaved(metrics.rpcCallsSavedEstimate)}`;
   }
 
-  return { text, keyboard: navOnly('home') };
+  return { text, keyboard: navOnly('home', lang) };
 }

@@ -1,6 +1,7 @@
 import { InlineKeyboard } from 'grammy';
 import { getOrCreateBusinessSettings } from '@nova/shared';
 import { withNav } from '../keyboards.js';
+import { getLocale, t } from '../../i18n/index.js';
 import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
 
 /**
@@ -20,8 +21,10 @@ export async function hasAcceptedCurrentFeePolicy(
 
 export async function renderFeePolicyConsent(
   deps: ScreenDeps,
-  _user: ScreenUser,
+  user: ScreenUser,
 ): Promise<ScreenResult> {
+  const lang = getLocale(user);
+  const d = t(lang).feePolicyConsent;
   const settings = await getOrCreateBusinessSettings(deps.prisma);
   const feePercent = (settings.performanceFeeBps / 100).toFixed(1);
   const userSharePercent = (100 - settings.performanceFeeBps / 100).toFixed(1);
@@ -29,32 +32,31 @@ export async function renderFeePolicyConsent(
     ? settings.referralLevels.filter((l) => l.enabled)
     : [];
 
+  // Section 14 (2026-07-18): referral rewards are now a fixed percentage of
+  // net profit directly (registerFeeSystem.ts's calculateFixedProfitDistribution),
+  // not a cut of the platform fee shown above — this wording used to say "of
+  // the platform fee," which stopped being true once that computation changed.
   const referralLines =
     enabledLevels.length > 0
       ? enabledLevels
-          .map(
-            (l) => `  • Level ${l.level}: ${(l.percentBps / 100).toFixed(1)}% of the platform fee`,
-          )
+          .map((l) => d.referralLevelRow(l.level, (l.percentBps / 100).toFixed(1)))
           .join('\n')
-      : '  • Referral program is currently disabled';
+      : d.referralDisabled;
 
   const text =
-    `📜 *Performance Fee & Referral Policy*\n\n` +
-    `Registration is free — no monthly subscription, ever.\n\n` +
-    `💸 *Performance Fee*\n` +
-    `You only pay a fee on a *profitable, completed* trade — never on a losing or break-even trade, and never before a trade actually closes.\n` +
-    `Current fee: *${feePercent}%* of realized net profit, after trading costs.\n\n` +
-    `👤 *Your Profit Share*\n` +
-    `You keep *${userSharePercent}%* of net profit on every profitable trade.\n\n` +
-    `🔗 *Referral Program*\n${referralLines}\n` +
-    `Referral rewards come out of the platform's own fee share — never an extra charge on your profit.\n\n` +
-    `Tap below to accept and enable auto-trading. If this policy ever changes, you'll be asked to accept again before it applies to you.`;
+    `${d.title}` +
+    `${d.freeNote}` +
+    `${d.feeSectionTitle}` +
+    `${d.feeSectionBody}` +
+    `${d.currentFee(feePercent)}` +
+    `${d.yourShareTitle}` +
+    `${d.yourShareBody(userSharePercent)}` +
+    `${d.referralTitle}${referralLines}\n` +
+    `${d.referralSourceNote(feePercent)}` +
+    `${d.ctaNote}`;
 
-  const keyboard = new InlineKeyboard().text(
-    '✅ I Agree, Enable Auto-Trading',
-    'a:sniper:acceptpolicy',
-  );
-  return { text, keyboard: withNav(keyboard, 'home') };
+  const keyboard = new InlineKeyboard().text(d.acceptButton, 'a:sniper:acceptpolicy');
+  return { text, keyboard: withNav(keyboard, 'home', lang) };
 }
 
 /** Returns the updated user row — the caller's in-memory `user` object is

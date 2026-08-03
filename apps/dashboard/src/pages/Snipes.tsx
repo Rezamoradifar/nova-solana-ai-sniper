@@ -19,6 +19,12 @@ export function Snipes() {
   const [autoBuyOnLaunch, setAutoBuyOnLaunch] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
+  // Stop-loss is the one field with a real safety ceiling enforced server-side
+  // (PositionManager clamps to DEFAULT_MAX_LOSS_PERCENT regardless of what's
+  // stored here) — editable in place since a config was previously create-only.
+  const [editingStopLossId, setEditingStopLossId] = useState<string | null>(null);
+  const [stopLossEditValue, setStopLossEditValue] = useState('');
+  const [stopLossError, setStopLossError] = useState<string | undefined>();
 
   function update(field: keyof typeof DEFAULTS, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -49,6 +55,22 @@ export function Snipes() {
 
   async function onDelete(id: string) {
     await api.del(`/snipes/${id}`);
+  }
+
+  function startEditStopLoss(config: SnipeConfig) {
+    setEditingStopLossId(config.id);
+    setStopLossEditValue(String(config.stopLossPercent ?? ''));
+    setStopLossError(undefined);
+  }
+
+  async function onSaveStopLoss(id: string) {
+    setStopLossError(undefined);
+    try {
+      await api.patch(`/snipes/${id}`, { stopLossPercent: Number(stopLossEditValue) });
+      setEditingStopLossId(null);
+    } catch (err) {
+      setStopLossError(err instanceof ApiError ? err.message : 'Something went wrong');
+    }
   }
 
   return (
@@ -161,8 +183,41 @@ export function Snipes() {
                 <td>${config.minLiquidityUsd.toLocaleString()}</td>
                 <td>{config.minAiScore}</td>
                 <td className="text-xs text-slate-400">
-                  {config.takeProfitPercent ?? '—'}% / {config.stopLossPercent ?? '—'}% /{' '}
-                  {config.trailingStopPercent ?? '—'}%
+                  {config.takeProfitPercent ?? '—'}% /{' '}
+                  {editingStopLossId === config.id ? (
+                    <span className="inline-flex items-center gap-1">
+                      <input
+                        className="input-field w-16 px-1 py-0"
+                        type="number"
+                        value={stopLossEditValue}
+                        onChange={(e) => setStopLossEditValue(e.target.value)}
+                      />
+                      <button
+                        onClick={() => onSaveStopLoss(config.id)}
+                        className="text-primary hover:underline"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setEditingStopLossId(null)}
+                        className="hover:underline"
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => startEditStopLoss(config)}
+                      className="hover:underline"
+                      title="Never honored looser than the platform's default max-loss ceiling, regardless of what's set here"
+                    >
+                      {config.stopLossPercent ?? '—'}%
+                    </button>
+                  )}{' '}
+                  / {config.trailingStopPercent ?? '—'}%
+                  {stopLossError && editingStopLossId === null && (
+                    <div className="text-loss">{stopLossError}</div>
+                  )}
                 </td>
                 <td>{config.autoBuyOnLaunch ? 'Yes' : 'No'}</td>
                 <td>{config.isActive ? 'Active' : 'Paused'}</td>

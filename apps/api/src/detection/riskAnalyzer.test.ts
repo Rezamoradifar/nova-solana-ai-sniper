@@ -2,6 +2,7 @@ import { PublicKey } from '@solana/web3.js';
 import { describe, expect, it, vi } from 'vitest';
 import {
   estimateLiquidityFromPriceImpact,
+  isFastPathCandidate,
   mapDexScreenerIdToDex,
   resolveLiquidityUsd,
   resolveRecentActivity,
@@ -109,6 +110,30 @@ describe('resolveRecentActivity', () => {
   });
 });
 
+describe('isFastPathCandidate', () => {
+  const thresholds = { minRecentBuys: 15, minRecentVolumeUsd: 2000 };
+
+  it('is true only when both buys and volume clear their thresholds', () => {
+    expect(isFastPathCandidate({ recentBuys: 20, recentVolumeUsd: 3000 }, thresholds)).toBe(true);
+  });
+
+  it('is false when buys clear the threshold but volume does not', () => {
+    expect(isFastPathCandidate({ recentBuys: 20, recentVolumeUsd: 500 }, thresholds)).toBe(false);
+  });
+
+  it('is false when volume clears the threshold but buys do not', () => {
+    expect(isFastPathCandidate({ recentBuys: 2, recentVolumeUsd: 3000 }, thresholds)).toBe(false);
+  });
+
+  it('treats missing fields as 0, never as "unknown, assume fast"', () => {
+    expect(isFastPathCandidate({}, thresholds)).toBe(false);
+  });
+
+  it('is true exactly at the threshold boundary (>=, not >)', () => {
+    expect(isFastPathCandidate({ recentBuys: 15, recentVolumeUsd: 2000 }, thresholds)).toBe(true);
+  });
+});
+
 describe('estimateLiquidityFromPriceImpact', () => {
   it('estimates pool liquidity from a small probe trade price impact', () => {
     // 0.5 SOL probe, $77.91/SOL, 1% impact => one side ~= $3895.5, both sides ~= $7791
@@ -150,7 +175,9 @@ vi.mock('./onchain.js', () => ({
     decimals: 6,
     supply: 1_000_000_000n,
   }),
-  getHolderConcentration: vi.fn().mockResolvedValue({ top10HolderPercent: 20, holderCount: 50 }),
+  getHolderConcentration: vi
+    .fn()
+    .mockResolvedValue({ top10HolderPercent: 20, holderCount: 50, holderBalances: [] }),
 }));
 
 describe('RiskAnalyzer.analyze liquidity fallback chain', () => {
@@ -169,6 +196,37 @@ describe('RiskAnalyzer.analyze liquidity fallback chain', () => {
       (connection as { getAccountInfo: ReturnType<typeof vi.fn> }).getAccountInfo,
     ).not.toHaveBeenCalled();
     expect((jupiter as { getQuote: ReturnType<typeof vi.fn> }).getQuote).not.toHaveBeenCalled();
+  });
+
+  it('regression (2026-07-23 USOH incident post-mortem): surfaces the real on-chain decimals from getMintAuthorityInfo, not a hardcoded/default value', async () => {
+    const dexScreener = {
+      getBestSolanaPair: vi.fn().mockResolvedValue({ liquidity: { usd: 12345 } }),
+    } as never;
+    const jupiter = { getQuote: vi.fn() } as never;
+    const connection = { getAccountInfo: vi.fn() } as never;
+
+    const analyzer = new RiskAnalyzer(connection, dexScreener, jupiter, fakeLogger());
+    const result = await analyzer.analyze({ mint: 'MintAAAA' });
+
+    // The shared onchain.js mock above resolves decimals: 6 — a real
+    // Token-2022/pump.fun-style mint, not the Token schema's `@default(9)`
+    // fallback that caused the incident's 1000x PnL understatement.
+    expect(result.decimals).toBe(6);
+  });
+
+  it('reports decimals as undefined (not a placeholder) when the mint-authority read itself fails', async () => {
+    const { getMintAuthorityInfo } = await import('./onchain.js');
+    vi.mocked(getMintAuthorityInfo).mockRejectedValueOnce(new Error('rpc blip'));
+    const dexScreener = {
+      getBestSolanaPair: vi.fn().mockResolvedValue({ liquidity: { usd: 12345 } }),
+    } as never;
+    const jupiter = { getQuote: vi.fn() } as never;
+    const connection = { getAccountInfo: vi.fn() } as never;
+
+    const analyzer = new RiskAnalyzer(connection, dexScreener, jupiter, fakeLogger());
+    const result = await analyzer.analyze({ mint: 'MintAAAA' });
+
+    expect(result.decimals).toBeUndefined();
   });
 
   it('falls back to the native DEX reader when a known dex+poolAddress is passed and DexScreener has nothing', async () => {

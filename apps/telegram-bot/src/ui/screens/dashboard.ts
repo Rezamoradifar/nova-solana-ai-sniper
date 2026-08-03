@@ -1,9 +1,12 @@
 import { PortfolioService } from '@nova/shared';
 import { navOnly } from '../keyboards.js';
 import { sol, usd, pnlEmoji } from '../format.js';
+import { getLocale, t } from '../../i18n/index.js';
 import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
 
 export async function renderDashboard(deps: ScreenDeps, user: ScreenUser): Promise<ScreenResult> {
+  const lang = getLocale(user);
+  const d = t(lang).dashboard;
   const portfolioService = new PortfolioService(deps.prisma);
 
   const [wallets, tokenCount, tradeCount] = await Promise.all([
@@ -27,13 +30,13 @@ export async function renderDashboard(deps: ScreenDeps, user: ScreenUser): Promi
   );
 
   const text =
-    `📊 *Dashboard*\n\n` +
-    `📈 Open positions: *${totals.openPositions}*\n` +
-    `💵 Invested: *${sol(totals.investedSol)}*\n` +
-    `${pnlEmoji(totals.realizedPnlUsd)} Realized PnL: *${usd(totals.realizedPnlUsd)}*\n` +
-    `${pnlEmoji(totals.unrealizedPnlUsd)} Unrealized PnL: *${usd(totals.unrealizedPnlUsd)}*\n\n` +
-    `💱 Your trades: *${tradeCount}*\n` +
-    `🪙 Tokens tracked platform-wide: *${tokenCount}*`;
+    `${d.title}\n\n` +
+    `${d.openPositions(totals.openPositions)}\n` +
+    `${d.invested(sol(totals.investedSol))}\n` +
+    `${d.realizedPnl(pnlEmoji(totals.realizedPnlUsd), usd(totals.realizedPnlUsd))}\n` +
+    `${d.unrealizedPnl(pnlEmoji(totals.unrealizedPnlUsd), usd(totals.unrealizedPnlUsd))}\n\n` +
+    `${d.yourTrades(tradeCount)}\n` +
+    `${d.tokensTracked(tokenCount)}`;
 
-  return { text, keyboard: navOnly('home') };
+  return { text, keyboard: navOnly('home', lang) };
 }

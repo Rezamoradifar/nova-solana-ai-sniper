@@ -4,9 +4,13 @@ import type { Redis } from 'ioredis';
 import {
   getKillSwitchState,
   getOrCreateBusinessSettings,
+  getScannerAutoBuyPauseReason,
+  getScannerAutoBuyPauseState,
   setKillSwitchState,
+  setScannerAutoBuyPauseState,
   type Logger,
 } from '@nova/shared';
+import { fmtDate, fmtHoldingTimeShort, usd } from '../ui/format.js';
 
 /** Restricts every command registered after this middleware to known admin Telegram IDs. */
 function requireAdmin(adminIds: Set<string>) {
@@ -41,14 +45,69 @@ export function registerAdminCommands(
     );
   });
 
+  // Telegram Member Counter (2026-07-27) — dashboard companion to the
+  // background memberGrowthReporter.ts alerts. "Members" == User rows with a
+  // telegramId (registered bot users), consistent with that reporter's own
+  // count so the two never drift apart.
   bot.command('stats', admin, async (ctx) => {
-    const closedPositions = await prisma.position.findMany({ where: { status: 'CLOSED' } });
-    const totalPnl = closedPositions.reduce((sum, p) => sum + (p.realizedPnlUsd ?? 0), 0);
-    const wins = closedPositions.filter((p) => (p.realizedPnlUsd ?? 0) > 0).length;
-    const winRate = closedPositions.length ? (wins / closedPositions.length) * 100 : 0;
+    const now = new Date();
+    const startOfDay = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
+    const startOfWeek = new Date(
+      startOfDay.getTime() - startOfDay.getUTCDay() * 24 * 60 * 60 * 1000,
+    );
+    const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    const [
+      totalMembers,
+      newToday,
+      newThisWeek,
+      newThisMonth,
+      totalTrades,
+      volumeAgg,
+      activeWalletGroups,
+    ] = await Promise.all([
+      prisma.user.count({ where: { telegramId: { not: null } } }),
+      prisma.user.count({ where: { telegramId: { not: null }, createdAt: { gte: startOfDay } } }),
+      prisma.user.count({ where: { telegramId: { not: null }, createdAt: { gte: startOfWeek } } }),
+      prisma.user.count({
+        where: { telegramId: { not: null }, createdAt: { gte: startOfMonth } },
+      }),
+      prisma.trade.count({ where: { status: 'CONFIRMED' } }),
+      prisma.trade.aggregate({ where: { status: 'CONFIRMED' }, _sum: { amountSol: true } }),
+      prisma.trade.groupBy({ by: ['walletId'], where: { createdAt: { gte: since24h } } }),
+    ]);
+
+    // Trade->Wallet->User, not a direct userId column on Trade — a second
+    // narrow query on the (few) wallets active in the window, rather than
+    // pulling every recent trade row just to dedupe by user.
+    const activeWalletIds = activeWalletGroups.map((g) => g.walletId);
+    const activeUsers24h = activeWalletIds.length
+      ? (
+          await prisma.wallet.findMany({
+            where: { id: { in: activeWalletIds } },
+            select: { userId: true },
+            distinct: ['userId'],
+          })
+        ).length
+      : 0;
+
+    const growthRate = totalMembers > 0 ? (newThisWeek / totalMembers) * 100 : 0;
+    const totalVolumeSol = volumeAgg._sum.amountSol ?? 0;
+
     await ctx.reply(
-      `📈 *Trading stats*\nClosed positions: ${closedPositions.length}\n` +
-        `Win rate: ${winRate.toFixed(1)}%\nTotal realized PnL: $${totalPnl.toFixed(2)}`,
+      `📊 *Bot Stats*\n\n` +
+        `👥 Total Members: ${totalMembers.toLocaleString('en-US')}\n` +
+        `🆕 New Today: ${newToday.toLocaleString('en-US')}\n` +
+        `🆕 New This Week: ${newThisWeek.toLocaleString('en-US')}\n` +
+        `🆕 New This Month: ${newThisMonth.toLocaleString('en-US')}\n` +
+        `📈 Growth Rate (7d): ${growthRate.toFixed(1)}%\n` +
+        `🟢 Active Users (24h): ${activeUsers24h.toLocaleString('en-US')}\n` +
+        `💰 Total Trades: ${totalTrades.toLocaleString('en-US')}\n` +
+        `💵 Total Volume: ${totalVolumeSol.toLocaleString('en-US', { maximumFractionDigits: 2 })} SOL\n` +
+        `⏱ Server Uptime: ${fmtHoldingTimeShort(process.uptime() * 1000)}`,
       { parse_mode: 'Markdown' },
     );
   });
@@ -91,6 +150,39 @@ export function registerAdminCommands(
     const active = await getKillSwitchState(redis);
     await ctx.reply(
       `Kill switch is currently ${active ? '🚨 ACTIVE (new trades blocked)' : '✅ inactive'}.\n\nUsage: /killswitch on | off`,
+    );
+  });
+
+  // Recurring pump.fun outage follow-up (2026-07-23): scannerHealth.ts sets this
+  // Redis flag automatically the moment launch detection is confirmed fully
+  // down (every source unhealthy) — narrower than the kill switch above (blocks
+  // NEW auto-buys only; SELL/TP/SL and existing position monitoring are never
+  // affected). By design this does NOT auto-clear when detection recovers
+  // (unless SCANNER_AUTO_BUY_AUTO_RESUME_ENABLED is explicitly set) — an admin
+  // must confirm it's safe to resume auto-buying via this command.
+  bot.command('resumeautobuy', admin, async (ctx) => {
+    const arg = String(ctx.match).trim().toLowerCase();
+
+    if (arg === 'off' || arg === 'resume') {
+      await setScannerAutoBuyPauseState(redis, false);
+      logger.warn(
+        { adminId: ctx.from?.id },
+        'admin manually resumed auto-buy after scanner outage',
+      );
+      await ctx.reply('✅ Auto-buy resumed — new launches will be evaluated again.');
+      return;
+    }
+    if (arg === 'on' || arg === 'pause') {
+      await setScannerAutoBuyPauseState(redis, true, 'manually paused by admin');
+      logger.warn({ adminId: ctx.from?.id }, 'admin manually paused auto-buy');
+      await ctx.reply('⏸️ Auto-buy paused — existing positions are unaffected.');
+      return;
+    }
+
+    const active = await getScannerAutoBuyPauseState(redis);
+    const reason = active ? await getScannerAutoBuyPauseReason(redis) : undefined;
+    await ctx.reply(
+      `Auto-buy is currently ${active ? `⏸️ PAUSED${reason ? ` (${reason})` : ''}` : '✅ active'}.\n\nUsage: /resumeautobuy on | off`,
     );
   });
 
@@ -201,6 +293,43 @@ export function registerAdminCommands(
     await ctx.reply(`🔗 Referral program ${enabled ? 'ENABLED' : 'DISABLED'}.`);
   });
 
+  // Verifies end-to-end delivery of the Real Bot Trade DM broadcast
+  // (2026-07-28, see marketing-engine/tradeShowcase/monitor.ts's
+  // dmSubscribedUsers) without waiting for a real trade to close — same
+  // premium layout + live DexScreener chart-preview link, clearly labeled
+  // SAMPLE so it can never be mistaken for a real trade.
+  bot.command('testtrade', admin, async (ctx) => {
+    const chatId = String(ctx.chat.id);
+    const sampleMint = 'So11111111111111111111111111111111111111112';
+    const now = new Date();
+    const buyAt = new Date(now.getTime() - 15 * 60_000);
+    const chartUrl = `https://dexscreener.com/solana/${sampleMint}`;
+    const text =
+      `🤖 *REAL BOT TRADE* _(SAMPLE — /testtrade)_\n\n` +
+      `🟢 *TESTCOIN*\n\n` +
+      `Name: Test Token\n` +
+      `Token: \`${sampleMint}\` ([Solscan](https://solscan.io/token/${sampleMint}))\n` +
+      `DEX: PUMPFUN\n` +
+      `Buy: ${fmtDate(buyAt)} UTC\n` +
+      `Sell: ${fmtDate(now)} UTC (held ${fmtHoldingTimeShort(now.getTime() - buyAt.getTime())})\n` +
+      `ROI: *+42.0%*\n` +
+      `PnL: *${usd(12.34)}*\n` +
+      `AI Score: *87/100*\n` +
+      `[View chart on DexScreener](${chartUrl})\n\n` +
+      `🔷 *Nova Solana AI Sniper*`;
+
+    try {
+      await ctx.api.sendMessage(chatId, text, {
+        parse_mode: 'Markdown',
+        link_preview_options: { url: chartUrl },
+      });
+      logger.info({ adminId: ctx.from?.id, chatId }, 'admin sent /testtrade sample notification');
+    } catch (err) {
+      logger.error({ err, chatId }, 'failed to send /testtrade sample notification');
+      await ctx.reply('❌ Failed to send test trade notification — see logs.');
+    }
+  });
+
   bot.command('businessreport', admin, async (ctx) => {
     const settings = await getOrCreateBusinessSettings(prisma);
     const now = new Date();
@@ -243,7 +372,9 @@ export function registerAdminCommands(
       `📊 *Business Report*\n\n` +
         `⚙️ *Settings*\nPerformance fee: ${(settings.performanceFeeBps / 100).toFixed(1)}%\n` +
         `Referral program: ${settings.referralProgramEnabled ? '✅ enabled' : '⏸ disabled'}\n` +
-        `Max referral depth: ${settings.maxReferralDepth}\n${levelLines}\n\n` +
+        `Max referral depth: ${settings.maxReferralDepth}\n${levelLines}\n` +
+        `_ℹ️ Referral/profit split is fixed at 80/10/5/5 by policy (Section 14) — ` +
+        `these settings are for reference only and no longer drive the actual split._\n\n` +
         `💰 *Revenue (Performance Fees)*\n` +
         `Today: $${(dailyAgg._sum.feeUsd ?? 0).toFixed(2)}\n` +
         `This week: $${(weeklyAgg._sum.feeUsd ?? 0).toFixed(2)}\n` +

@@ -1,5 +1,6 @@
 import { InlineKeyboard } from 'grammy';
 import { withNav } from '../keyboards.js';
+import { getLocale, t } from '../../i18n/index.js';
 import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
 import type { Context } from 'grammy';
 
@@ -8,6 +9,8 @@ export async function renderReferrals(
   user: ScreenUser,
   ctx: Context,
 ): Promise<ScreenResult> {
+  const lang = getLocale(user);
+  const d = t(lang).referrals;
   const referredCount = user.referralCode
     ? await deps.prisma.user.count({ where: { referredByCode: user.referralCode } })
     : 0;
@@ -19,17 +22,15 @@ export async function renderReferrals(
       : undefined;
 
   const text =
-    `🔗 *Referrals*\n\n` +
-    `Your code: \`${user.referralCode ?? '—'}\`\n` +
-    `People referred: *${referredCount}*\n\n` +
-    (link
-      ? // Backtick-wrapped: a bot username containing "_" would otherwise read as an
-        // unpaired italic marker and make Telegram's legacy Markdown parser reject the
-        // whole message (confirmed live — this broke the screen for a real user).
-        `Share your link — anyone who opens the bot through it is automatically credited to you:\n\`${link}\``
-      : 'Share your code with friends so they get credited to you when they join.');
+    `${d.title}\n\n` +
+    `${d.yourCode(user.referralCode ?? '—')}\n` +
+    `${d.peopleReferred(referredCount)}\n\n` +
+    // Backtick-wrapped: a bot username containing "_" would otherwise read as an
+    // unpaired italic marker and make Telegram's legacy Markdown parser reject the
+    // whole message (confirmed live — this broke the screen for a real user).
+    (link ? d.shareLink(link) : d.shareCodeOnly);
 
-  const keyboard = new InlineKeyboard().text('🔄 Refresh', 'a:referrals:refresh');
+  const keyboard = new InlineKeyboard().text(d.refresh, 'a:referrals:refresh');
 
-  return { text, keyboard: withNav(keyboard, 'home') };
+  return { text, keyboard: withNav(keyboard, 'home', lang) };
 }

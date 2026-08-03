@@ -1,9 +1,10 @@
 import { PublicKey } from '@solana/web3.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   calculateMeteoraDlmmLiquidityUsd,
   decodeMeteoraDlmmPool,
   isMeteoraDlmmPoolCreation,
+  MeteoraDlmmMonitor,
 } from './meteora.js';
 
 // Real pool captured live 2026-07-10: 6oFWm7KPLfxnwMb3z5xwBoXNSPP3JJyirAPqPSiVcnsp
@@ -115,5 +116,48 @@ describe('isMeteoraDlmmPoolCreation', () => {
 
   it('does not match swap instructions', () => {
     expect(isMeteoraDlmmPoolCreation(['Program log: Instruction: Swap'])).toBe(false);
+  });
+});
+
+describe('MeteoraDlmmMonitor', () => {
+  function fakeConnection() {
+    let handler: ((logInfo: unknown, ctx: { slot: number }) => void) | undefined;
+    return {
+      onLogs: vi.fn((_programId: unknown, cb: typeof handler) => {
+        handler = cb;
+        return 1;
+      }),
+      removeOnLogsListener: vi.fn(),
+      emit: (logInfo: unknown, ctx: { slot: number } = { slot: 1 }) => handler!(logInfo, ctx),
+    };
+  }
+
+  const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
+
+  it('calls onRawActivity on every raw log delivery, including errored and non-pool-creation ones (2026-07-15 Helius credit audit)', () => {
+    const connection = fakeConnection();
+    const monitor = new MeteoraDlmmMonitor(connection as never, logger);
+    const onEvent = vi.fn();
+    const onRawActivity = vi.fn();
+    monitor.start(onEvent, onRawActivity);
+
+    connection.emit({ err: { InstructionError: [] }, logs: [], signature: 'sig-err' });
+    connection.emit({ err: null, logs: ['Program log: Instruction: Swap'], signature: 'sig-swap' });
+    connection.emit({
+      err: null,
+      logs: ['Program log: Instruction: InitializeLbPair'],
+      signature: 'sig-init',
+    });
+
+    expect(onRawActivity).toHaveBeenCalledTimes(3);
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ signature: 'sig-init' }));
+  });
+
+  it('registers only one onLogs subscription per start() call (no duplicate WS registration)', () => {
+    const connection = fakeConnection();
+    const monitor = new MeteoraDlmmMonitor(connection as never, logger);
+    monitor.start(vi.fn(), vi.fn());
+    expect(connection.onLogs).toHaveBeenCalledTimes(1);
   });
 });

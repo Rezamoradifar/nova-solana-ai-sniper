@@ -279,7 +279,8 @@ export interface SellCardData {
   roiPercent: number;
   pnlPercent: number;
   holdingTimeMs: number;
-  exitReason: 'take_profit' | 'stop_loss' | 'trailing_stop' | 'manual' | 'emergency';
+  exitReason:
+    'take_profit' | 'stop_loss' | 'trailing_stop' | 'manual' | 'emergency' | 'manual_emergency';
   highestProfitPercent?: number;
   lockedProfitPercent?: number;
   walletPublicKey: string;
@@ -294,6 +295,7 @@ const EXIT_REASON_LABELS: Record<SellCardData['exitReason'], string> = {
   trailing_stop: 'Trailing Stop',
   manual: 'Manual Sell',
   emergency: 'Emergency Sell',
+  manual_emergency: 'Manual Emergency Sell',
 };
 
 export function buildSellCardSvg(data: SellCardData, logoDataUri: string | undefined): string {

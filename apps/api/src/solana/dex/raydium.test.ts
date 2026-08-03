@@ -1,9 +1,10 @@
 import { PublicKey } from '@solana/web3.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   calculateRaydiumCpmmLiquidityUsd,
   decodeRaydiumCpmmPool,
   isRaydiumCpmmPoolCreation,
+  RaydiumCpmmMonitor,
 } from './raydium.js';
 
 // Real pool captured live 2026-07-10: 7ZFLTdJCmL8PQozEmfPcq8dxsjR4W7LLkbK8hqSGZnQ1
@@ -54,6 +55,10 @@ describe('decodeRaydiumCpmmPool', () => {
     expect(state.token1Mint).toBe(REAL_POOL.token1Mint);
     expect(state.token0Vault).toBe(REAL_POOL.token0Vault);
     expect(state.token1Vault).toBe(REAL_POOL.token1Vault);
+    expect(state.ammConfig).toBe(REAL_POOL.ammConfig);
+    expect(state.token0Program).toBe(REAL_POOL.token0Program);
+    expect(state.token1Program).toBe(REAL_POOL.token1Program);
+    expect(state.observationKey).toBe(REAL_POOL.observationKey);
     expect(state.status).toBe(0);
     expect(state.lpSupply).toBe(REAL_POOL.lpSupply);
   });
@@ -124,5 +129,69 @@ describe('isRaydiumCpmmPoolCreation', () => {
     expect(isRaydiumCpmmPoolCreation(['Program log: Instruction: SwapBaseInput'])).toBe(false);
     expect(isRaydiumCpmmPoolCreation(['Program log: Instruction: Deposit'])).toBe(false);
     expect(isRaydiumCpmmPoolCreation(['Program log: Instruction: Withdraw'])).toBe(false);
+  });
+});
+
+describe('RaydiumCpmmMonitor', () => {
+  function fakeConnection() {
+    let handler: ((logInfo: unknown, ctx: { slot: number }) => void) | undefined;
+    return {
+      onLogs: vi.fn((_programId: unknown, cb: typeof handler) => {
+        handler = cb;
+        return 1;
+      }),
+      removeOnLogsListener: vi.fn(),
+      emit: (logInfo: unknown, ctx: { slot: number } = { slot: 1 }) => handler!(logInfo, ctx),
+    };
+  }
+
+  const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
+
+  it('calls onRawActivity on every raw log delivery, including errored and non-pool-creation ones (2026-07-15 Helius credit audit)', () => {
+    const connection = fakeConnection();
+    const monitor = new RaydiumCpmmMonitor(connection as never, logger);
+    const onEvent = vi.fn();
+    const onRawActivity = vi.fn();
+    monitor.start(onEvent, onRawActivity);
+
+    connection.emit({ err: { InstructionError: [] }, logs: [], signature: 'sig-err' });
+    connection.emit({
+      err: null,
+      logs: ['Program log: Instruction: SwapBaseInput'],
+      signature: 'sig-swap',
+    });
+    connection.emit({
+      err: null,
+      logs: ['Program log: Instruction: Initialize'],
+      signature: 'sig-init',
+    });
+
+    expect(onRawActivity).toHaveBeenCalledTimes(3);
+    // onEvent only fires on the genuine pool-creation log — unchanged behavior.
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ signature: 'sig-init' }));
+  });
+
+  it('works exactly as before when onRawActivity is omitted (backward compatible)', () => {
+    const connection = fakeConnection();
+    const monitor = new RaydiumCpmmMonitor(connection as never, logger);
+    const onEvent = vi.fn();
+    monitor.start(onEvent);
+
+    expect(() =>
+      connection.emit({
+        err: null,
+        logs: ['Program log: Instruction: Initialize'],
+        signature: 'sig-init',
+      }),
+    ).not.toThrow();
+    expect(onEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('registers only one onLogs subscription per start() call (no duplicate WS registration)', () => {
+    const connection = fakeConnection();
+    const monitor = new RaydiumCpmmMonitor(connection as never, logger);
+    monitor.start(vi.fn(), vi.fn());
+    expect(connection.onLogs).toHaveBeenCalledTimes(1);
   });
 });

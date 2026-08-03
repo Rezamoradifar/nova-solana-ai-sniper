@@ -36,6 +36,7 @@ import {
   type NativeDexName,
 } from './types.js';
 import { MonitorWatchdog } from '../monitorWatchdog.js';
+import { NativeDexAdapter, type DexAdapter } from './adapter.js';
 
 type NativeDex = NativeDexName;
 
@@ -71,6 +72,26 @@ type LiquidityReader = (
  * positionManager.ts don't need a per-DEX conditional each — adding a real native
  * executor for Raydium/Orca/Meteora later (currently `NotImplementedNativeExecutor`
  * stubs) is a change to this file's construction only, not to any call site.
+ *
+ * Status per DEX (2026-07-29 audit, see apps/api/src/solana/dex/adapter.ts for
+ * the formal DexAdapter interface this registry now also exposes):
+ *
+ * | DEX       | Monitor | Liquidity reader | Swap executor                          |
+ * |-----------|---------|-------------------|----------------------------------------|
+ * | PUMPSWAP  | real    | real              | real, live-verified (pumpswapExecutor.ts) |
+ * | RAYDIUM   | real    | real              | real, NOT live-verified (raydiumExecutor.ts — see its doc comment) |
+ * | ORCA      | real    | real              | stub (NotImplementedNativeExecutor — Whirlpool concentrated-liquidity swap not built) |
+ * | METEORA   | real    | real              | stub (NotImplementedNativeExecutor — DLMM bin-based swap not built) |
+ * | LIFINITY  | none    | none              | none — detection-only (Token.dex labeling via DexScreener dexId, see migrationMonitor.ts/riskAnalyzer.ts) |
+ * | FLUXBEAM  | none    | none              | none — detection-only |
+ * | OPENBOOK  | none    | none              | none — detection-only |
+ * | PHOENIX   | none    | none              | none — detection-only |
+ *
+ * The last 4 are deliberately NOT registered here (not added to NativeDexName) —
+ * this registry's maps assume a working liquidity reader exists for every entry
+ * (resolveNewPool, getVaultAddresses); adding a DEX with no reader would silently
+ * degrade those call sites rather than fail loudly like NotImplementedNativeExecutor
+ * does for swap building.
  */
 export class DexRegistry {
   readonly monitors: ReadonlyMap<NativeDex, DexMonitor>;
@@ -89,34 +110,66 @@ export class DexRegistry {
     // most tests) leaves monitors unwrapped — the watchdog's own interval timer
     // would otherwise outlive short-lived test instances.
     watchdogIdleMs?: number,
+    // Config-driven enable/disable (2026-07-29, ENABLED_NATIVE_DEXES env var —
+    // see packages/shared/src/env.ts): a DEX not in this set gets no monitor,
+    // no liquidity reader, no executor at all — same end state as if it were
+    // never registered here, letting an operator disable a misbehaving DEX
+    // integration without a redeploy. Undefined (the default, used by every
+    // existing caller/test) enables all 4 — today's exact behavior.
+    enabledDexes: ReadonlySet<NativeDex> = new Set(['PUMPSWAP', 'RAYDIUM', 'ORCA', 'METEORA']),
   ) {
     const wrap = (dex: NativeDex, monitor: DexMonitor): DexMonitor =>
       watchdogIdleMs === undefined
         ? monitor
         : new MonitorWatchdog(monitor, logger, { label: dex, idleThresholdMs: watchdogIdleMs });
 
-    this.monitors = new Map<NativeDex, DexMonitor>([
-      ['PUMPSWAP', wrap('PUMPSWAP', new PumpSwapMonitor(connection, logger))],
-      ['RAYDIUM', wrap('RAYDIUM', new RaydiumCpmmMonitor(connection, logger))],
-      ['ORCA', wrap('ORCA', new OrcaWhirlpoolMonitor(connection, logger))],
-      ['METEORA', wrap('METEORA', new MeteoraDlmmMonitor(connection, logger))],
-    ]);
-    this.liquidityReaders = new Map<NativeDex, LiquidityReader>([
-      ['PUMPSWAP', getPumpSwapLiquidity],
-      ['RAYDIUM', getRaydiumCpmmLiquidity],
-      ['ORCA', getOrcaWhirlpoolLiquidity],
-      ['METEORA', getMeteoraDlmmLiquidity],
-    ]);
-    this.executors = new Map<NativeDex, NativeDexExecutor>([
-      ['PUMPSWAP', executorOverrides.PUMPSWAP ?? new NotImplementedNativeExecutor('PUMPSWAP')],
-      ['RAYDIUM', executorOverrides.RAYDIUM ?? new NotImplementedNativeExecutor('RAYDIUM')],
-      ['ORCA', executorOverrides.ORCA ?? new NotImplementedNativeExecutor('ORCA')],
-      ['METEORA', executorOverrides.METEORA ?? new NotImplementedNativeExecutor('METEORA')],
-    ]);
+    const filterEnabled = <T>(entries: [NativeDex, T][]): [NativeDex, T][] =>
+      entries.filter(([dex]) => enabledDexes.has(dex));
+
+    this.monitors = new Map<NativeDex, DexMonitor>(
+      filterEnabled([
+        ['PUMPSWAP', wrap('PUMPSWAP', new PumpSwapMonitor(connection, logger))],
+        ['RAYDIUM', wrap('RAYDIUM', new RaydiumCpmmMonitor(connection, logger))],
+        ['ORCA', wrap('ORCA', new OrcaWhirlpoolMonitor(connection, logger))],
+        ['METEORA', wrap('METEORA', new MeteoraDlmmMonitor(connection, logger))],
+      ]),
+    );
+    this.liquidityReaders = new Map<NativeDex, LiquidityReader>(
+      filterEnabled([
+        ['PUMPSWAP', getPumpSwapLiquidity],
+        ['RAYDIUM', getRaydiumCpmmLiquidity],
+        ['ORCA', getOrcaWhirlpoolLiquidity],
+        ['METEORA', getMeteoraDlmmLiquidity],
+      ]),
+    );
+    this.executors = new Map<NativeDex, NativeDexExecutor>(
+      filterEnabled([
+        ['PUMPSWAP', executorOverrides.PUMPSWAP ?? new NotImplementedNativeExecutor('PUMPSWAP')],
+        ['RAYDIUM', executorOverrides.RAYDIUM ?? new NotImplementedNativeExecutor('RAYDIUM')],
+        ['ORCA', executorOverrides.ORCA ?? new NotImplementedNativeExecutor('ORCA')],
+        ['METEORA', executorOverrides.METEORA ?? new NotImplementedNativeExecutor('METEORA')],
+      ]),
+    );
   }
 
-  startAll(onLaunch: Parameters<DexMonitor['start']>[0]): void {
-    for (const monitor of this.monitors.values()) monitor.start(onLaunch);
+  /**
+   * `onRawActivity`, if given, is called with the DEX label on every raw log
+   * delivery from that DEX's existing subscription (see DexMonitor.start's
+   * doc comment) — 2026-07-15 Helius credit audit: lets a caller feed
+   * source-health liveness tracking off this one subscription instead of
+   * opening a second, redundant one per DEX just to get the same signal.
+   */
+  startAll(
+    onLaunch: Parameters<DexMonitor['start']>[0],
+    onRawActivity?: (dex: NativeDex) => void,
+  ): void {
+    for (const [dex, monitor] of this.monitors) {
+      if (onRawActivity) {
+        monitor.start(onLaunch, () => onRawActivity(dex));
+      } else {
+        monitor.start(onLaunch);
+      }
+    }
   }
 
   async stopAll(): Promise<void> {
@@ -166,6 +219,31 @@ export class DexRegistry {
 
   getExecutor(dex: Dex): NativeDexExecutor | undefined {
     return this.executors.get(dex as NativeDex);
+  }
+
+  /**
+   * The formal DexAdapter surface (see adapter.ts) for one DEX — a thin
+   * wrapper composing this registry's own liquidity reader + executor, built
+   * fresh per call rather than cached (constructing NativeDexAdapter is
+   * allocation-only, no I/O). Additive: existing callers (positionManager.ts's
+   * sendSwap) keep using getExecutor/getLiquidity directly and are
+   * unaffected — this is for new/analytics callers that want one per-DEX
+   * surface instead of composing the registry's individual methods
+   * themselves.
+   */
+  getAdapter(dex: Dex): DexAdapter | undefined {
+    const nativeDex = dex as NativeDex;
+    const reader = this.liquidityReaders.get(nativeDex);
+    const executor = this.executors.get(nativeDex);
+    if (!reader || !executor) return undefined;
+    return new NativeDexAdapter(
+      nativeDex,
+      this.connection,
+      this.dexScreener,
+      this.solPriceOracle,
+      reader,
+      executor,
+    );
   }
 
   /**

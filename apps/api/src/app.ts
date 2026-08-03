@@ -16,6 +16,7 @@ import tradeRoutes from './routes/trades.js';
 import positionRoutes from './routes/positions.js';
 import snipeRoutes from './routes/snipes.js';
 import portfolioRoutes from './routes/portfolio.js';
+import analyticsRoutes from './routes/analytics.js';
 import walletRoutes from './routes/wallets.js';
 import referralRoutes from './routes/referrals.js';
 import copyTradeRoutes from './routes/copyTrades.js';
@@ -56,6 +57,7 @@ export async function buildApp() {
   await app.register(positionRoutes);
   await app.register(snipeRoutes);
   await app.register(portfolioRoutes);
+  await app.register(analyticsRoutes);
   await app.register(walletRoutes);
   await app.register(referralRoutes);
   await app.register(copyTradeRoutes);
