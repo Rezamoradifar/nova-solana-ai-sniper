@@ -173,18 +173,16 @@ describe('ActivityFeedMonitor — trending token requires a live, real threshold
     vi.spyOn(Math, 'random').mockReturnValue(0);
     const prisma = fakePrisma({
       token: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([
-            {
-              id: 'tok1',
-              mint: 'MintA',
-              name: 'A',
-              symbol: 'AAA',
-              dex: 'RAYDIUM',
-              firstSeenAt: new Date('2026-07-27T07:00:00Z'),
-            },
-          ]),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'tok1',
+            mint: 'MintA',
+            name: 'A',
+            symbol: 'AAA',
+            dex: 'RAYDIUM',
+            firstSeenAt: new Date('2026-07-27T07:00:00Z'),
+          },
+        ]),
       },
     });
     const deps = fakeDeps({

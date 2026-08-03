@@ -76,12 +76,10 @@ describe('MarketDataClient.fetchEnrichment', () => {
   it('returns undefined when no Solana pair exists in the response', async () => {
     vi.stubGlobal(
       'fetch',
-      vi
-        .fn()
-        .mockResolvedValue({
-          ok: true,
-          json: async () => [{ chainId: 'ethereum', liquidity: { usd: 1 } }],
-        }),
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => [{ chainId: 'ethereum', liquidity: { usd: 1 } }],
+      }),
     );
     const client = new MarketDataClient('https://api.dexscreener.com');
     expect(await client.fetchEnrichment('MintAbc')).toBeUndefined();

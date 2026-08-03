@@ -1,5 +1,8 @@
 <title>Nova Sniper AI — Brand Assets</title>
-<meta name="description" content="Logo mark, wordmark lockup, and banner export sheet for Nova Solana AI Sniper.">
+<meta
+  name="description"
+  content="Logo mark, wordmark lockup, and banner export sheet for Nova Solana AI Sniper."
+/>
 <style>
   :root {
     --ground: #eef0f2;
@@ -11,26 +14,95 @@
     --dark-ground: #0b0f14;
     --dark-panel: #121821;
     --dark-ink: #e7eaed;
-    --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Consolas, monospace;
+    --mono: ui-monospace, 'SF Mono', 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --ground:#0b0f14; --panel:#121821; --ink:#e7eaed; --ink-soft:#a4acb6; --border:#262e38; --accent:#ff9f45; }
+    :root {
+      --ground: #0b0f14;
+      --panel: #121821;
+      --ink: #e7eaed;
+      --ink-soft: #a4acb6;
+      --border: #262e38;
+      --accent: #ff9f45;
+    }
   }
-  :root[data-theme="dark"] { --ground:#0b0f14; --panel:#121821; --ink:#e7eaed; --ink-soft:#a4acb6; --border:#262e38; --accent:#ff9f45; }
-  :root[data-theme="light"] { --ground:#eef0f2; --panel:#ffffff; --ink:#12161c; --ink-soft:#454c56; --border:#d5d9de; --accent:#c9711f; }
+  :root[data-theme='dark'] {
+    --ground: #0b0f14;
+    --panel: #121821;
+    --ink: #e7eaed;
+    --ink-soft: #a4acb6;
+    --border: #262e38;
+    --accent: #ff9f45;
+  }
+  :root[data-theme='light'] {
+    --ground: #eef0f2;
+    --panel: #ffffff;
+    --ink: #12161c;
+    --ink-soft: #454c56;
+    --border: #d5d9de;
+    --accent: #c9711f;
+  }
 
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--ground); color:var(--ink); font-family: var(--mono); padding: 40px 24px 80px; }
-  .wrap { max-width: 980px; margin: 0 auto; }
-  h1 { font-size: 1.3rem; margin-bottom: 4px; }
-  .sub { color: var(--ink-soft); font-size: 0.85rem; margin-bottom: 44px; }
-  h2 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin: 0 0 16px; }
-  section { margin-bottom: 56px; }
-  .row { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 18px; display:flex; flex-direction:column; align-items:center; gap:10px; }
-  .card .cap { font-size: 0.68rem; color: var(--ink-soft); text-align:center; }
-  .icon-dark { background:#0b0f14; }
-  .icon-light { background:#ffffff; }
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--mono);
+    padding: 40px 24px 80px;
+  }
+  .wrap {
+    max-width: 980px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.3rem;
+    margin-bottom: 4px;
+  }
+  .sub {
+    color: var(--ink-soft);
+    font-size: 0.85rem;
+    margin-bottom: 44px;
+  }
+  h2 {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    margin: 0 0 16px;
+  }
+  section {
+    margin-bottom: 56px;
+  }
+  .row {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .card .cap {
+    font-size: 0.68rem;
+    color: var(--ink-soft);
+    text-align: center;
+  }
+  .icon-dark {
+    background: #0b0f14;
+  }
+  .icon-light {
+    background: #ffffff;
+  }
 
   .banner {
     width: 100%;
@@ -45,76 +117,154 @@
     border: 1px solid var(--border);
   }
   .banner::before {
-    content: "";
-    position: absolute; inset: 0;
-    background: radial-gradient(circle at 78% 50%, rgba(255,159,69,0.22), transparent 55%);
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 78% 50%, rgba(255, 159, 69, 0.22), transparent 55%);
   }
-  .banner-word { color: #e7eaed; font-size: clamp(1.2rem, 3.4vw, 2.1rem); font-weight: 700; z-index:1; line-height:1.15; }
-  .banner-word span { color: #ff9f45; }
-  .banner-sub { color: #a4acb6; font-size: 0.78rem; margin-top: 10px; z-index:1; }
-  .banner-mark { position:absolute; right: 6%; top: 50%; transform: translateY(-50%); width: 22%; max-width: 130px; opacity: 0.9; z-index:1;}
+  .banner-word {
+    color: #e7eaed;
+    font-size: clamp(1.2rem, 3.4vw, 2.1rem);
+    font-weight: 700;
+    z-index: 1;
+    line-height: 1.15;
+  }
+  .banner-word span {
+    color: #ff9f45;
+  }
+  .banner-sub {
+    color: #a4acb6;
+    font-size: 0.78rem;
+    margin-top: 10px;
+    z-index: 1;
+  }
+  .banner-mark {
+    position: absolute;
+    right: 6%;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 22%;
+    max-width: 130px;
+    opacity: 0.9;
+    z-index: 1;
+  }
 
-  .wide-banner { aspect-ratio: 1500/500; }
+  .wide-banner {
+    aspect-ratio: 1500/500;
+  }
 
-  .swatches { display:flex; gap: 14px; flex-wrap: wrap; }
-  .swatch { width: 92px; }
-  .swatch .chip { height: 56px; border-radius: 4px; border: 1px solid var(--border); }
-  .swatch .lbl { font-size: 0.62rem; color: var(--ink-soft); margin-top: 6px; text-align:center; }
+  .swatches {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .swatch {
+    width: 92px;
+  }
+  .swatch .chip {
+    height: 56px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .swatch .lbl {
+    font-size: 0.62rem;
+    color: var(--ink-soft);
+    margin-top: 6px;
+    text-align: center;
+  }
 
-  .note { font-size: 0.78rem; color: var(--ink-soft); line-height:1.6; max-width: 70ch; }
+  .note {
+    font-size: 0.78rem;
+    color: var(--ink-soft);
+    line-height: 1.6;
+    max-width: 70ch;
+  }
 </style>
 
 <div class="wrap">
   <h1>NOVA SNIPER AI — brand asset sheet</h1>
-  <div class="sub">Vector-built, exportable at any size. Screenshot each block below at 2x, or open this page's source and re-export the inline SVG in any vector tool (Figma/Inkscape) for a lossless PNG.</div>
+  <div class="sub">
+    Vector-built, exportable at any size. Screenshot each block below at 2x, or open this page's
+    source and re-export the inline SVG in any vector tool (Figma/Inkscape) for a lossless PNG.
+  </div>
 
   <section>
     <h2>01 — Logo mark, both grounds</h2>
     <div class="row">
       <div class="card icon-dark">
-        <svg width="120" height="120" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="12" cy="12" r="10.25" stroke="#ff9f45" stroke-width="1.4"/>
-          <circle cx="12" cy="12" r="5.5" stroke="#ff9f45" stroke-width="1.4"/>
-          <line x1="12" y1="1" x2="12" y2="5.2" stroke="#ff9f45" stroke-width="1.4"/>
-          <line x1="12" y1="18.8" x2="12" y2="23" stroke="#ff9f45" stroke-width="1.4"/>
-          <line x1="1" y1="12" x2="5.2" y2="12" stroke="#ff9f45" stroke-width="1.4"/>
-          <line x1="18.8" y1="12" x2="23" y2="12" stroke="#ff9f45" stroke-width="1.4"/>
-          <circle cx="12" cy="12" r="1.6" fill="#ff9f45"/>
+        <svg
+          width="120"
+          height="120"
+          viewBox="0 0 24 24"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <circle cx="12" cy="12" r="10.25" stroke="#ff9f45" stroke-width="1.4" />
+          <circle cx="12" cy="12" r="5.5" stroke="#ff9f45" stroke-width="1.4" />
+          <line x1="12" y1="1" x2="12" y2="5.2" stroke="#ff9f45" stroke-width="1.4" />
+          <line x1="12" y1="18.8" x2="12" y2="23" stroke="#ff9f45" stroke-width="1.4" />
+          <line x1="1" y1="12" x2="5.2" y2="12" stroke="#ff9f45" stroke-width="1.4" />
+          <line x1="18.8" y1="12" x2="23" y2="12" stroke="#ff9f45" stroke-width="1.4" />
+          <circle cx="12" cy="12" r="1.6" fill="#ff9f45" />
         </svg>
         <div class="cap">On dark — app icon / favicon base</div>
       </div>
       <div class="card icon-light">
-        <svg width="120" height="120" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="12" cy="12" r="10.25" stroke="#c9711f" stroke-width="1.4"/>
-          <circle cx="12" cy="12" r="5.5" stroke="#c9711f" stroke-width="1.4"/>
-          <line x1="12" y1="1" x2="12" y2="5.2" stroke="#c9711f" stroke-width="1.4"/>
-          <line x1="12" y1="18.8" x2="12" y2="23" stroke="#c9711f" stroke-width="1.4"/>
-          <line x1="1" y1="12" x2="5.2" y2="12" stroke="#c9711f" stroke-width="1.4"/>
-          <line x1="18.8" y1="12" x2="23" y2="12" stroke="#c9711f" stroke-width="1.4"/>
-          <circle cx="12" cy="12" r="1.6" fill="#c9711f"/>
+        <svg
+          width="120"
+          height="120"
+          viewBox="0 0 24 24"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <circle cx="12" cy="12" r="10.25" stroke="#c9711f" stroke-width="1.4" />
+          <circle cx="12" cy="12" r="5.5" stroke="#c9711f" stroke-width="1.4" />
+          <line x1="12" y1="1" x2="12" y2="5.2" stroke="#c9711f" stroke-width="1.4" />
+          <line x1="12" y1="18.8" x2="12" y2="23" stroke="#c9711f" stroke-width="1.4" />
+          <line x1="1" y1="12" x2="5.2" y2="12" stroke="#c9711f" stroke-width="1.4" />
+          <line x1="18.8" y1="12" x2="23" y2="12" stroke="#c9711f" stroke-width="1.4" />
+          <circle cx="12" cy="12" r="1.6" fill="#c9711f" />
         </svg>
         <div class="cap">On light — print / white backgrounds</div>
       </div>
-      <div class="card icon-dark" style="width:60px;height:60px;padding:8px;">
-        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="12" cy="12" r="10.25" stroke="#ff9f45" stroke-width="1.6"/>
-          <circle cx="12" cy="12" r="5.5" stroke="#ff9f45" stroke-width="1.6"/>
-          <circle cx="12" cy="12" r="1.9" fill="#ff9f45"/>
+      <div class="card icon-dark" style="width: 60px; height: 60px; padding: 8px">
+        <svg
+          width="34"
+          height="34"
+          viewBox="0 0 24 24"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <circle cx="12" cy="12" r="10.25" stroke="#ff9f45" stroke-width="1.6" />
+          <circle cx="12" cy="12" r="5.5" stroke="#ff9f45" stroke-width="1.6" />
+          <circle cx="12" cy="12" r="1.9" fill="#ff9f45" />
         </svg>
-        <div class="cap" style="font-size:0.55rem;">Favicon (simplified, 32px)</div>
+        <div class="cap" style="font-size: 0.55rem">Favicon (simplified, 32px)</div>
       </div>
     </div>
   </section>
 
   <section>
     <h2>02 — Wordmark lockup</h2>
-    <div class="card icon-dark" style="width:100%; flex-direction:row; justify-content:center; padding:36px;">
-      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-right:12px;">
-        <circle cx="12" cy="12" r="10.25" stroke="#ff9f45" stroke-width="1.5"/>
-        <circle cx="12" cy="12" r="5.5" stroke="#ff9f45" stroke-width="1.5"/>
-        <circle cx="12" cy="12" r="1.7" fill="#ff9f45"/>
+    <div
+      class="card icon-dark"
+      style="width: 100%; flex-direction: row; justify-content: center; padding: 36px"
+    >
+      <svg
+        width="30"
+        height="30"
+        viewBox="0 0 24 24"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        style="margin-right: 12px"
+      >
+        <circle cx="12" cy="12" r="10.25" stroke="#ff9f45" stroke-width="1.5" />
+        <circle cx="12" cy="12" r="5.5" stroke="#ff9f45" stroke-width="1.5" />
+        <circle cx="12" cy="12" r="1.7" fill="#ff9f45" />
       </svg>
-      <span style="color:#e7eaed; font-size:1.4rem; font-weight:700; letter-spacing:0.01em;">NOVA <span style="color:#ff9f45;">SNIPER</span> AI</span>
+      <span style="color: #e7eaed; font-size: 1.4rem; font-weight: 700; letter-spacing: 0.01em"
+        >NOVA <span style="color: #ff9f45">SNIPER</span> AI</span
+      >
     </div>
   </section>
 
@@ -126,9 +276,9 @@
         <div class="banner-sub">AI-gated Solana token sniper — your wallet, your rules.</div>
       </div>
       <svg class="banner-mark" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="12" cy="12" r="10.25" stroke="#ff9f45" stroke-width="1.1"/>
-        <circle cx="12" cy="12" r="5.5" stroke="#ff9f45" stroke-width="1.1"/>
-        <circle cx="12" cy="12" r="1.6" fill="#ff9f45"/>
+        <circle cx="12" cy="12" r="10.25" stroke="#ff9f45" stroke-width="1.1" />
+        <circle cx="12" cy="12" r="5.5" stroke="#ff9f45" stroke-width="1.1" />
+        <circle cx="12" cy="12" r="1.6" fill="#ff9f45" />
       </svg>
     </div>
   </section>
@@ -141,9 +291,9 @@
         <div class="banner-sub">Layered risk gating for Solana token launches.</div>
       </div>
       <svg class="banner-mark" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="12" cy="12" r="10.25" stroke="#ff9f45" stroke-width="1.1"/>
-        <circle cx="12" cy="12" r="5.5" stroke="#ff9f45" stroke-width="1.1"/>
-        <circle cx="12" cy="12" r="1.6" fill="#ff9f45"/>
+        <circle cx="12" cy="12" r="10.25" stroke="#ff9f45" stroke-width="1.1" />
+        <circle cx="12" cy="12" r="5.5" stroke="#ff9f45" stroke-width="1.1" />
+        <circle cx="12" cy="12" r="1.6" fill="#ff9f45" />
       </svg>
     </div>
   </section>
@@ -151,25 +301,41 @@
   <section>
     <h2>05 — Palette reference</h2>
     <div class="swatches">
-      <div class="swatch"><div class="chip" style="background:#0b0f14;"></div><div class="lbl">#0B0F14 ground</div></div>
-      <div class="swatch"><div class="chip" style="background:#121821;"></div><div class="lbl">#121821 panel</div></div>
-      <div class="swatch"><div class="chip" style="background:#ff9f45;"></div><div class="lbl">#FF9F45 accent</div></div>
-      <div class="swatch"><div class="chip" style="background:#e7eaed;"></div><div class="lbl">#E7EAED ink</div></div>
-      <div class="swatch"><div class="chip" style="background:#a4acb6;"></div><div class="lbl">#A4ACB6 ink-soft</div></div>
-      <div class="swatch"><div class="chip" style="background:#ff8a7a;"></div><div class="lbl">#FF8A7A caution</div></div>
+      <div class="swatch">
+        <div class="chip" style="background: #0b0f14"></div>
+        <div class="lbl">#0B0F14 ground</div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background: #121821"></div>
+        <div class="lbl">#121821 panel</div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background: #ff9f45"></div>
+        <div class="lbl">#FF9F45 accent</div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background: #e7eaed"></div>
+        <div class="lbl">#E7EAED ink</div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background: #a4acb6"></div>
+        <div class="lbl">#A4ACB6 ink-soft</div>
+      </div>
+      <div class="swatch">
+        <div class="chip" style="background: #ff8a7a"></div>
+        <div class="lbl">#FF8A7A caution</div>
+      </div>
     </div>
   </section>
 
   <section>
     <h2>06 — Notes</h2>
     <p class="note">
-      This sheet is built entirely from inline SVG + CSS — no external image
-      generator was used, and none is available in this environment. It's a
-      complete, real, exportable logo/banner set, not a placeholder. If you
-      want a more illustrated (non-geometric) mark instead, see the
-      Midjourney/DALL·E-style prompts in <code>04-brand-assets.md</code> —
-      those require an external image-generation tool this session doesn't
-      have access to.
+      This sheet is built entirely from inline SVG + CSS — no external image generator was used, and
+      none is available in this environment. It's a complete, real, exportable logo/banner set, not
+      a placeholder. If you want a more illustrated (non-geometric) mark instead, see the
+      Midjourney/DALL·E-style prompts in <code>04-brand-assets.md</code> — those require an external
+      image-generation tool this session doesn't have access to.
     </p>
   </section>
 </div>

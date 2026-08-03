@@ -123,13 +123,13 @@ async function main() {
   }
 
   await prisma.$disconnect();
-   
+
   console.log(JSON.stringify({ ok: true, results }, null, 2));
 }
 
 main().catch((err) => {
   logger.error({ err }, 'dry-run-visuals failed');
-   
+
   console.error(
     JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }),
   );

@@ -152,13 +152,11 @@ describe('EmergencyExitMonitor — 2026-07-28 scope fix', () => {
     const good = fakePosition({ id: 'pos-good' });
     const bad = fakePosition({ id: 'pos-bad' });
     const { deps, closePosition, analyze, logger } = fakeDeps([bad, good]);
-    analyze
-      .mockRejectedValueOnce(new Error('rpc blip'))
-      .mockResolvedValueOnce({
-        liquidityUsd: 50,
-        mintAuthorityRevoked: true,
-        freezeAuthorityRevoked: true,
-      });
+    analyze.mockRejectedValueOnce(new Error('rpc blip')).mockResolvedValueOnce({
+      liquidityUsd: 50,
+      mintAuthorityRevoked: true,
+      freezeAuthorityRevoked: true,
+    });
     vi.spyOn(RiskAnalyzer, 'ruleBasedScore').mockReturnValue(90);
     const monitor = new EmergencyExitMonitor(deps);
 

@@ -75,13 +75,13 @@ async function main() {
   }
 
   logger.info(result, 'test post published successfully');
-   
+
   console.log(JSON.stringify({ ok: true, ...result }, null, 2));
 }
 
 main().catch((err) => {
   logger.error({ err }, 'send-test-post failed');
-   
+
   console.error(
     JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }),
   );
