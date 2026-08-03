@@ -44,6 +44,7 @@ export const marketingEnvSchema = envSchema.pick({
   NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES: true,
   NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY: true,
   NETWORK_TRADE_FEED_DEPLOYED_AT: true,
+  NETWORK_TRADE_BROADCAST_WORKER_INTERVAL_MS: true,
 });
 
 export function loadMarketingEnv() {

@@ -84,7 +84,7 @@ export async function sendBrandedPhotoHtml(
   photo: Buffer | SendableTradePhoto | undefined,
   captionHtml: string,
   buttonRows: ButtonSpec[][] = [],
-): Promise<{ message_id: number }> {
+): Promise<{ message_id: number; photo?: { file_id: string }[] }> {
   const reply_markup = buildInlineKeyboard(buttonRows);
   if (!photo) {
     return bot.api.sendMessage(chatId, captionHtml, { parse_mode: 'HTML', reply_markup });

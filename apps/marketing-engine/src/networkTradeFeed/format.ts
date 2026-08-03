@@ -1,5 +1,6 @@
 import { shortKey, fmtDate, fmtHoldingTimeShort } from '@nova/telegram-bot';
-import type { NetworkTradeCandidate } from './data.js';
+import type { NetworkTradeCandidate, NetworkTradeCategory } from './data.js';
+import type { NetworkTradeCardBrief } from '../visuals/networkTradeCard.js';
 
 /**
  * Network Trade Feed HTML formatting (2026-08-02) — deliberately its own
@@ -56,7 +57,18 @@ function compactUsd(n: number | undefined): string {
 export interface NetworkTradeEnrichment {
   liquidityUsd: number | undefined;
   marketCapUsd: number | undefined;
+  volume24hUsd: number | undefined;
 }
+
+/** One badge line per category — always shown alongside, never instead of,
+ * the 🟢/🔴 profit-or-loss header below (see buildNetworkTradeCaptionHtml's
+ * own doc comment). */
+const CATEGORY_LABEL: Record<NetworkTradeCategory, string> = {
+  SMART_MONEY: '🧠 SMART MONEY',
+  TRENDING_TOKEN: '🔥 TRENDING TOKEN',
+  NETWORK_PROFIT: '🌐 NETWORK TRADE',
+  NETWORK_LOSS: '🌐 NETWORK TRADE',
+};
 
 export const NOVA_BRAND_FOOTER_HTML = '\n\n🔷 <b>Nova Solana AI Sniper</b> · Network Feed';
 
@@ -71,16 +83,22 @@ export function truncateForPhotoCaption(html: string): string {
 /**
  * Every field the project's Network Trade Feed spec requires, always present
  * as its own line — a value that couldn't be resolved (aiScore, live
- * liquidity/market cap) renders as a literal "N/A", never a fabricated
- * number, same convention as tradeShowcase's own "Real Bot Trade" caption.
+ * liquidity/market cap/volume) renders as a literal "N/A", never a
+ * fabricated number, same convention as tradeShowcase's own "Real Bot Trade"
+ * caption. `category` (see data.ts's categorizeNetworkTrade) drives the
+ * badge line only — the 🟢/🔴 profit-or-loss header always reflects the
+ * trade's actual sign, so a SMART_MONEY or TRENDING_TOKEN post never hides
+ * whether it was a win or a loss.
  */
 export function buildNetworkTradeCaptionHtml(
   c: NetworkTradeCandidate,
   enrichment: NetworkTradeEnrichment,
   now: Date,
+  category: NetworkTradeCategory,
 ): string {
   const isProfit = c.realizedPnlUsd >= 0;
-  const header = isProfit ? '🟢 <b>PROFIT — NETWORK TRADE</b>' : '🔴 <b>LOSS — NETWORK TRADE</b>';
+  const badge = CATEGORY_LABEL[category];
+  const header = isProfit ? `🟢 <b>PROFIT</b> · ${badge}` : `🔴 <b>LOSS</b> · ${badge}`;
   const label = tokenLabel(c.mint, c.tokenName, c.tokenSymbol);
   const roiStr = `${c.realizedRoiPercent >= 0 ? '+' : ''}${c.realizedRoiPercent.toFixed(1)}%`;
   const holdingMs = c.exitAt.getTime() - c.entryAt.getTime();
@@ -96,11 +114,53 @@ export function buildNetworkTradeCaptionHtml(
     `⏱ Holding Time: ${fmtHoldingTimeShort(holdingMs)}`,
     `💧 Liquidity: ${compactUsd(enrichment.liquidityUsd)}`,
     `🏦 Market Cap: ${compactUsd(enrichment.marketCapUsd)}`,
+    `📊 Volume (24h): ${compactUsd(enrichment.volume24hUsd)}`,
     `🤖 AI Score: ${c.aiScore !== undefined ? `${Math.round(c.aiScore)}/100` : NOT_AVAILABLE}`,
     `🔀 DEX: ${escapeHtml(c.dex)}`,
     `👛 Wallet: <code>${escapeHtml(shortKey(c.walletAddress))}</code>`,
+    `🧾 Tx: <code>${escapeHtml(shortKey(c.exitSignature))}</code>`,
     `🕐 ${escapeHtml(fmtDate(now))} UTC`,
   ];
 
   return truncateForPhotoCaption(lines.join('\n') + NOVA_BRAND_FOOTER_HTML);
+}
+
+/** Plain-text (no emoji — the generated image has no emoji font loaded)
+ * counterpart to CATEGORY_LABEL above, for the image's category tag line. */
+const CATEGORY_TAG_PLAIN: Record<NetworkTradeCategory, string> = {
+  SMART_MONEY: 'SMART MONEY',
+  TRENDING_TOKEN: 'TRENDING TOKEN',
+  NETWORK_PROFIT: 'NETWORK TRADE',
+  NETWORK_LOSS: 'NETWORK TRADE',
+};
+
+/**
+ * Converts a real candidate + live enrichment into the premium generated
+ * image's brief (see visuals/networkTradeCard.ts) — every field the project
+ * spec requires on the image (logo is handled separately, by the caller
+ * fetching it via fetchNetworkTradeLogo.ts and passing the buffer straight to
+ * renderNetworkTradeCard). Reuses this file's own priceLabel/compactUsd so
+ * the image and the caption always render identical numbers for the same
+ * trade.
+ */
+export function buildNetworkTradeCardBrief(
+  c: NetworkTradeCandidate,
+  enrichment: NetworkTradeEnrichment,
+  category: NetworkTradeCategory,
+): NetworkTradeCardBrief {
+  const roiStr = `${c.realizedRoiPercent >= 0 ? '+' : ''}${c.realizedRoiPercent.toFixed(1)}%`;
+  return {
+    tokenName: c.tokenName ?? shortKey(c.mint),
+    tokenSymbol: c.tokenSymbol ?? '—',
+    roiPercent: c.realizedRoiPercent,
+    roiLabel: roiStr,
+    pnlLabel: `${formatUsdSigned(c.realizedPnlUsd)} · ${formatSolSigned(c.realizedPnlSol)}`,
+    categoryTag: CATEGORY_TAG_PLAIN[category],
+    marketCapLabel: compactUsd(enrichment.marketCapUsd),
+    liquidityLabel: compactUsd(enrichment.liquidityUsd),
+    volumeLabel: compactUsd(enrichment.volume24hUsd),
+    aiScoreLabel: c.aiScore !== undefined ? `${Math.round(c.aiScore)}/100` : NOT_AVAILABLE,
+    entryLabel: priceLabel(c.entryPriceUsd),
+    exitLabel: priceLabel(c.exitPriceUsd),
+  };
 }

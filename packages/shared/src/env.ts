@@ -262,6 +262,14 @@ export const envSchema = z.object({
   // explicitly enqueues a one-off announcement via the CLI script.
   ADMIN_BROADCAST_WORKER_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
 
+  // Durable Network Trade Feed broadcast queue worker (2026-08-03) — how
+  // often NetworkTradeBroadcastWorker ticks to drain NetworkTradeBroadcast/
+  // NetworkTradeBroadcastDelivery rows enqueued right after each channel
+  // post (see networkTradeFeed/broadcastQueue.ts) — the "bot and channel get
+  // identical posts" requirement. Only ever has work when
+  // NETWORK_TRADE_FEED_ENABLED is on.
+  NETWORK_TRADE_BROADCAST_WORKER_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
+
   // Real-Data Telegram Activity Feed (2026-07-27) — posts premium-formatted
   // messages to MARKETING_TELEGRAM_CHANNEL_ID sourced ONLY from real rows
   // (new tokens detected, real AI/Opportunity Score evaluations, real smart-
@@ -346,16 +354,46 @@ export const envSchema = z.object({
   // that separate category), sourced only from SmartWalletTokenEntry rows
   // resolved to a real, on-chain-verified full exit (see
   // smartWalletTracker.ts's checkAndRecordExit). Off by default, same
-  // double-opt-in convention as every other feed here. maxPostsPerDay is a
-  // CEILING only (10-40/day is the intended range) — never a floor; a day
-  // with fewer real, fully-resolved smart-wallet exits than that simply
-  // posts fewer, same "never fabricate to hit a target" convention as the
-  // rest of this codebase.
+  // double-opt-in convention as every other feed here. The real daily mix
+  // (20 HIGH_PROFIT / 5 SMALL_PROFIT / 5 LOSS_BAND, 2026-08-03 spec) is
+  // enforced per-bucket by data.ts's NETWORK_TRADE_DAILY_BUCKET_CAPS, not by
+  // this env var — maxPostsPerDay below is just an extra overall safety
+  // ceiling on top of those, defaulted to match their 30 total. Every
+  // ceiling here is a CEILING only, never a floor; a day with fewer real,
+  // fully-resolved matching exits than that simply posts fewer, same "never
+  // fabricate to hit a target" convention as the rest of this codebase.
   NETWORK_TRADE_FEED_ENABLED: booleanFlag(false),
-  NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES: z.coerce.number().positive().default(20),
-  NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES: z.coerce.number().positive().default(90),
-  NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY: z.coerce.number().int().positive().default(40),
+  // Tightened from 20-90 (avg 55min, ~26/day) to 25-50 (avg 37.5min, ~38/day)
+  // so natural random pacing offers enough real candidates across a full day
+  // to fill the 30/day bucketed target — still a ceiling, never a floor (see
+  // NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY below).
+  NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES: z.coerce.number().positive().default(25),
+  NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES: z.coerce.number().positive().default(50),
+  NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY: z.coerce.number().int().positive().default(30),
   NETWORK_TRADE_FEED_DEPLOYED_AT: z.coerce.date().default(() => new Date()),
+
+  // Network Trade Scanner (2026-08-02) — broadens WHICH mints
+  // SmartWalletTrackerService.evaluateForToken gets called for, beyond the
+  // live pre-migration pump.fun candidate pipeline (smartMoneyMomentumEvaluator.ts)
+  // that's its only caller today. extractBuyerFromTransaction/
+  // extractSellFromTransaction are balance-delta based, not pump.fun-specific,
+  // so this is what actually gives the Network Trade Feed real multi-DEX
+  // coverage (Token.dex already has PUMPFUN/PUMPSWAP/RAYDIUM/ORCA/METEORA/
+  // JUPITER rows) without a new on-chain parser. Off by default — this adds
+  // real, bounded-but-nonzero RPC load (see networkTradeScanner.ts's own doc
+  // comment), and this codebase has a documented history of RPC-quota
+  // pressure, so it ships disabled until explicitly turned on and watched.
+  NETWORK_TRADE_SCANNER_ENABLED: booleanFlag(false),
+  NETWORK_TRADE_SCANNER_BATCH_SIZE: z.coerce.number().int().positive().default(6),
+  NETWORK_TRADE_SCANNER_INTERVAL_MS: z.coerce.number().int().positive().default(240_000),
+  NETWORK_TRADE_SCANNER_MIN_LIQUIDITY_USD: z.coerce.number().nonnegative().default(2_000),
+  // Token.firstSeenAt (discovery time) window a mint must fall within to be
+  // offered as a scan candidate — a proxy for "still actively trading," not
+  // the real signal (evaluateForToken always reads the mint's own current
+  // signature history regardless of this value). Default matches the
+  // original fixed 48h; raise it if the live discovery pipeline has fallen
+  // behind and 48h leaves too few real candidates to seed the feed from.
+  NETWORK_TRADE_SCANNER_LOOKBACK_HOURS: z.coerce.number().positive().default(48),
 
   // Twitter / X
   TWITTER_API_KEY: z.string().optional(),

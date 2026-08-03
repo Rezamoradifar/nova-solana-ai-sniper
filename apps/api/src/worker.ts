@@ -74,6 +74,7 @@ import {
 } from './trading/smartMoneyMomentumEvaluator.js';
 import { recordShadowDecision } from './trading/shadowModeEvaluator.js';
 import { ShadowModePriceSampler } from './trading/shadowModePriceSampler.js';
+import { NetworkTradeScannerService } from './trading/networkTradeScanner.js';
 import {
   hasAnyAiProvider,
   resolveAiProvider,
@@ -384,6 +385,27 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       logger: app.log as never,
     });
     shadowModePriceSampler.start();
+  }
+
+  // Network Trade Scanner (2026-08-02) — feeds evaluateForToken a broader,
+  // multi-DEX slice of recently-active tokens so the marketing-engine's
+  // Network Trade Feed has real completed trades beyond pump.fun to draw
+  // from (see networkTradeScanner.ts's own doc comment). Independent of
+  // SMART_MONEY_ANALYSIS_ENABLED — this is a marketing-content source, not a
+  // buy-decision input. Off by default; adds real, bounded RPC load.
+  let networkTradeScanner: NetworkTradeScannerService | undefined;
+  if (app.config.NETWORK_TRADE_SCANNER_ENABLED) {
+    networkTradeScanner = new NetworkTradeScannerService({
+      prisma: app.prisma,
+      dexScreener,
+      smartWalletTracker,
+      redis: app.redis,
+      logger: app.log as never,
+      batchSize: app.config.NETWORK_TRADE_SCANNER_BATCH_SIZE,
+      minLiquidityUsd: app.config.NETWORK_TRADE_SCANNER_MIN_LIQUIDITY_USD,
+      tokenLookbackHours: app.config.NETWORK_TRADE_SCANNER_LOOKBACK_HOURS,
+    });
+    networkTradeScanner.start(app.config.NETWORK_TRADE_SCANNER_INTERVAL_MS);
   }
 
   // Drives TP/SL/trailing-stop: without this loop those fields are just stored
@@ -1786,6 +1808,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     depositMonitor?.stop();
     sourceHealthMonitor.stop();
     shadowModePriceSampler?.stop();
+    networkTradeScanner?.stop();
     if (app.config.SCANNER_CONCURRENCY_GOVERNOR_ENABLED) {
       scannerConcurrencyGovernor.stop();
     }

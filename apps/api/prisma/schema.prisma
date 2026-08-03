@@ -65,6 +65,7 @@ model User {
   referralRewardsCaused ReferralReward[]       @relation("ReferralRewardReferredUser")
   tradeBroadcastDeliveries TradeBroadcastDelivery[]
   adminBroadcastDeliveries AdminBroadcastDelivery[]
+  networkTradeBroadcastDeliveries NetworkTradeBroadcastDelivery[]
 
   @@map("users")
 }
@@ -170,6 +171,68 @@ model AdminBroadcastDelivery {
   @@unique([broadcastId, userId])
   @@index([status, lastAttemptAt])
   @@map("admin_broadcast_deliveries")
+}
+
+/// Durable Telegram broadcast queue for the Network Trade Feed (2026-08-03) —
+/// same durable/retryable/crash-safe shape as TradeBroadcast above, own copy
+/// rather than a shared model (this codebase's standing per-feed-module
+/// isolation convention — see e.g. networkTradeFeed/data.ts's own doc
+/// comment). Keyed by entryId (the SmartWalletTokenEntry.id the channel post
+/// was built from) instead of positionId, since a network trade isn't tied
+/// to this bot's own Position table. Enqueued right after the channel post
+/// succeeds, reusing that exact photoFileId/caption/buttonsJson — the "bot
+/// and channel get identical posts" requirement — never re-rendered or
+/// re-composed per recipient.
+model NetworkTradeBroadcast {
+  id      String @id @default(cuid())
+  entryId String @unique
+
+  caption String
+  /// The Telegram file_id from the channel send itself — never null at
+  /// creation time (unlike TradeBroadcast.photoFileId), since the channel
+  /// post always happens first and its result is what gets enqueued.
+  photoFileId String
+  /// JSON-serialized ButtonSpec[][] captured from the same channel post, so
+  /// every DM gets the identical inline keyboard rather than recomputing it
+  /// (which could drift if botUsername/websiteUrl config changes mid-broadcast).
+  buttonsJson String
+
+  status               String    @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED | COMPLETED_WITH_FAILURES
+  totalRecipients      Int?
+  sentCount            Int       @default(0)
+  failedPermanentCount Int       @default(0)
+  failedTempCount      Int       @default(0)
+  createdAt            DateTime  @default(now())
+  completedAt          DateTime?
+
+  deliveries NetworkTradeBroadcastDelivery[]
+
+  @@map("network_trade_broadcasts")
+}
+
+/// One row per (broadcast, recipient) — same PENDING -> SENT | FAILED_PERMANENT
+/// | FAILED_TEMP transitions as TradeBroadcastDelivery, driven by the same
+/// classifyTelegramError classification.
+model NetworkTradeBroadcastDelivery {
+  id             String                @id @default(cuid())
+  broadcastId    String
+  broadcast      NetworkTradeBroadcast @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User                  @relation(fields: [userId], references: [id])
+  telegramChatId String
+
+  status String @default("PENDING") // PENDING | SENT | FAILED_PERMANENT | FAILED_TEMP
+  /// Count of TRANSIENT send attempts only — a permanent-error delivery is
+  /// terminal on its first attempt and never increments this.
+  attempts      Int       @default(0)
+  lastError     String?
+  lastAttemptAt DateTime?
+  sentAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@unique([broadcastId, userId])
+  @@index([status, lastAttemptAt])
+  @@map("network_trade_broadcast_deliveries")
 }
 
 /// Wallet private keys are stored encrypted (AES-256-GCM) via the security layer,

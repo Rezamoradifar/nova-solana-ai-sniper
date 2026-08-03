@@ -1,12 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NetworkTradeFeedMonitor } from './monitor.js';
 
-const resolveTradePhotoMock = vi.fn().mockResolvedValue(undefined);
-vi.mock('@nova/telegram-bot', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@nova/telegram-bot')>();
-  return { ...actual, resolveTradePhoto: (...args: unknown[]) => resolveTradePhotoMock(...args) };
-});
-
 function fakeLogger() {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as never;
 }
@@ -40,6 +34,9 @@ function fakePrisma(overrides: Record<string, unknown> = {}) {
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn().mockResolvedValue(undefined),
     },
+    user: { findMany: vi.fn().mockResolvedValue([]) },
+    networkTradeBroadcast: { create: vi.fn().mockResolvedValue({ id: 'broadcast1' }) },
+    networkTradeBroadcastDelivery: { createMany: vi.fn().mockResolvedValue(undefined) },
     ...overrides,
   } as never;
 }
@@ -50,7 +47,9 @@ function fakeMarketData(enrichment: unknown = undefined) {
 
 function fakeDeps(overrides: Record<string, unknown> = {}) {
   const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 });
-  const sendPhoto = vi.fn().mockResolvedValue({ message_id: 1 });
+  const sendPhoto = vi
+    .fn()
+    .mockResolvedValue({ message_id: 1, photo: [{ file_id: 'sm_1' }, { file_id: 'lg_1' }] });
   const getMe = vi.fn().mockResolvedValue({ username: 'novasniperbot' });
   return {
     prisma: fakePrisma(),
@@ -77,7 +76,6 @@ function bot(deps: unknown) {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-08-02T08:00:00Z'));
-  resolveTradePhotoMock.mockResolvedValue({ buffer: Buffer.from('chart') });
   vi.spyOn(Math, 'random').mockReturnValue(0);
 });
 
@@ -137,8 +135,8 @@ describe('NetworkTradeFeedMonitor — posts the best-scored candidate', () => {
     });
   });
 
-  it('shows a loss header for a net-negative trade', async () => {
-    const row = fakeRow({ realizedRoiPercent: -60, realizedPnlUsd: -80, realizedPnlSol: -0.4 });
+  it('shows a loss header for a net-negative trade inside the -20%/-25% loss band', async () => {
+    const row = fakeRow({ realizedRoiPercent: -22, realizedPnlUsd: -80, realizedPnlSol: -0.4 });
     const prisma = fakePrisma({
       smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([row]) },
     });
@@ -153,8 +151,11 @@ describe('NetworkTradeFeedMonitor — posts the best-scored candidate', () => {
     expect(opts.caption).toContain('LOSS');
   });
 
-  it('falls back to a text-only message when no real chart photo resolves', async () => {
-    resolveTradePhotoMock.mockResolvedValueOnce(undefined);
+  it('still posts a generated card photo (never falls back to text) when live enrichment/logo lookup fails', async () => {
+    // fakeDeps' default fakeMarketData resolves `undefined` — same as a real
+    // failed DexScreener lookup. renderNetworkTradeCard never throws (see its
+    // own tests), so the post still goes out as a photo with "N/A" fields,
+    // never degrading to a text-only sendMessage.
     const prisma = fakePrisma({
       smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([fakeRow()]) },
     });
@@ -165,8 +166,57 @@ describe('NetworkTradeFeedMonitor — posts the best-scored candidate', () => {
     vi.setSystemTime(new Date('2026-08-02T08:16:00Z'));
     await monitor.tick();
 
-    expect(bot(deps).sendPhoto).not.toHaveBeenCalled();
-    expect(bot(deps).sendMessage).toHaveBeenCalledTimes(1);
+    expect(bot(deps).sendPhoto).toHaveBeenCalledTimes(1);
+    expect(bot(deps).sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('NetworkTradeFeedMonitor — bot+channel parity', () => {
+  it('enqueues a DM broadcast to registered users with the exact channel fileId/caption/buttons', async () => {
+    const broadcastCreate = vi.fn().mockResolvedValue({ id: 'broadcast1' });
+    const prisma = fakePrisma({
+      smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([fakeRow()]) },
+      networkTradeBroadcast: { create: broadcastCreate },
+    });
+    const deps = fakeDeps({ prisma });
+    const monitor = new NetworkTradeFeedMonitor(deps);
+
+    await monitor.tick();
+    vi.setSystemTime(new Date('2026-08-02T08:16:00Z'));
+    await monitor.tick();
+
+    expect(broadcastCreate).toHaveBeenCalledTimes(1);
+    const call = broadcastCreate.mock.calls[0]![0];
+    expect(call.data.entryId).toBe('entry1');
+    // The largest (last) photo size from the channel's own sendPhoto result —
+    // never a re-render.
+    expect(call.data.photoFileId).toBe('lg_1');
+    const [, , sentOpts] = bot(deps).sendPhoto.mock.calls[0]!;
+    expect(call.data.caption).toBe(sentOpts.caption);
+  });
+
+  it('never re-throws (and never blocks the dedup write) when the broadcast enqueue itself fails', async () => {
+    const broadcastCreate = vi.fn().mockRejectedValue(new Error('db down'));
+    const activityFeedPostCreate = vi.fn().mockResolvedValue(undefined);
+    const prisma = fakePrisma({
+      smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([fakeRow()]) },
+      networkTradeBroadcast: { create: broadcastCreate },
+      activityFeedPost: {
+        findMany: vi.fn().mockResolvedValue([]),
+        create: activityFeedPostCreate,
+      },
+    });
+    const deps = fakeDeps({ prisma });
+    const monitor = new NetworkTradeFeedMonitor(deps);
+
+    await monitor.tick();
+    vi.setSystemTime(new Date('2026-08-02T08:16:00Z'));
+    await monitor.tick();
+
+    expect(bot(deps).sendPhoto).toHaveBeenCalledTimes(1);
+    expect(activityFeedPostCreate).toHaveBeenCalledWith({
+      data: { feedType: 'NETWORK_TRADE', refId: 'entry1' },
+    });
   });
 });
 
@@ -194,5 +244,84 @@ describe('NetworkTradeFeedMonitor — daily cap', () => {
     }
 
     expect(bot(deps).sendPhoto).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('NetworkTradeFeedMonitor — ROI quota buckets', () => {
+  it('never posts a candidate whose ROI falls outside the three spec bands', async () => {
+    const row = fakeRow({ realizedRoiPercent: -10 }); // small loss — no bucket
+    const prisma = fakePrisma({
+      smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([row]) },
+    });
+    const deps = fakeDeps({ prisma });
+    const monitor = new NetworkTradeFeedMonitor(deps);
+
+    await monitor.tick();
+    vi.setSystemTime(new Date('2026-08-02T08:16:00Z'));
+    await monitor.tick();
+
+    expect(bot(deps).sendPhoto).not.toHaveBeenCalled();
+  });
+
+  it('stops posting HIGH_PROFIT candidates once that bucket hits its own 20/day cap, even though maxPostsPerDay allows more', async () => {
+    // Longer timeout: 25 ticks each render a real PNG card end-to-end.
+    let counter = 0;
+    const findMany = vi.fn().mockImplementation(() => {
+      counter += 1;
+      return Promise.resolve([
+        fakeRow({ id: `entry${counter}`, mint: `Mint${counter}`, realizedRoiPercent: 80 }),
+      ]);
+    });
+    const prisma = fakePrisma({ smartWalletTokenEntry: { findMany } });
+    const deps = fakeDeps({
+      prisma,
+      maxPostsPerDay: 30,
+      minIntervalMinutes: 1,
+      maxIntervalMinutes: 2,
+    });
+    const monitor = new NetworkTradeFeedMonitor(deps);
+
+    let t = new Date('2026-08-02T08:00:00Z').getTime();
+    for (let i = 0; i < 25; i++) {
+      vi.setSystemTime(new Date(t));
+      await monitor.tick();
+      t += 3 * 60_000;
+    }
+
+    // 25 real HIGH_PROFIT candidates were offered, but the bucket's own cap
+    // (20) — not the overall maxPostsPerDay ceiling (30) — is what stops it.
+    expect(bot(deps).sendPhoto).toHaveBeenCalledTimes(20);
+  }, 20_000);
+
+  it('posts SMALL_PROFIT and LOSS_BAND candidates independently even once the HIGH_PROFIT bucket is full', async () => {
+    const rows = [
+      fakeRow({ id: 'hp', mint: 'MintHP', realizedRoiPercent: 80 }),
+      fakeRow({ id: 'sp', mint: 'MintSP', realizedRoiPercent: 10 }),
+      fakeRow({ id: 'loss', mint: 'MintLoss', realizedRoiPercent: -22 }),
+    ];
+    const findMany = vi.fn().mockResolvedValue(rows);
+    const activityFeedFindMany = vi.fn().mockResolvedValue([]);
+    const prisma = fakePrisma({
+      smartWalletTokenEntry: { findMany },
+      activityFeedPost: { findMany: activityFeedFindMany, create: vi.fn() },
+    });
+    const deps = fakeDeps({ prisma, maxPostsPerDay: 30 });
+    const monitor = new NetworkTradeFeedMonitor(deps);
+
+    await monitor.tick();
+    // Best-scored real candidate (highest ROI/PnL) among all three eligible
+    // buckets is picked first — the HIGH_PROFIT one.
+    vi.setSystemTime(new Date('2026-08-02T08:16:00Z'));
+    await monitor.tick();
+    expect(bot(deps).sendPhoto).toHaveBeenCalledTimes(1);
+
+    // 'hp' is now posted (dedup row exists), so the next tick's real,
+    // unposted backlog is just the small-profit + loss rows — both still in
+    // open buckets — and the higher-scored of the two (small profit, 10%
+    // ROI beats a loss) goes out next.
+    activityFeedFindMany.mockResolvedValue([{ refId: 'hp' }]);
+    vi.setSystemTime(new Date('2026-08-02T08:40:00Z'));
+    await monitor.tick();
+    expect(bot(deps).sendPhoto).toHaveBeenCalledTimes(2);
   });
 });

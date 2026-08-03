@@ -17,6 +17,7 @@ import { ActivityFeedMonitor } from './activityFeed/monitor.js';
 import { EcosystemFeedMonitor } from './ecosystemFeed/monitor.js';
 import { createEcosystemConnection } from './discovery/riskScore.js';
 import { NetworkTradeFeedMonitor } from './networkTradeFeed/monitor.js';
+import { NetworkTradeBroadcastWorker } from './networkTradeFeed/broadcastWorker.js';
 
 const logger = createLogger('marketing-engine');
 
@@ -210,6 +211,7 @@ async function main() {
   // — see monitor.ts's own doc comment for why this posts only the single
   // best-scored unposted trade per tick rather than every real backlog item.
   let networkTradeFeed: NetworkTradeFeedMonitor | undefined;
+  let networkTradeBroadcastWorker: NetworkTradeBroadcastWorker | undefined;
   if (env.NETWORK_TRADE_FEED_ENABLED) {
     networkTradeFeed = new NetworkTradeFeedMonitor({
       prisma,
@@ -232,6 +234,19 @@ async function main() {
       },
       'network trade feed monitor started',
     );
+
+    // Durable broadcast queue (2026-08-03) — "the Telegram Bot and Telegram
+    // Channel receive identical posts" requirement. NetworkTradeFeedMonitor
+    // is the only producer of NetworkTradeBroadcast rows (via
+    // enqueueNetworkTradeBroadcast in monitor.ts), so the drain worker only
+    // needs to run when the feed itself is enabled — same rationale as
+    // tradeShowcase's own BroadcastWorker above.
+    networkTradeBroadcastWorker = new NetworkTradeBroadcastWorker({ prisma, bot, logger });
+    networkTradeBroadcastWorker.start(env.NETWORK_TRADE_BROADCAST_WORKER_INTERVAL_MS);
+    logger.info(
+      { intervalMs: env.NETWORK_TRADE_BROADCAST_WORKER_INTERVAL_MS },
+      'network trade broadcast worker started',
+    );
   } else {
     logger.info('NETWORK_TRADE_FEED_ENABLED not set — network trade feed is disabled');
   }
@@ -245,6 +260,7 @@ async function main() {
     activityFeed?.stop();
     ecosystemFeed?.stop();
     networkTradeFeed?.stop();
+    networkTradeBroadcastWorker?.stop();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

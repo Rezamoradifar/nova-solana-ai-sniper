@@ -16,8 +16,8 @@ function candidate(overrides: Partial<NetworkTradeCandidate> = {}): NetworkTrade
     walletConfidenceScore: 65,
     entryAt: new Date('2026-08-01T00:00:00Z'),
     exitAt: new Date('2026-08-01T02:30:00Z'),
-    entrySignature: 'buysig',
-    exitSignature: 'sellsig',
+    entrySignature: 'BuySigAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+    exitSignature: 'SellSigBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
     entryPriceUsd: 0.001,
     exitPriceUsd: 0.0018,
     entryAmountSol: 1,
@@ -53,8 +53,9 @@ describe('buildNetworkTradeCaptionHtml', () => {
   it('uses a profit header and includes every required field for a winning trade', () => {
     const html = buildNetworkTradeCaptionHtml(
       candidate(),
-      { liquidityUsd: 42_000, marketCapUsd: 1_200_000 },
+      { liquidityUsd: 42_000, marketCapUsd: 1_200_000, volume24hUsd: 88_000 },
       NOW,
+      'NETWORK_PROFIT',
     );
 
     expect(html).toContain('PROFIT');
@@ -66,13 +67,16 @@ describe('buildNetworkTradeCaptionHtml', () => {
     expect(html).toContain('2h 30m');
     expect(html).toContain('72/100');
     expect(html).toContain('PUMPFUN');
+    expect(html).toContain('$88.0K');
+    expect(html).toContain('SellSi'); // shortened exitSignature prefix
   });
 
   it('uses a loss header for a losing trade', () => {
     const html = buildNetworkTradeCaptionHtml(
       candidate({ realizedRoiPercent: -40, realizedPnlUsd: -60, realizedPnlSol: -0.3 }),
-      { liquidityUsd: 10_000, marketCapUsd: 200_000 },
+      { liquidityUsd: 10_000, marketCapUsd: 200_000, volume24hUsd: 5_000 },
       NOW,
+      'NETWORK_LOSS',
     );
 
     expect(html).toContain('LOSS');
@@ -81,34 +85,68 @@ describe('buildNetworkTradeCaptionHtml', () => {
     expect(html).toContain('-$60.00');
   });
 
+  it('shows the SMART MONEY badge while still reflecting a real loss in the header', () => {
+    const html = buildNetworkTradeCaptionHtml(
+      candidate({ realizedRoiPercent: -20, realizedPnlUsd: -30, realizedPnlSol: -0.15 }),
+      { liquidityUsd: 10_000, marketCapUsd: 200_000, volume24hUsd: 5_000 },
+      NOW,
+      'SMART_MONEY',
+    );
+
+    expect(html).toContain('SMART MONEY');
+    expect(html).toContain('LOSS');
+  });
+
+  it('shows the TRENDING TOKEN badge', () => {
+    const html = buildNetworkTradeCaptionHtml(
+      candidate(),
+      { liquidityUsd: 10_000, marketCapUsd: 200_000, volume24hUsd: 500_000 },
+      NOW,
+      'TRENDING_TOKEN',
+    );
+
+    expect(html).toContain('TRENDING TOKEN');
+  });
+
   it('shows N/A rather than a fabricated number for missing aiScore/enrichment', () => {
     const html = buildNetworkTradeCaptionHtml(
       candidate({ aiScore: undefined }),
-      { liquidityUsd: undefined, marketCapUsd: undefined },
+      { liquidityUsd: undefined, marketCapUsd: undefined, volume24hUsd: undefined },
       NOW,
+      'NETWORK_PROFIT',
     );
 
     const naCount = (html.match(/N\/A/g) ?? []).length;
-    expect(naCount).toBeGreaterThanOrEqual(3); // liquidity, market cap, ai score
+    expect(naCount).toBeGreaterThanOrEqual(4); // liquidity, market cap, volume, ai score
   });
 
-  it('shows the wallet address shortened, never the full address', () => {
+  it('shows the wallet address and tx signature shortened, never the full values', () => {
     const html = buildNetworkTradeCaptionHtml(
       candidate(),
-      { liquidityUsd: 1000, marketCapUsd: 1000 },
+      { liquidityUsd: 1000, marketCapUsd: 1000, volume24hUsd: 1000 },
       NOW,
+      'NETWORK_PROFIT',
     );
 
     expect(html).not.toContain(candidate().walletAddress);
+    expect(html).not.toContain(candidate().exitSignature);
     expect(html).toContain('…');
   });
 
   it("never exceeds Telegram's photo caption limit", () => {
     const html = buildNetworkTradeCaptionHtml(
       candidate({ tokenName: 'A'.repeat(2000) }),
-      { liquidityUsd: 1000, marketCapUsd: 1000 },
+      { liquidityUsd: 1000, marketCapUsd: 1000, volume24hUsd: 1000 },
       NOW,
+      'NETWORK_PROFIT',
     );
     expect(html.length).toBeLessThanOrEqual(1024);
   });
 });
+
+// exitSignature is only 7 chars ('sellsig') so shortKey (first6…last4-style)
+// just returns it unchanged for this fixture — kept as a named helper so the
+// intent at each call site is clear rather than a bare literal.
+function shortKeyStub(sig: string): string {
+  return sig;
+}
