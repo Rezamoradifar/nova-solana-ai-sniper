@@ -16,6 +16,23 @@ export interface SolanaConfig {
 
 const DEFAULT_PUBLIC_RPC = 'https://api.mainnet-beta.solana.com';
 
+/**
+ * Hostnames of known shared/free public Solana RPC endpoints — same
+ * far-lower-rate-limit risk as DEFAULT_PUBLIC_RPC (see tierFor's doc comment
+ * below), so a URL on any of these hosts is tagged 'fallback' no matter which
+ * env var it arrived through (e.g. ADDITIONAL_RPC_URLS), not only the one
+ * literal default URL.
+ */
+const KNOWN_PUBLIC_RPC_HOSTS = new Set([
+  'api.mainnet-beta.solana.com',
+  'rpc.ankr.com',
+  'solana.drpc.org',
+  'solana-rpc.publicnode.com',
+  'solana-mainnet.gateway.tatum.io',
+  'solana.api.onfinality.io',
+  'solana.api.pocket.network',
+]);
+
 /** Resolves the RPC endpoint, preferring Helius (if a key is configured) over a raw URL. */
 export function resolveRpcUrl(config: SolanaConfig): string {
   if (config.heliusApiKey) {
@@ -64,21 +81,27 @@ export interface RpcEndpoint {
  * with zero events reaching any scanner, for hours. Helius was upgraded the
  * same day specifically to take over as the reliable primary.
  *
- * Every candidate whose URL resolves to Solana's shared public endpoint
- * (`DEFAULT_PUBLIC_RPC` — including SOLANA_RPC_URL when a deployment leaves it
- * pointed at that same public URL instead of a real dedicated provider, which
- * is exactly what happened in production 2026-07-15: the two were byte-for-byte
- * identical, so wrapWithMultiProviderFailover's round-robin gave the public
- * endpoint an equal ~1/3 share of ALL ordinary RPC traffic, and its rate limit
- * — far lower than a paid provider's — couldn't sustain that share, producing
+ * Every candidate whose URL resolves to one of the known shared/free public
+ * RPC hosts (`KNOWN_PUBLIC_RPC_HOSTS` — including SOLANA_RPC_URL or any
+ * ADDITIONAL_RPC_URLS entry a deployment points at one of these instead of a
+ * real dedicated provider, which is exactly what happened in production
+ * 2026-07-15 with DEFAULT_PUBLIC_RPC: it was byte-for-byte identical to
+ * SOLANA_RPC_URL, so wrapWithMultiProviderFailover's round-robin gave it an
+ * equal ~1/3 share of ALL ordinary RPC traffic, and its rate limit — far
+ * lower than a paid provider's — couldn't sustain that share, producing
  * constant 429s) is tagged `tier: 'fallback'` rather than `'primary'`, so it's
- * only ever reached once every paid/dedicated provider is unhealthy. If
- * SOLANA_RPC_URL is ever pointed at a real distinct paid endpoint instead, it
- * correctly gets `'primary'` — the tier follows the URL, not the label.
+ * only ever reached once every paid/dedicated provider is unhealthy. If a URL
+ * points at a real distinct paid endpoint instead, it correctly gets
+ * `'primary'` — the tier follows the URL's host, not the label or env var.
  */
 export function resolveAllRpcEndpoints(config: SolanaConfig): RpcEndpoint[] {
-  const tierFor = (url: string): 'primary' | 'fallback' =>
-    url === DEFAULT_PUBLIC_RPC ? 'fallback' : 'primary';
+  const tierFor = (url: string): 'primary' | 'fallback' => {
+    try {
+      return KNOWN_PUBLIC_RPC_HOSTS.has(new URL(url).hostname) ? 'fallback' : 'primary';
+    } catch {
+      return 'primary';
+    }
+  };
 
   const candidates: RpcEndpoint[] = [];
   if (config.heliusApiKey) {

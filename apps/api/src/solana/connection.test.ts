@@ -121,6 +121,34 @@ describe('resolveAllRpcEndpoints', () => {
     const configuredRpc = endpoints.find((e) => e.label === 'configured-rpc');
     expect(configuredRpc?.tier).toBe('primary');
   });
+
+  it('tags every known shared/free public RPC host as fallback, even via ADDITIONAL_RPC_URLS', () => {
+    const knownPublicUrls = [
+      'https://rpc.ankr.com/solana',
+      'https://solana.drpc.org',
+      'https://solana-rpc.publicnode.com',
+      'https://solana-mainnet.gateway.tatum.io',
+      'https://solana.api.onfinality.io/public',
+      'https://solana.api.pocket.network',
+    ];
+    const endpoints = resolveAllRpcEndpoints({
+      heliusApiKey: 'key123',
+      additionalRpcUrls: knownPublicUrls.join(','),
+    });
+    for (const url of knownPublicUrls) {
+      expect(endpoints.find((e) => e.url === url)?.tier).toBe('fallback');
+    }
+    const helius = endpoints.find((e) => e.label === 'helius');
+    expect(helius?.tier).toBe('primary');
+  });
+
+  it('tags a real dedicated provider passed via ADDITIONAL_RPC_URLS as primary', () => {
+    const endpoints = resolveAllRpcEndpoints({
+      additionalRpcUrls: 'https://my-dedicated-node.example.com',
+    });
+    const custom = endpoints.find((e) => e.label === 'custom-1');
+    expect(custom?.tier).toBe('primary');
+  });
 });
 
 describe('getConnection', () => {
