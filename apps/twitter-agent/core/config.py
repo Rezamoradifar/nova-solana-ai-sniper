@@ -69,6 +69,17 @@ class Settings:
     dashboard_host: str
     dashboard_port: int
 
+    # Real trade data (optional — Nova's trade-highlight content type is
+    # simply skipped when unset, same graceful-degrade convention as every
+    # other optional integration in this codebase). See news/bot_trades.py's
+    # doc comment: this connection is READ-ONLY by construction (SELECT-only
+    # queries), never touches trading logic. Point it at the SAME Postgres
+    # instance apps/api uses — ideally via a read-only DB role/user, not the
+    # trading app's own credentials.
+    trading_database_url: str
+    bot_public_name: str
+    bot_referral_url: str
+
     news_feeds: list[str] = field(default_factory=list)
 
 
@@ -96,7 +107,7 @@ def load_settings() -> Settings:
         anthropic_api_key=_require("ANTHROPIC_API_KEY"),
         openai_api_key=_require("OPENAI_API_KEY"),
         claude_model=_optional("CLAUDE_MODEL", "claude-sonnet-4-5"),
-        agent_name=_optional("AGENT_NAME", "Terminal_X"),
+        agent_name=_optional("AGENT_NAME", "Nova"),
         solana_wallet_address=_optional("SOLANA_WALLET_ADDRESS"),
         posts_per_day_min=_int("POSTS_PER_DAY_MIN", 8),
         posts_per_day_max=_int("POSTS_PER_DAY_MAX", 12),
@@ -110,6 +121,9 @@ def load_settings() -> Settings:
         redis_url=_optional("REDIS_URL"),
         dashboard_host=_optional("DASHBOARD_HOST", "0.0.0.0"),
         dashboard_port=_int("DASHBOARD_PORT", 8080),
+        trading_database_url=_optional("TRADING_DATABASE_URL"),
+        bot_public_name=_optional("BOT_PUBLIC_NAME", "Nova Solana AI Sniper"),
+        bot_referral_url=_optional("BOT_REFERRAL_URL"),
         news_feeds=news_feeds,
     )
 

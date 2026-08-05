@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import random
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,7 @@ from core.config import settings
 from core.models import ContentType, GeneratedPost
 from llm import claude_client
 from memory import db
+from news import bot_trades
 from news.rewriter import fresh_news_items, rewrite_one
 from twitter.client import twitter_client
 
@@ -31,29 +33,91 @@ logger = logging.getLogger("agent.scheduler")
 TREND_KEYWORDS = ["AI", "Solana", "Bitcoin", "Ethereum", "Anthropic", "OpenAI", "Nvidia", "crypto"]
 MAX_QUOTE_TWEETS_PER_DAY = 3
 
+# Real, factual features of the trading bot Nova can talk about. Kept as
+# plain descriptions (not marketing copy) — llm.claude_client turns each
+# into a concrete, non-hype tweet. Update this list as the bot evolves.
+BOT_FEATURES = [
+    (
+        "A liveness watchdog that detects when a pump.fun or DEX websocket "
+        "subscription has gone silent and automatically forces a resubscribe, "
+        "so the bot never silently stops seeing new token launches."
+    ),
+    (
+        "A multi-provider Solana RPC failover pool that rotates across "
+        "several RPC providers so a single provider's rate limit or outage "
+        "doesn't stop trading."
+    ),
+    (
+        "An emergency exit monitor that watches for rug-pull signals — "
+        "liquidity removal, disabled sell routes, mint/freeze authority "
+        "changes, dev wallet dumps — independent of price data, so it can "
+        "force-close a position even when there's no price tick to trigger a "
+        "normal stop-loss."
+    ),
+    (
+        "An AI consensus scoring gate that evaluates every candidate token "
+        "before a buy, checking honeypot risk, liquidity, and holder "
+        "concentration before committing capital."
+    ),
+    (
+        "A retry mechanism for candidate tokens that fail an initial safety "
+        "check for a transient reason (like data not indexed yet), instead of "
+        "permanently discarding tokens that just needed more time to verify."
+    ),
+]
+
+
+def _feature_fingerprint(feature: str) -> str:
+    return "feature:" + hashlib.sha1(feature.encode("utf-8")).hexdigest()[:16]
+
 
 # -- content generation rotation --------------------------------------------
 
 
 def _pick_generator():
     """Weighted rotation across content types. News rewrite only enters the
-    pool when there's genuinely fresh, unused news — otherwise it's original
-    thought / philosophical thread / controversial opinion."""
+    pool when there's genuinely fresh, unused news; trade highlights only
+    enter when TRADING_DATABASE_URL is configured and there's a real, not
+    yet reported closed trade. Real trade/feature content is weighted
+    heaviest — it's Nova's most credible, differentiated material."""
     fresh_news = fresh_news_items(since_minutes=180)
+    fresh_trades = bot_trades.fresh_real_trades(limit=5)
     style_notes = db.get_style_notes()
 
     choices: list[tuple[str, float]] = [
-        ("original_thought", 0.40),
-        ("controversial_opinion", 0.25),
-        ("philosophical_thread", 0.20),
+        ("original_thought", 0.25),
+        ("controversial_opinion", 0.20),
+        ("philosophical_thread", 0.15),
+        ("feature_highlight", 0.10),
     ]
     if fresh_news:
-        choices.append(("news_rewrite", 0.15))
+        choices.append(("news_rewrite", 0.10))
+    if fresh_trades:
+        choices.append(("trade_highlight", 0.20))
 
     names = [c[0] for c in choices]
     weights = [c[1] for c in choices]
     choice = random.choices(names, weights=weights, k=1)[0]
 
+    if choice == "trade_highlight" and fresh_trades:
+        trade = fresh_trades[0]
+
+        def _generate_trade_highlight():
+            post = claude_client.generate_trade_highlight(trade)
+            bot_trades.mark_trade_used(trade)
+            return post
+
+        return _generate_trade_highlight
+    if choice == "feature_highlight":
+        unused = [f for f in BOT_FEATURES if not db.idea_already_used(_feature_fingerprint(f))]
+        feature = random.choice(unused) if unused else random.choice(BOT_FEATURES)
+
+        def _generate_feature_highlight():
+            post = claude_client.generate_feature_highlight(feature)
+            db.mark_idea_used(_feature_fingerprint(feature))
+            return post
+
+        return _generate_feature_highlight
     if choice == "news_rewrite" and fresh_news:
         item = fresh_news[0]
         return lambda: rewrite_one(item)

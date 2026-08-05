@@ -1,12 +1,28 @@
-# Terminal_X — Autonomous AI X (Twitter) Agent
+# Nova — Autonomous AI X (Twitter) Agent for Nova Solana AI Sniper
 
-An AI-run X account that posts original, high-quality content, monitors AI/crypto/tech
-news, detects trends, replies to mentions (always disclosed as an AI), and continuously
-tunes its own posting schedule and style based on real engagement data.
+An AI-run X account that is the official, disclosed AI voice of the Nova Solana AI
+Sniper trading bot. It posts original content, reports the bot's own real closed trades
+and real features, monitors AI/crypto/tech news, detects trends, replies to mentions
+(always disclosed as an AI), and continuously tunes its own posting schedule and style
+based on real engagement data.
 
 This agent does **not** impersonate humans, does not "snipe" replies on other accounts'
-threads, and never solicits funds through a fake persona — see `llm/claude_client.py`'s
-system prompt for the hard rules baked into every generation call.
+threads, never fabricates trade numbers, and never uses urgency/fomo framing to solicit
+deposits — see `llm/claude_client.py`'s system prompt for the hard rules baked into every
+generation call. It unambiguously discloses being both an AI and the bot's own official
+account, not a neutral third-party commentator.
+
+### Content built from real data
+
+- **Trade highlights** (`news/bot_trades.py`): reads real, already-closed positions
+  directly from the trading bot's own Postgres database (read-only, SELECT-only queries —
+  see that module's doc comment) and mirrors the exact eligibility filter and ROI formula
+  already used by `apps/marketing-engine/src/tradeShowcase`, so Nova never reports a
+  number that disagrees with the platform's own public trade showcase. Losses are reported
+  matter-of-factly, not hidden — see `TRADING_DATABASE_URL` below.
+- **Feature highlights**: concrete, non-hype explanations of real safety/reliability
+  features of the trading bot (e.g. the RPC failover pool, the emergency exit monitor),
+  defined in `agent/scheduler.py`'s `BOT_FEATURES` list.
 
 ## Architecture
 
@@ -17,7 +33,8 @@ system prompt for the hard rules baked into every generation call.
 /twitter      client.py — Tweepy v2 wrapper with retry/backoff
 /llm          claude_client.py (generation + scoring + persona),
               openai_images.py, embeddings.py
-/news         fetcher.py (RSS monitoring), rewriter.py
+/news         fetcher.py (RSS monitoring), rewriter.py,
+              bot_trades.py (real trade data from the trading bot's own DB)
 /memory       db.py (SQLite), vector_store.py (local embedding-based dedup)
 /analytics    metrics.py, scheduler_optimizer.py, reporter.py
 /dashboard    FastAPI read-only dashboard (followers, engagement, trends, recommendations)
@@ -34,6 +51,9 @@ system prompt for the hard rules baked into every generation call.
 2. An **Anthropic API key** (console.anthropic.com) with billing enabled.
 3. An **OpenAI API key** (platform.openai.com) with billing enabled — used for image
    generation and embeddings (the local vector database).
+4. (Optional, enables trade-highlight content) `TRADING_DATABASE_URL` pointing at the
+   same Postgres instance `apps/api` uses — ideally via a **read-only** role. Without it,
+   trade-highlight content is simply skipped and everything else works as normal.
 
 ## Local setup
 

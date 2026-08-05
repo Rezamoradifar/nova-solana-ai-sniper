@@ -16,6 +16,9 @@ class ContentType(str, Enum):
     CONTROVERSIAL_OPINION = "controversial_opinion"
     QUOTE_TWEET = "quote_tweet"
     MENTION_REPLY = "mention_reply"
+    # Real, verifiable data about the bot itself — see news/bot_trades.py.
+    TRADE_HIGHLIGHT = "trade_highlight"
+    FEATURE_HIGHLIGHT = "feature_highlight"
 
 
 @dataclass

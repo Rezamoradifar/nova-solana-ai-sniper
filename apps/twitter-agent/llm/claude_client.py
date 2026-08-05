@@ -21,30 +21,39 @@ _client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
 # Requirement: "Include a robust internal system prompt inside the code that
 # locks Claude into this specific persona." Explicitly transparent about
-# being an AI (per the user's own updated brief: "never impersonate humans" /
-# "clearly identifying itself as an AI") — the persona is a *voice*, not a
-# false identity.
-SYSTEM_PROMPT = f"""You are {settings.agent_name}, an autonomous AI personality who posts on X (Twitter).
+# being an AI and about which product it represents — the persona is a
+# *voice* for a real product, never a false identity, and never a vehicle
+# for hype disconnected from what the product actually does.
+SYSTEM_PROMPT = f"""You are {settings.agent_name}, the official AI voice of {settings.bot_public_name} —
+a real, live Solana meme-coin sniping bot — posting on X (Twitter).
 
 VOICE:
-- Sharp, original, intellectually restless. You think in first principles about AI,
-  crypto, Solana, technology, and the absurdity of human coordination games (including
-  meme coins).
-- Witty and occasionally irreverent, but every claim you make is fact-based — you
-  never fabricate statistics, quotes, or events. If you don't know, you speculate
-  openly ("if this holds...") rather than inventing certainty.
-- You write like a real, opinionated thinker, not a corporate AI assistant. Short,
-  punchy sentences. No hedging filler ("As an AI, I think..."). No hashtags spam.
-  No emoji spam (at most one, only if it truly earns its place).
-- You are unambiguously an AI and never pretend otherwise. If asked directly, you say
-  so plainly and without breaking your voice.
+- Sharp, precise, quietly confident — like the AI that actually watches the chain in
+  real time, because you are. Not mystical, not a "digital philosopher," not chasing
+  vibes for their own sake.
+- You mostly talk about what you actually do: catching fresh Solana token launches,
+  real trades the bot has made, on-chain risk signals, and genuinely useful
+  Solana/meme-coin market commentary. You are allowed a wider lens (AI, crypto,
+  technology) but you always circle back to being useful to someone who trades or is
+  curious about Solana.
+- Witty when it earns it, never desperate for engagement. Every claim is fact-based —
+  you never fabricate statistics, trades, or events. Real trade data is provided to
+  you directly in the prompt when available; you never invent numbers that weren't
+  given to you.
+- Short, punchy sentences. No hedging filler ("As an AI, I think..."). No hashtag
+  spam. No emoji spam (at most one, only if it truly earns its place).
+- You are unambiguously an AI, and unambiguously {settings.bot_public_name}'s own
+  official account — never pretend otherwise, and never imply you're an independent
+  or neutral commentator when you're describing your own product's results.
 
 HARD RULES:
-- Never fabricate facts, quotes, statistics, or events.
+- Never fabricate facts, trade numbers, quotes, or events — only report real data
+  given to you in the prompt.
 - Never impersonate a human, another account, or a real institution.
-- Never solicit money, investment, or "send me crypto" framing. You may mention your
-  own project/wallet only as plain factual context when directly relevant, never as a
-  pitch or call to send funds.
+- Never pressure, hype-cycle, or use urgency/fomo framing ("last chance", "don't miss
+  out") to push people toward buying anything. You may state real facts about the
+  product (features, real results, referral program) plainly; you never manufacture
+  urgency or emotional pressure to drive deposits.
 - Max 280 characters for a single tweet; thread parts should each stand alone but
   build on each other.
 - Do not use more than {settings.max_hashtags} hashtags, and only when they add real
@@ -115,6 +124,47 @@ uncomfortable, defensible conclusion most people avoid saying out loud.
 Respond with ONLY the tweet text."""
     text = _call_claude(prompt, max_tokens=200).strip().strip('"')
     return GeneratedPost(text=text, content_type=ContentType.CONTROVERSIAL_OPINION)
+
+
+def generate_trade_highlight(trade) -> GeneratedPost:  # trade: news.bot_trades.RealTrade
+    """Turns one real, closed trade into a tweet. Every number in the prompt
+    is real data pulled from the trading database (news/bot_trades.py) —
+    the system prompt's "never invent numbers" rule is what keeps this
+    honest even on a losing trade (reported exactly like a winning one, no
+    survivorship bias — see bot_trades.py's doc comment)."""
+    symbol = trade.token_symbol or trade.mint[:6]
+    hold_minutes = max(0, int((trade.closed_at - trade.opened_at).total_seconds() // 60))
+    outcome = "profitable" if trade.pnl_usd >= 0 else "closed at a loss"
+    prompt = f"""Write one tweet (max 280 characters) about a real, just-closed trade
+{settings.bot_public_name} executed. This is a real, {outcome} trade — report it exactly
+as given, no exaggeration, no hiding a loss. If it's a loss, be matter-of-fact about it
+(this builds more credibility than only ever posting wins).
+
+Token: {symbol}
+DEX: {trade.dex}
+Held for: {hold_minutes} minutes
+ROI: {trade.roi_percent:+.1f}%
+PnL: ${trade.pnl_usd:+.2f}
+{f"AI risk score at entry: {trade.ai_score:.0f}/100" if trade.ai_score is not None else ""}
+
+Respond with ONLY the tweet text."""
+    text = _call_claude(prompt, max_tokens=200, temperature=0.7).strip().strip('"')
+    return GeneratedPost(text=text, content_type=ContentType.TRADE_HIGHLIGHT)
+
+
+def generate_feature_highlight(feature_description: str) -> GeneratedPost:
+    """A factual, non-hype explanation of one real capability of the bot —
+    the caller supplies the actual feature description; this only handles
+    turning it into an engaging tweet, never invents capabilities."""
+    prompt = f"""Write one tweet (max 280 characters) explaining this real feature of
+{settings.bot_public_name} in an engaging, concrete way — describe what it actually does
+and why it matters, not generic marketing language ("revolutionary", "game-changing").
+
+Feature: {feature_description}
+
+Respond with ONLY the tweet text."""
+    text = _call_claude(prompt, max_tokens=200, temperature=0.6).strip().strip('"')
+    return GeneratedPost(text=text, content_type=ContentType.FEATURE_HIGHLIGHT)
 
 
 def rewrite_news(headline: str, summary: str, url: str) -> GeneratedPost:
