@@ -354,22 +354,28 @@ export const envSchema = z.object({
   // that separate category), sourced only from SmartWalletTokenEntry rows
   // resolved to a real, on-chain-verified full exit (see
   // smartWalletTracker.ts's checkAndRecordExit). Off by default, same
-  // double-opt-in convention as every other feed here. The real daily mix
-  // (20 HIGH_PROFIT / 5 SMALL_PROFIT / 5 LOSS_BAND, 2026-08-03 spec) is
-  // enforced per-bucket by data.ts's NETWORK_TRADE_DAILY_BUCKET_CAPS, not by
-  // this env var — maxPostsPerDay below is just an extra overall safety
-  // ceiling on top of those, defaulted to match their 30 total. Every
-  // ceiling here is a CEILING only, never a floor; a day with fewer real,
-  // fully-resolved matching exits than that simply posts fewer, same "never
-  // fabricate to hit a target" convention as the rest of this codebase.
+  // double-opt-in convention as every other feed here.
+  //
+  // Scheduler rewrite (2026-08-05 spec: "about 2 posts/hour, ~48/day, 20-40
+  // minute random interval") replaced the old per-ROI-bucket daily quota
+  // (20 HIGH_PROFIT / 5 SMALL_PROFIT / 5 LOSS_BAND, 2026-08-03) — that scheme
+  // left the feed silent for days whenever real trades didn't land in one of
+  // three narrow ROI bands. Candidate selection is now data.ts's
+  // compareNetworkTradeCandidatesByPriority (Trending > Smart Money > Whale >
+  // Highest ROI > Highest PnL); MAX_POSTS_PER_DAY below is just an overall
+  // safety ceiling — a CEILING only, never a floor; a day with fewer real,
+  // fully-resolved, quality-eligible exits than that simply posts fewer,
+  // same "never fabricate to hit a target" convention as the rest of this
+  // codebase.
   NETWORK_TRADE_FEED_ENABLED: booleanFlag(false),
-  // Tightened from 20-90 (avg 55min, ~26/day) to 25-50 (avg 37.5min, ~38/day)
-  // so natural random pacing offers enough real candidates across a full day
-  // to fill the 30/day bucketed target — still a ceiling, never a floor (see
-  // NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY below).
-  NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES: z.coerce.number().positive().default(25),
-  NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES: z.coerce.number().positive().default(50),
-  NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY: z.coerce.number().int().positive().default(30),
+  // 20-40 minutes (avg 30min == 2/hour) — random within that range so
+  // consecutive posts never land at a fixed cadence (reads as natural, not a
+  // bot timer), never exactly the same time twice.
+  NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES: z.coerce.number().positive().default(20),
+  NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES: z.coerce.number().positive().default(40),
+  // ~48/day to match "about 2 posts/hour" — a ceiling only (see this
+  // section's own doc comment above).
+  NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY: z.coerce.number().int().positive().default(48),
   NETWORK_TRADE_FEED_DEPLOYED_AT: z.coerce.date().default(() => new Date()),
 
   // Network Trade Scanner (2026-08-02) — broadens WHICH mints

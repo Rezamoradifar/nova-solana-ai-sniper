@@ -31,6 +31,14 @@ export interface NetworkTradeCandidate {
   aiScore: number | undefined;
   walletAddress: string;
   walletConfidenceScore: number | undefined;
+  /// Wallet's historical rate of trading tokens that turned out to be rugs
+  /// (see SmartWallet.rugExposureRatePct) — a quality signal on the WALLET's
+  /// track record, independent of whether this specific trade was profitable.
+  walletRugExposureRatePct: number | undefined;
+  /// 0-100 confidence this wallet is part of a manipulated/Sybil cluster (see
+  /// SmartWallet.sybilConfidencePct / sybilDetector.ts) — the spam/wash-
+  /// trading signal used to keep bot-farm wallets out of this feed.
+  walletSybilConfidencePct: number | undefined;
   entryAt: Date;
   exitAt: Date;
   entrySignature: string;
@@ -101,6 +109,8 @@ export async function fetchNetworkTradeCandidates(
       aiScore: r.token?.aiScore ?? undefined,
       walletAddress: r.walletAddress,
       walletConfidenceScore: r.wallet.confidenceScore ?? undefined,
+      walletRugExposureRatePct: r.wallet.rugExposureRatePct ?? undefined,
+      walletSybilConfidencePct: r.wallet.sybilConfidencePct ?? undefined,
       entryAt: r.entryAt,
       exitAt: r.exitAt!,
       entrySignature: r.entrySignature,
@@ -116,7 +126,7 @@ export async function fetchNetworkTradeCandidates(
 }
 
 export type NetworkTradeCategory =
-  'SMART_MONEY' | 'TRENDING_TOKEN' | 'NETWORK_PROFIT' | 'NETWORK_LOSS';
+  'TRENDING_TOKEN' | 'SMART_MONEY' | 'WHALE_WALLET' | 'NETWORK_PROFIT' | 'NETWORK_LOSS';
 
 /** Same confidence bar as activityFeed/data.ts's WhaleAlertCandidate
  * (MIN_WHALE_CONFIDENCE) — a wallet is never called out as "smart money"
@@ -125,103 +135,141 @@ export type NetworkTradeCategory =
  * smartWalletTracker.ts, upstream of confidenceScore existing at all). */
 const SMART_MONEY_MIN_CONFIDENCE = 50;
 
-/** Same volume normalization constant scoreNetworkTradeCandidate already
- * uses for its own trending proxy — a token doing six figures of real 24h
- * volume is trending regardless of who's trading it. */
+/** A token doing six figures of real 24h volume is trending regardless of
+ * who's trading it. */
 const TRENDING_MIN_VOLUME_USD = 100_000;
 
 /** A real double-digit hourly move is the other, faster trending signal
  * (volume can lag a spike briefly; price never does). */
 const TRENDING_MIN_H1_CHANGE_PERCENT = 20;
 
+/** A single real entry this large is a whale-sized bet regardless of who's
+ * making it — the "Whale Wallets" tier (priority 3, 2026-08-05 spec). */
+const WHALE_MIN_ENTRY_SOL = 5;
+
 export interface NetworkTradeCategoryInputs {
   realizedPnlUsd: number;
   walletConfidenceScore: number | undefined;
   volume24hUsd: number | undefined;
   priceChangeH1Percent: number | undefined;
+  entryAmountSol: number;
 }
 
 /**
- * Which of the spec's four categories (NETWORK PROFIT / NETWORK LOSS /
- * SMART MONEY / TRENDING TOKEN) badges this post. Most-specific-signal-first:
- * a wallet with a real track record is the most notable thing about a trade,
- * then a token currently trending independent of who traded it, and only
- * then does it fall back to a plain win/loss. The 🟢/🔴 profit-or-loss
+ * Which of the spec's five categories badges this post. Same precedence
+ * order as this module's own selection priority (see
+ * computeNetworkTradePriorityTier below) — Trending Tokens > Smart Money >
+ * Whale Wallets > plain win/loss — so the badge always matches the reason a
+ * candidate was actually picked over the others. The 🟢/🔴 profit-or-loss
  * coloring in the caption header is independent of this and always shown —
- * see buildNetworkTradeCaptionHtml — so a SMART_MONEY or TRENDING_TOKEN post
- * never hides whether it was actually a win or a loss.
+ * see buildNetworkTradeCaptionHtml — so no badge ever hides whether a trade
+ * was actually a win or a loss.
  */
 export function categorizeNetworkTrade(inputs: NetworkTradeCategoryInputs): NetworkTradeCategory {
-  if ((inputs.walletConfidenceScore ?? 0) >= SMART_MONEY_MIN_CONFIDENCE) return 'SMART_MONEY';
   if (
     (inputs.volume24hUsd ?? 0) >= TRENDING_MIN_VOLUME_USD ||
     Math.abs(inputs.priceChangeH1Percent ?? 0) >= TRENDING_MIN_H1_CHANGE_PERCENT
   ) {
     return 'TRENDING_TOKEN';
   }
+  if ((inputs.walletConfidenceScore ?? 0) >= SMART_MONEY_MIN_CONFIDENCE) return 'SMART_MONEY';
+  if (inputs.entryAmountSol >= WHALE_MIN_ENTRY_SOL) return 'WHALE_WALLET';
   return inputs.realizedPnlUsd >= 0 ? 'NETWORK_PROFIT' : 'NETWORK_LOSS';
 }
 
-export interface NetworkTradeScoreInputs {
+/**
+ * Real losses read as natural, honest content ("not every trade wins") —
+ * only a loss steep enough to look like a rug gets excluded outright, never
+ * any loss at all (2026-08-05 spec: "prefer profitable trades, small losses
+ * are acceptable"). -30% is the cutoff: worse than that reads as a rug/
+ * dump, not a normal losing trade.
+ */
+const MIN_ACCEPTABLE_ROI_PERCENT = -30;
+
+/** A wallet whose own historical trades have rugged this often is a spam/
+ * low-quality signal on the WALLET, independent of whether this specific
+ * trade happened to be profitable (SmartWallet.rugExposureRatePct). */
+const MAX_ACCEPTABLE_RUG_EXPOSURE_PCT = 50;
+
+/** Wallets sybilDetector.ts has flagged as probably part of a manipulated /
+ * wash-trading cluster are the "spam" this feed must never showcase as real
+ * organic activity (SmartWallet.sybilConfidencePct). */
+const MAX_ACCEPTABLE_SYBIL_CONFIDENCE_PCT = 70;
+
+export interface NetworkTradeQualityInputs {
+  realizedRoiPercent: number;
+  walletRugExposureRatePct: number | undefined;
+  walletSybilConfidencePct: number | undefined;
+}
+
+/**
+ * The "skip spam, rugs and duplicate wallets" quality gate (2026-08-05 spec)
+ * — the duplicate-wallet cooldown itself lives in monitor.ts instead, since
+ * it needs recent-post history rather than a property of the candidate
+ * alone. A real loss is never excluded just for being a loss; only a loss
+ * steep enough to look like a rug, or a wallet with its own bad track
+ * record, reads as noise rather than a legitimate completed trade.
+ */
+export function isNetworkTradeCandidateEligible(inputs: NetworkTradeQualityInputs): boolean {
+  if (inputs.realizedRoiPercent < MIN_ACCEPTABLE_ROI_PERCENT) return false;
+  if ((inputs.walletRugExposureRatePct ?? 0) > MAX_ACCEPTABLE_RUG_EXPOSURE_PCT) return false;
+  if ((inputs.walletSybilConfidencePct ?? 0) > MAX_ACCEPTABLE_SYBIL_CONFIDENCE_PCT) return false;
+  return true;
+}
+
+export interface NetworkTradePriorityInputs {
   realizedRoiPercent: number;
   realizedPnlUsd: number;
   walletConfidenceScore: number | undefined;
   entryAmountSol: number;
   volume24hUsd: number | undefined;
+  priceChangeH1Percent: number | undefined;
 }
 
-function clamp01(n: number): number {
-  return Math.max(0, Math.min(1, n));
-}
+/** 1 = Trending Tokens, 2 = Smart Money, 3 = Whale Wallets, 4 = neither —
+ * ranked against every other tier-4 candidate purely by ROI then PnL (see
+ * compareNetworkTradeCandidatesByPriority). Lower number = higher priority. */
+export type NetworkTradePriorityTier = 1 | 2 | 3 | 4;
 
 /**
- * Pure, independently unit-tested composite score (0-100) — the "select only
- * the best trades" gate. Uses absolute ROI/PnL (not signed) so a large,
- * notable LOSS scores just as high as an equally large win: this feed is
- * meant to mix profitable and losing trades naturally, not filter losses out
- * as "bad content." Weights: ROI 30, PnL magnitude 25, wallet track record
- * 20, position size (a whale-activity proxy — no separate trade-size-based
- * signal exists) 15, live 24h volume (a trending proxy) 10.
+ * Selection priority order (2026-08-05 project spec): Trending Tokens >
+ * Smart Money > Whale Wallets > Highest ROI > Highest PnL. The first three
+ * are genuine categories — the most notable real signal about a trade wins
+ * outright, same precedence as categorizeNetworkTrade's badge. ROI and PnL
+ * aren't separate categories: every candidate that clears none of the first
+ * three signals shares tier 4, where compareNetworkTradeCandidatesByPriority
+ * ranks them by ROI first and PnL second — that's what makes "Highest ROI"
+ * and "Highest PnL" priorities 4 and 5 rather than tiers of their own.
  */
-export function scoreNetworkTradeCandidate(inputs: NetworkTradeScoreInputs): number {
-  const roiScore = clamp01(Math.abs(inputs.realizedRoiPercent) / 500) * 30;
-  const pnlScore = clamp01(Math.abs(inputs.realizedPnlUsd) / 5000) * 25;
-  const walletScore = clamp01((inputs.walletConfidenceScore ?? 0) / 100) * 20;
-  const whaleScore = clamp01(inputs.entryAmountSol / 10) * 15;
-  const volumeScore = clamp01((inputs.volume24hUsd ?? 0) / 100_000) * 10;
-  return roiScore + pnlScore + walletScore + whaleScore + volumeScore;
-}
-
-/**
- * Daily post-mix quota (2026-08-03, project spec) — a real completed trade
- * only qualifies for this feed at all if its ROI lands in one of these three
- * bands; anything else (a small loss better than -20%, or a loss worse than
- * -25%) is simply never eligible, same "never fabricate/substitute to fill a
- * quota" convention as everywhere else in this module. HIGH_PROFIT/
- * SMALL_PROFIT split at +50% ROI; LOSS_BAND is intentionally narrow
- * (-25%..-20% inclusive) per spec, not "any loss."
- */
-export type NetworkTradePostBucket = 'HIGH_PROFIT' | 'SMALL_PROFIT' | 'LOSS_BAND';
-
-const HIGH_PROFIT_ROI_THRESHOLD = 50;
-const LOSS_BAND_MIN_ROI = -25;
-const LOSS_BAND_MAX_ROI = -20;
-
-/** Each bucket's own daily ceiling — never a floor, per this module's
- * standing convention. Caps sum to the spec's 30 posts/day total. */
-export const NETWORK_TRADE_DAILY_BUCKET_CAPS: Record<NetworkTradePostBucket, number> = {
-  HIGH_PROFIT: 20,
-  SMALL_PROFIT: 5,
-  LOSS_BAND: 5,
-};
-
-export function classifyNetworkTradePostBucket(
-  realizedRoiPercent: number,
-): NetworkTradePostBucket | undefined {
-  if (realizedRoiPercent >= HIGH_PROFIT_ROI_THRESHOLD) return 'HIGH_PROFIT';
-  if (realizedRoiPercent >= 0) return 'SMALL_PROFIT';
-  if (realizedRoiPercent >= LOSS_BAND_MIN_ROI && realizedRoiPercent <= LOSS_BAND_MAX_ROI) {
-    return 'LOSS_BAND';
+export function computeNetworkTradePriorityTier(
+  inputs: NetworkTradePriorityInputs,
+): NetworkTradePriorityTier {
+  if (
+    (inputs.volume24hUsd ?? 0) >= TRENDING_MIN_VOLUME_USD ||
+    Math.abs(inputs.priceChangeH1Percent ?? 0) >= TRENDING_MIN_H1_CHANGE_PERCENT
+  ) {
+    return 1;
   }
-  return undefined;
+  if ((inputs.walletConfidenceScore ?? 0) >= SMART_MONEY_MIN_CONFIDENCE) return 2;
+  if (inputs.entryAmountSol >= WHALE_MIN_ENTRY_SOL) return 3;
+  return 4;
+}
+
+/**
+ * Full priority-order comparator — sorting a candidate list with this and
+ * taking index 0 picks the single best candidate per the spec's 5-level
+ * priority list in one pass. Category tier ascending first (tier 1 wins
+ * outright over tier 4 regardless of ROI/PnL), then Highest ROI, then
+ * Highest PnL as the final tie-break.
+ */
+export function compareNetworkTradeCandidatesByPriority(
+  a: NetworkTradePriorityInputs,
+  b: NetworkTradePriorityInputs,
+): number {
+  const tierDiff = computeNetworkTradePriorityTier(a) - computeNetworkTradePriorityTier(b);
+  if (tierDiff !== 0) return tierDiff;
+  if (b.realizedRoiPercent !== a.realizedRoiPercent) {
+    return b.realizedRoiPercent - a.realizedRoiPercent;
+  }
+  return b.realizedPnlUsd - a.realizedPnlUsd;
 }

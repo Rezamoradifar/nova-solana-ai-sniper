@@ -64,8 +64,9 @@ export interface NetworkTradeEnrichment {
  * the 🟢/🔴 profit-or-loss header below (see buildNetworkTradeCaptionHtml's
  * own doc comment). */
 const CATEGORY_LABEL: Record<NetworkTradeCategory, string> = {
-  SMART_MONEY: '🧠 SMART MONEY',
   TRENDING_TOKEN: '🔥 TRENDING TOKEN',
+  SMART_MONEY: '🧠 SMART MONEY',
+  WHALE_WALLET: '🐋 WHALE WALLET',
   NETWORK_PROFIT: '🌐 NETWORK TRADE',
   NETWORK_LOSS: '🌐 NETWORK TRADE',
 };
@@ -128,8 +129,9 @@ export function buildNetworkTradeCaptionHtml(
 /** Plain-text (no emoji — the generated image has no emoji font loaded)
  * counterpart to CATEGORY_LABEL above, for the image's category tag line. */
 const CATEGORY_TAG_PLAIN: Record<NetworkTradeCategory, string> = {
-  SMART_MONEY: 'SMART MONEY',
   TRENDING_TOKEN: 'TRENDING TOKEN',
+  SMART_MONEY: 'SMART MONEY',
+  WHALE_WALLET: 'WHALE WALLET',
   NETWORK_PROFIT: 'NETWORK TRADE',
   NETWORK_LOSS: 'NETWORK TRADE',
 };

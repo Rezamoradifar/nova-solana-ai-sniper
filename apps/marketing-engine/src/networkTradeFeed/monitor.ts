@@ -10,12 +10,10 @@ import { fetchNetworkTradeLogo } from '../visuals/fetchNetworkTradeLogo.js';
 import {
   fetchNetworkTradeCandidates,
   markNetworkTradePosted,
-  scoreNetworkTradeCandidate,
   categorizeNetworkTrade,
-  classifyNetworkTradePostBucket,
-  NETWORK_TRADE_DAILY_BUCKET_CAPS,
+  isNetworkTradeCandidateEligible,
+  compareNetworkTradeCandidatesByPriority,
   type NetworkTradeCandidate,
-  type NetworkTradePostBucket,
 } from './data.js';
 import { buildNetworkTradeCaptionHtml, buildNetworkTradeCardBrief } from './format.js';
 import { enqueueNetworkTradeBroadcast } from './broadcastQueue.js';
@@ -26,21 +24,26 @@ import { enqueueNetworkTradeBroadcast } from './broadcastQueue.js';
  * separate category), sourced only from SmartWalletTokenEntry rows
  * smartWalletTracker.ts has resolved to a real, on-chain-verified full exit.
  * "Curated" is the operative word: unlike activityFeed/ecosystemFeed (post
- * the oldest/first real backlog item), this monitor scores every unposted
- * candidate and posts only the single best one per tick — the "select only
- * the best trades, never publish every detected trade" requirement. Same
- * day-quota/random-interval pacing model as ActivityFeedMonitor (own scoped
- * import, not a duplicate — see scheduler.ts's own doc comment on why that
- * pick logic was generalized for reuse).
+ * the oldest/first real backlog item), this monitor evaluates every
+ * unposted candidate and posts only the single best one per tick — the
+ * "select only the best trades, never publish every detected trade"
+ * requirement. Same day-quota/random-interval pacing model as
+ * ActivityFeedMonitor (own scoped import, not a duplicate — see
+ * scheduler.ts's own doc comment on why that pick logic was generalized for
+ * reuse).
  *
- * Daily mix (2026-08-03 project spec): each of the three ROI-based buckets
- * from data.ts's classifyNetworkTradePostBucket (HIGH_PROFIT/SMALL_PROFIT/
- * LOSS_BAND) has its OWN daily ceiling (NETWORK_TRADE_DAILY_BUCKET_CAPS —
- * 20/5/5, summing to the spec's 30/day). Every ceiling is a CEILING only,
- * never a floor — a bucket with fewer real, fully-resolved matching exits
- * than its cap simply posts fewer that day, same "never fabricate/substitute
- * to hit a target" convention as every other feed here. `maxPostsPerDay`
- * remains as an extra overall safety ceiling on top of the per-bucket caps.
+ * Scheduler rewrite (2026-08-05 spec): replaces the old per-ROI-bucket daily
+ * quota (which left the feed silent for days whenever real trades didn't
+ * land in one of three narrow bands — see this feed's own incident writeup)
+ * with a single overall daily ceiling (`maxPostsPerDay`, ~48 to match "about
+ * 2 posts/hour") plus a flat 20-40 minute random interval (average 30min ==
+ * 2/hour) — see data.ts's compareNetworkTradeCandidatesByPriority for the
+ * new 5-level selection order (Trending > Smart Money > Whale > Highest ROI
+ * > Highest PnL) that replaced the bucket system as the "pick the best one"
+ * gate. Every ceiling here remains a CEILING only, never a floor — a quiet
+ * day with fewer real, fully-resolved, quality-eligible exits than that
+ * simply posts fewer, same "never fabricate to hit a target" convention as
+ * every other feed here.
  */
 export interface NetworkTradeFeedMonitorDeps {
   prisma: PrismaClient;
@@ -58,25 +61,31 @@ export interface NetworkTradeFeedMonitorDeps {
 }
 
 /** How many of the most recent unposted completed trades to consider per
- * tick before picking the single best-scored one — bounded so a backlog
- * spike can't turn one tick into an unbounded scoring pass. */
+ * tick before picking the single best one — bounded so a backlog spike
+ * can't turn one tick into an unbounded evaluation pass. */
 const CANDIDATE_FETCH_LIMIT = 30;
 
 /** Same "wake up far more often than the post spacing itself" rationale as
  * ActivityFeedMonitor's own CHECK_INTERVAL_MS. */
 const CHECK_INTERVAL_MS = 60_000;
 
-function freshBucketCounts(): Record<NetworkTradePostBucket, number> {
-  return { HIGH_PROFIT: 0, SMALL_PROFIT: 0, LOSS_BAND: 0 };
-}
+/** "Never publish duplicate trades" via entryId dedup is permanent (see
+ * markNetworkTradePosted/filterUnposted in data.ts) — this is the separate,
+ * softer "skip duplicate wallets" quality rule (2026-08-05 spec): the same
+ * wallet is never the star of two posts back-to-back within this window,
+ * even across two genuinely different trades. In-memory/per-process by
+ * design (a cosmetic pacing rule, not a correctness guarantee) so it costs
+ * no extra query and naturally clears itself on restart. */
+const DUPLICATE_WALLET_COOLDOWN_MS = 3 * 60 * 60_000;
 
 export class NetworkTradeFeedMonitor {
   private timer: ReturnType<typeof setInterval> | undefined;
   private ticking = false;
   private nextPostDueAt: number | undefined;
-  private postsTodayByBucket: Record<NetworkTradePostBucket, number> = freshBucketCounts();
+  private postsToday = 0;
   private postsTodayKey: string | undefined;
   private botUsername: string | undefined;
+  private recentlyFeaturedWallets = new Map<string, number>();
 
   constructor(private readonly deps: NetworkTradeFeedMonitorDeps) {}
 
@@ -136,34 +145,34 @@ export class NetworkTradeFeedMonitor {
     const today = utcDayKey(new Date(now));
     if (this.postsTodayKey !== today) {
       this.postsTodayKey = today;
-      this.postsTodayByBucket = freshBucketCounts();
+      this.postsToday = 0;
     }
-    const totalPostedToday =
-      this.postsTodayByBucket.HIGH_PROFIT +
-      this.postsTodayByBucket.SMALL_PROFIT +
-      this.postsTodayByBucket.LOSS_BAND;
-    if (isDailyCapReached(totalPostedToday, this.deps.maxPostsPerDay) || this.allBucketsFull()) {
+    if (isDailyCapReached(this.postsToday, this.deps.maxPostsPerDay)) {
       this.scheduleNextCheck(now);
       return;
     }
 
-    const postedBucket = await this.postBestCandidate(new Date(now));
-    if (postedBucket) this.postsTodayByBucket[postedBucket] += 1;
+    const posted = await this.postBestCandidate(new Date(now));
+    if (posted) this.postsToday += 1;
     // Reschedule regardless of whether anything was posted — a tick with no
-    // real, unposted completed trade simply tries again later.
+    // real, qualifying, unposted completed trade simply tries again later
+    // (per spec: "wait for new qualifying trades instead of fabricating").
     this.scheduleNextCheck(now);
   }
 
-  /** True once every bucket has independently hit its own daily cap — no
-   * point fetching candidates this tick if there's nowhere left to post
-   * one, same short-circuit rationale as the maxPostsPerDay check above. */
-  private allBucketsFull(): boolean {
-    return (Object.keys(NETWORK_TRADE_DAILY_BUCKET_CAPS) as NetworkTradePostBucket[]).every(
-      (bucket) => this.postsTodayByBucket[bucket] >= NETWORK_TRADE_DAILY_BUCKET_CAPS[bucket],
-    );
+  /** Wallets featured within the last DUPLICATE_WALLET_COOLDOWN_MS — pruned
+   * on every check so this map never grows unbounded across a long-running
+   * process. */
+  private walletsRecentlyFeatured(now: number): Set<string> {
+    for (const [wallet, postedAt] of this.recentlyFeaturedWallets) {
+      if (now - postedAt >= DUPLICATE_WALLET_COOLDOWN_MS) {
+        this.recentlyFeaturedWallets.delete(wallet);
+      }
+    }
+    return new Set(this.recentlyFeaturedWallets.keys());
   }
 
-  private async postBestCandidate(now: Date): Promise<NetworkTradePostBucket | undefined> {
+  private async postBestCandidate(now: Date): Promise<boolean> {
     const candidates = await fetchNetworkTradeCandidates(
       this.deps.prisma,
       CANDIDATE_FETCH_LIMIT,
@@ -171,57 +180,77 @@ export class NetworkTradeFeedMonitor {
     );
     if (candidates.length === 0) {
       this.deps.logger.info('network trade feed: no real, unposted completed trades this tick');
-      return undefined;
+      return false;
     }
 
-    // Only a candidate whose ROI lands in one of the three spec'd bands, AND
-    // whose bucket still has room today, is eligible at all — see data.ts's
-    // classifyNetworkTradePostBucket doc comment for why everything else
-    // (a small loss, or one worse than -25%) is never eligible for this feed.
-    const eligible = candidates
-      .map((c) => ({ c, bucket: classifyNetworkTradePostBucket(c.realizedRoiPercent) }))
-      .filter(
-        (x): x is { c: NetworkTradeCandidate; bucket: NetworkTradePostBucket } =>
-          x.bucket !== undefined &&
-          this.postsTodayByBucket[x.bucket] < NETWORK_TRADE_DAILY_BUCKET_CAPS[x.bucket],
+    // Quality gate (2026-08-05 spec: "prefer profitable trades, small losses
+    // are acceptable, skip spam, rugs and duplicate wallets") — real losses
+    // are never excluded just for being losses; see data.ts's
+    // isNetworkTradeCandidateEligible doc comment for the actual bars.
+    const qualityEligible = candidates.filter((c) =>
+      isNetworkTradeCandidateEligible({
+        realizedRoiPercent: c.realizedRoiPercent,
+        walletRugExposureRatePct: c.walletRugExposureRatePct,
+        walletSybilConfidencePct: c.walletSybilConfidencePct,
+      }),
+    );
+    if (qualityEligible.length === 0) {
+      this.deps.logger.info(
+        'network trade feed: no real candidate passed the quality filter this tick',
       );
+      return false;
+    }
+
+    // "Skip duplicate wallets" — a wallet already featured within the
+    // cooldown window is excluded outright this tick, never merely
+    // deprioritized, so the feed reads as many different real wallets
+    // rather than the same one repeatedly.
+    const recentWallets = this.walletsRecentlyFeatured(now.getTime());
+    const eligible = qualityEligible.filter((c) => !recentWallets.has(c.walletAddress));
     if (eligible.length === 0) {
       this.deps.logger.info(
-        'network trade feed: no real candidate in an open quota bucket this tick',
+        'network trade feed: every quality-eligible candidate this tick is from a recently-featured wallet',
       );
-      return undefined;
+      return false;
     }
 
     await this.resolveBotUsername();
 
-    // Live enrichment (current liquidity/market cap, and 24h volume for
-    // scoring's trending proxy) fetched for every eligible candidate up
-    // front so the "best trade" pick reflects today's numbers, not stale
-    // ones. A failed lookup degrades that one candidate to score as if
-    // volume were 0 — never dropped from consideration just because one
-    // live call failed.
+    // Live enrichment (current liquidity/market cap, and 24h volume/h1
+    // change for the Trending Tokens priority signal) fetched for every
+    // eligible candidate up front so the pick reflects today's numbers, not
+    // stale ones. A failed lookup degrades that one candidate to evaluate as
+    // if volume/h1-change were 0 — never dropped from consideration just
+    // because one live call failed.
     const withEnrichment = await Promise.all(
-      eligible.map(async ({ c, bucket }) => ({
+      eligible.map(async (c) => ({
         c,
-        bucket,
         enrichment: await this.deps.marketData.fetchEnrichment(c.mint),
       })),
     );
 
-    const best = withEnrichment
-      .map(({ c, bucket, enrichment }) => ({
-        c,
-        bucket,
-        enrichment,
-        score: scoreNetworkTradeCandidate({
-          realizedRoiPercent: c.realizedRoiPercent,
-          realizedPnlUsd: c.realizedPnlUsd,
-          walletConfidenceScore: c.walletConfidenceScore,
-          entryAmountSol: c.entryAmountSol,
-          volume24hUsd: enrichment?.volume24hUsd,
-        }),
-      }))
-      .sort((a, b) => b.score - a.score)[0]!;
+    // Full 5-level priority order (Trending > Smart Money > Whale > Highest
+    // ROI > Highest PnL) — see data.ts's compareNetworkTradeCandidatesByPriority.
+    const best = withEnrichment.sort((a, b) =>
+      compareNetworkTradeCandidatesByPriority(
+        {
+          realizedRoiPercent: a.c.realizedRoiPercent,
+          realizedPnlUsd: a.c.realizedPnlUsd,
+          walletConfidenceScore: a.c.walletConfidenceScore,
+          entryAmountSol: a.c.entryAmountSol,
+          volume24hUsd: a.enrichment?.volume24hUsd,
+          priceChangeH1Percent: a.enrichment?.priceChangeH1Percent,
+        },
+        {
+          realizedRoiPercent: b.c.realizedRoiPercent,
+          realizedPnlUsd: b.c.realizedPnlUsd,
+          walletConfidenceScore: b.c.walletConfidenceScore,
+          entryAmountSol: b.c.entryAmountSol,
+          volume24hUsd: b.enrichment?.volume24hUsd,
+          priceChangeH1Percent: b.enrichment?.priceChangeH1Percent,
+        },
+      ),
+    )[0]!;
 
     try {
       await this.postCandidate(best.c, best.enrichment, now);
@@ -234,14 +263,15 @@ export class NetworkTradeFeedMonitor {
         { err, entryId: best.c.entryId },
         'network trade feed: failed to post — will retry later',
       );
-      return undefined;
+      return false;
     }
 
+    this.recentlyFeaturedWallets.set(best.c.walletAddress, now.getTime());
     this.deps.logger.info(
-      { entryId: best.c.entryId, score: best.score, mint: best.c.mint, bucket: best.bucket },
+      { entryId: best.c.entryId, mint: best.c.mint, walletAddress: best.c.walletAddress },
       'network trade feed: posted',
     );
-    return best.bucket;
+    return true;
   }
 
   private async postCandidate(
@@ -254,6 +284,7 @@ export class NetworkTradeFeedMonitor {
       walletConfidenceScore: c.walletConfidenceScore,
       volume24hUsd: enrichment?.volume24hUsd,
       priceChangeH1Percent: enrichment?.priceChangeH1Percent,
+      entryAmountSol: c.entryAmountSol,
     });
     const cardEnrichment = {
       liquidityUsd: enrichment?.liquidityUsd,

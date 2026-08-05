@@ -2,10 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   fetchNetworkTradeCandidates,
   markNetworkTradePosted,
-  scoreNetworkTradeCandidate,
   categorizeNetworkTrade,
-  classifyNetworkTradePostBucket,
-  NETWORK_TRADE_DAILY_BUCKET_CAPS,
+  isNetworkTradeCandidateEligible,
+  computeNetworkTradePriorityTier,
+  compareNetworkTradeCandidatesByPriority,
   NETWORK_TRADE_FEED_TYPE,
 } from './data.js';
 
@@ -39,7 +39,7 @@ function fakeRow(overrides: Record<string, unknown> = {}) {
     realizedPnlSol: 0.8,
     realizedPnlUsd: 150,
     token: { name: 'Gigachad', symbol: 'GIGA', dex: 'PUMPFUN', aiScore: 72 },
-    wallet: { confidenceScore: 65 },
+    wallet: { confidenceScore: 65, rugExposureRatePct: 5, sybilConfidencePct: 0 },
     ...overrides,
   };
 }
@@ -61,6 +61,8 @@ describe('fetchNetworkTradeCandidates', () => {
         aiScore: 72,
         walletAddress: 'Wallet111111111111111111111111111111111',
         walletConfidenceScore: 65,
+        walletRugExposureRatePct: 5,
+        walletSybilConfidencePct: 0,
         entryAt: new Date('2026-08-01T00:00:00Z'),
         exitAt: new Date('2026-08-01T02:00:00Z'),
         entrySignature: 'buysig',
@@ -127,71 +129,155 @@ describe('markNetworkTradePosted', () => {
   });
 });
 
-describe('scoreNetworkTradeCandidate', () => {
-  it('scores a large win and an equally large loss the same — losses are not penalized as content', () => {
-    const win = scoreNetworkTradeCandidate({
-      realizedRoiPercent: 200,
-      realizedPnlUsd: 1000,
-      walletConfidenceScore: 70,
-      entryAmountSol: 2,
-      volume24hUsd: 50_000,
-    });
-    const loss = scoreNetworkTradeCandidate({
-      realizedRoiPercent: -200,
-      realizedPnlUsd: -1000,
-      walletConfidenceScore: 70,
-      entryAmountSol: 2,
-      volume24hUsd: 50_000,
-    });
-    expect(win).toBe(loss);
+describe('isNetworkTradeCandidateEligible', () => {
+  it('accepts a profitable trade', () => {
+    expect(
+      isNetworkTradeCandidateEligible({
+        realizedRoiPercent: 80,
+        walletRugExposureRatePct: 0,
+        walletSybilConfidencePct: 0,
+      }),
+    ).toBe(true);
   });
 
-  it('scores a bigger, higher-conviction trade higher than a small, low-confidence one', () => {
-    const big = scoreNetworkTradeCandidate({
-      realizedRoiPercent: 150,
-      realizedPnlUsd: 3000,
-      walletConfidenceScore: 90,
-      entryAmountSol: 8,
-      volume24hUsd: 80_000,
-    });
-    const small = scoreNetworkTradeCandidate({
-      realizedRoiPercent: 5,
-      realizedPnlUsd: 10,
-      walletConfidenceScore: 10,
-      entryAmountSol: 0.1,
-      volume24hUsd: 1000,
-    });
-    expect(big).toBeGreaterThan(small);
+  it('accepts a small loss', () => {
+    expect(
+      isNetworkTradeCandidateEligible({
+        realizedRoiPercent: -15,
+        walletRugExposureRatePct: 0,
+        walletSybilConfidencePct: 0,
+      }),
+    ).toBe(true);
   });
 
-  it('never exceeds 100 even for extreme inputs', () => {
-    const score = scoreNetworkTradeCandidate({
-      realizedRoiPercent: 100_000,
-      realizedPnlUsd: 10_000_000,
-      walletConfidenceScore: 100,
-      entryAmountSol: 1_000_000,
-      volume24hUsd: 10_000_000,
-    });
-    expect(score).toBeLessThanOrEqual(100);
+  it('skips a loss steep enough to read as a rug (worse than -30%)', () => {
+    expect(
+      isNetworkTradeCandidateEligible({
+        realizedRoiPercent: -85,
+        walletRugExposureRatePct: 0,
+        walletSybilConfidencePct: 0,
+      }),
+    ).toBe(false);
   });
 
-  it('treats an unscored wallet (undefined confidence) as the worst case for that dimension, not a crash', () => {
+  it('skips a wallet with a high historical rug-exposure rate even on a winning trade', () => {
+    expect(
+      isNetworkTradeCandidateEligible({
+        realizedRoiPercent: 100,
+        walletRugExposureRatePct: 75,
+        walletSybilConfidencePct: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it('skips a wallet flagged as a likely Sybil/wash-trading cluster', () => {
+    expect(
+      isNetworkTradeCandidateEligible({
+        realizedRoiPercent: 100,
+        walletRugExposureRatePct: 0,
+        walletSybilConfidencePct: 90,
+      }),
+    ).toBe(false);
+  });
+
+  it('treats an unscored wallet (undefined rug/Sybil signals) as clean, not a crash', () => {
     expect(() =>
-      scoreNetworkTradeCandidate({
+      isNetworkTradeCandidateEligible({
         realizedRoiPercent: 50,
-        realizedPnlUsd: 500,
-        walletConfidenceScore: undefined,
-        entryAmountSol: 1,
-        volume24hUsd: undefined,
+        walletRugExposureRatePct: undefined,
+        walletSybilConfidencePct: undefined,
       }),
     ).not.toThrow();
   });
 });
 
+describe('computeNetworkTradePriorityTier', () => {
+  const base = {
+    realizedRoiPercent: 10,
+    realizedPnlUsd: 10,
+    walletConfidenceScore: 0,
+    entryAmountSol: 0.1,
+    volume24hUsd: 0,
+    priceChangeH1Percent: 0,
+  };
+
+  it('tags a high-volume token tier 1 (Trending Tokens) regardless of other signals', () => {
+    expect(computeNetworkTradePriorityTier({ ...base, volume24hUsd: 150_000 })).toBe(1);
+  });
+
+  it('tags a large hourly move tier 1 (Trending Tokens) even with low volume', () => {
+    expect(computeNetworkTradePriorityTier({ ...base, priceChangeH1Percent: -35 })).toBe(1);
+  });
+
+  it('tags a high-confidence wallet tier 2 (Smart Money) when not trending', () => {
+    expect(computeNetworkTradePriorityTier({ ...base, walletConfidenceScore: 75 })).toBe(2);
+  });
+
+  it('tags a large real entry tier 3 (Whale Wallets) when neither trending nor smart money', () => {
+    expect(computeNetworkTradePriorityTier({ ...base, entryAmountSol: 8 })).toBe(3);
+  });
+
+  it('falls back to tier 4 when no category signal clears its bar', () => {
+    expect(computeNetworkTradePriorityTier(base)).toBe(4);
+  });
+
+  it('prioritizes Trending over Smart Money and Whale when all three qualify', () => {
+    expect(
+      computeNetworkTradePriorityTier({
+        ...base,
+        volume24hUsd: 500_000,
+        walletConfidenceScore: 90,
+        entryAmountSol: 10,
+      }),
+    ).toBe(1);
+  });
+
+  it('prioritizes Smart Money over Whale when both qualify but not Trending', () => {
+    expect(
+      computeNetworkTradePriorityTier({ ...base, walletConfidenceScore: 90, entryAmountSol: 10 }),
+    ).toBe(2);
+  });
+});
+
+describe('compareNetworkTradeCandidatesByPriority', () => {
+  const base = {
+    realizedRoiPercent: 10,
+    realizedPnlUsd: 10,
+    walletConfidenceScore: 0,
+    entryAmountSol: 0.1,
+    volume24hUsd: 0,
+    priceChangeH1Percent: 0,
+  };
+
+  it('ranks a Trending candidate above a Smart Money candidate regardless of ROI/PnL', () => {
+    const trending = { ...base, volume24hUsd: 500_000, realizedRoiPercent: 1, realizedPnlUsd: 1 };
+    const smartMoney = { ...base, walletConfidenceScore: 90, realizedRoiPercent: 1000 };
+    const sorted = [smartMoney, trending].sort(compareNetworkTradeCandidatesByPriority);
+    expect(sorted[0]).toBe(trending);
+  });
+
+  it('within the same tier, ranks Highest ROI first', () => {
+    const higherRoi = { ...base, realizedRoiPercent: 300, realizedPnlUsd: 10 };
+    const lowerRoi = { ...base, realizedRoiPercent: 20, realizedPnlUsd: 5000 };
+    const sorted = [lowerRoi, higherRoi].sort(compareNetworkTradeCandidatesByPriority);
+    expect(sorted[0]).toBe(higherRoi);
+  });
+
+  it('uses Highest PnL as the final tie-break when ROI ties', () => {
+    const higherPnl = { ...base, realizedRoiPercent: 50, realizedPnlUsd: 900 };
+    const lowerPnl = { ...base, realizedRoiPercent: 50, realizedPnlUsd: 100 };
+    const sorted = [lowerPnl, higherPnl].sort(compareNetworkTradeCandidatesByPriority);
+    expect(sorted[0]).toBe(higherPnl);
+  });
+});
+
 describe('categorizeNetworkTrade', () => {
+  const base = { entryAmountSol: 0.1 };
+
   it('tags a high-confidence wallet SMART_MONEY even when the token has no trending signal', () => {
     expect(
       categorizeNetworkTrade({
+        ...base,
         realizedPnlUsd: 100,
         walletConfidenceScore: 75,
         volume24hUsd: 0,
@@ -200,9 +286,22 @@ describe('categorizeNetworkTrade', () => {
     ).toBe('SMART_MONEY');
   });
 
+  it('tags a large real entry WHALE_WALLET when neither trending nor smart money', () => {
+    expect(
+      categorizeNetworkTrade({
+        realizedPnlUsd: 100,
+        walletConfidenceScore: 0,
+        volume24hUsd: 0,
+        priceChangeH1Percent: 0,
+        entryAmountSol: 8,
+      }),
+    ).toBe('WHALE_WALLET');
+  });
+
   it('tags a high-volume token TRENDING_TOKEN when the wallet has no track record', () => {
     expect(
       categorizeNetworkTrade({
+        ...base,
         realizedPnlUsd: 100,
         walletConfidenceScore: undefined,
         volume24hUsd: 150_000,
@@ -214,6 +313,7 @@ describe('categorizeNetworkTrade', () => {
   it('tags a large hourly move TRENDING_TOKEN even with low volume', () => {
     expect(
       categorizeNetworkTrade({
+        ...base,
         realizedPnlUsd: -100,
         walletConfidenceScore: undefined,
         volume24hUsd: 0,
@@ -222,9 +322,10 @@ describe('categorizeNetworkTrade', () => {
     ).toBe('TRENDING_TOKEN');
   });
 
-  it('falls back to NETWORK_PROFIT/NETWORK_LOSS by sign when neither signal clears the bar', () => {
+  it('falls back to NETWORK_PROFIT/NETWORK_LOSS by sign when no category signal clears its bar', () => {
     expect(
       categorizeNetworkTrade({
+        ...base,
         realizedPnlUsd: 50,
         walletConfidenceScore: 10,
         volume24hUsd: 500,
@@ -233,6 +334,7 @@ describe('categorizeNetworkTrade', () => {
     ).toBe('NETWORK_PROFIT');
     expect(
       categorizeNetworkTrade({
+        ...base,
         realizedPnlUsd: -50,
         walletConfidenceScore: 10,
         volume24hUsd: 500,
@@ -241,49 +343,27 @@ describe('categorizeNetworkTrade', () => {
     ).toBe('NETWORK_LOSS');
   });
 
-  it('prioritizes SMART_MONEY over TRENDING_TOKEN when both signals qualify', () => {
+  it('prioritizes TRENDING_TOKEN over SMART_MONEY and WHALE_WALLET when all three qualify', () => {
     expect(
       categorizeNetworkTrade({
         realizedPnlUsd: 100,
         walletConfidenceScore: 90,
         volume24hUsd: 500_000,
         priceChangeH1Percent: 50,
+        entryAmountSol: 10,
+      }),
+    ).toBe('TRENDING_TOKEN');
+  });
+
+  it('prioritizes SMART_MONEY over WHALE_WALLET when both qualify but not TRENDING_TOKEN', () => {
+    expect(
+      categorizeNetworkTrade({
+        realizedPnlUsd: 100,
+        walletConfidenceScore: 90,
+        volume24hUsd: 0,
+        priceChangeH1Percent: 0,
+        entryAmountSol: 10,
       }),
     ).toBe('SMART_MONEY');
-  });
-});
-
-describe('classifyNetworkTradePostBucket', () => {
-  it('buckets a >=50% ROI trade as HIGH_PROFIT', () => {
-    expect(classifyNetworkTradePostBucket(50)).toBe('HIGH_PROFIT');
-    expect(classifyNetworkTradePostBucket(300)).toBe('HIGH_PROFIT');
-  });
-
-  it('buckets a 0%-49.99% ROI trade as SMALL_PROFIT', () => {
-    expect(classifyNetworkTradePostBucket(0)).toBe('SMALL_PROFIT');
-    expect(classifyNetworkTradePostBucket(49.9)).toBe('SMALL_PROFIT');
-  });
-
-  it('buckets a loss strictly between -25% and -20% (inclusive) as LOSS_BAND', () => {
-    expect(classifyNetworkTradePostBucket(-20)).toBe('LOSS_BAND');
-    expect(classifyNetworkTradePostBucket(-25)).toBe('LOSS_BAND');
-    expect(classifyNetworkTradePostBucket(-22.5)).toBe('LOSS_BAND');
-  });
-
-  it('is ineligible for any bucket outside the loss band or worse than -25%', () => {
-    expect(classifyNetworkTradePostBucket(-19.9)).toBeUndefined();
-    expect(classifyNetworkTradePostBucket(-5)).toBeUndefined();
-    expect(classifyNetworkTradePostBucket(-25.1)).toBeUndefined();
-    expect(classifyNetworkTradePostBucket(-90)).toBeUndefined();
-  });
-
-  it('bucket caps sum to the spec 30 posts/day total', () => {
-    const total = Object.values(NETWORK_TRADE_DAILY_BUCKET_CAPS).reduce((a, b) => a + b, 0);
-    expect(total).toBe(30);
-    expect(NETWORK_TRADE_DAILY_BUCKET_CAPS).toEqual({
-      HIGH_PROFIT: 20,
-      SMALL_PROFIT: 5,
-      LOSS_BAND: 5,
-    });
   });
 });

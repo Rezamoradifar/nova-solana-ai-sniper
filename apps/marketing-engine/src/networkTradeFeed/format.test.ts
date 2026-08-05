@@ -14,6 +14,8 @@ function candidate(overrides: Partial<NetworkTradeCandidate> = {}): NetworkTrade
     aiScore: 72,
     walletAddress: 'WalletAAAA1111111111111111111111111111111',
     walletConfidenceScore: 65,
+    walletRugExposureRatePct: 0,
+    walletSybilConfidencePct: 0,
     entryAt: new Date('2026-08-01T00:00:00Z'),
     exitAt: new Date('2026-08-01T02:30:00Z'),
     entrySignature: 'BuySigAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
