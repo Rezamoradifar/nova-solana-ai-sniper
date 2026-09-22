@@ -13,7 +13,7 @@ vi.mock('../detection/onchain.js', () => ({
 
 import { PositionManager } from './positionManager.js';
 import { getTopHolder } from '../detection/onchain.js';
-import { unsealKeypair } from '@nova/shared';
+import { unsealKeypair, DEFAULT_MAX_LOSS_PERCENT } from '@nova/shared';
 import { latencyTracker } from '../lib/latencyTracker.js';
 import { NotImplementedNativeExecutor } from '../solana/dex/types.js';
 
@@ -454,10 +454,12 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
         data: expect.objectContaining({
           takeProfitPercent: undefined,
           // Hard Loss Ceiling (2026-07-18): the balanced preset's own 25%
-          // default is now clamped to the 20% ceiling, same as any other
-          // looser-than-20% value — see the dedicated describe block below.
-          stopLossPercent: 20,
-          stopLossIsSystemDefault: true,
+          // default sits exactly at DEFAULT_MAX_LOSS_PERCENT now (both 25),
+          // so it's honored as the preset's own value rather than clamped —
+          // see the dedicated describe block below for a value that's
+          // actually looser than the ceiling.
+          stopLossPercent: 25,
+          stopLossIsSystemDefault: false,
           trailingStopPercent: 15,
           trailingStopPreset: 'balanced',
         }),
@@ -571,7 +573,7 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
           // never fired, and stopLossPercent stayed undefined forever. The
           // 2026-07-18 fix clamps it to the ceiling unconditionally, not just
           // as a last resort when every field is empty.
-          stopLossPercent: 20,
+          stopLossPercent: DEFAULT_MAX_LOSS_PERCENT,
           stopLossIsSystemDefault: true,
           trailingStopPercent: undefined,
         }),
@@ -619,19 +621,22 @@ describe('PositionManager Hard Loss Ceiling (production incident 2026-07-18: ANS
     return { manager, positionCreate };
   }
 
-  it('clamps a preset-derived stop loss looser than 20% (aggressive, 35%) down to the ceiling', async () => {
+  it('clamps a preset-derived stop loss looser than the ceiling (aggressive, 35%) down to the ceiling', async () => {
     const { manager, positionCreate } = fakeOpenDeps();
 
     await manager.openPosition({ ...BASE_PARAMS, stopLossPercent: 35, trailingStopPercent: 20 });
 
     expect(positionCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ stopLossPercent: 20, stopLossIsSystemDefault: true }),
+        data: expect.objectContaining({
+          stopLossPercent: DEFAULT_MAX_LOSS_PERCENT,
+          stopLossIsSystemDefault: true,
+        }),
       }),
     );
   });
 
-  it('honors a user-set stop loss tighter than 20% exactly, unchanged', async () => {
+  it('honors a user-set stop loss tighter than the ceiling exactly, unchanged', async () => {
     const { manager, positionCreate } = fakeOpenDeps();
 
     await manager.openPosition({ ...BASE_PARAMS, stopLossPercent: 10, trailingStopPercent: 8 });
@@ -643,14 +648,21 @@ describe('PositionManager Hard Loss Ceiling (production incident 2026-07-18: ANS
     );
   });
 
-  it('a stop loss set exactly at the 20% ceiling is honored as the user value, not flagged as a system default', async () => {
+  it('a stop loss set exactly at the ceiling is honored as the user value, not flagged as a system default', async () => {
     const { manager, positionCreate } = fakeOpenDeps();
 
-    await manager.openPosition({ ...BASE_PARAMS, stopLossPercent: 20, trailingStopPercent: 15 });
+    await manager.openPosition({
+      ...BASE_PARAMS,
+      stopLossPercent: DEFAULT_MAX_LOSS_PERCENT,
+      trailingStopPercent: 15,
+    });
 
     expect(positionCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ stopLossPercent: 20, stopLossIsSystemDefault: false }),
+        data: expect.objectContaining({
+          stopLossPercent: DEFAULT_MAX_LOSS_PERCENT,
+          stopLossIsSystemDefault: false,
+        }),
       }),
     );
   });

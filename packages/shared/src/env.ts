@@ -671,7 +671,8 @@ export const envSchema = z.object({
   EXIT_STRATEGY_V2_ENABLED: booleanFlag(false),
   // Initial stop-loss before TP1 fires. Still clamped through
   // resolveEffectiveStopLossPercent/DEFAULT_MAX_LOSS_PERCENT — this can never
-  // be looser than the system-wide 20% ceiling regardless of this value.
+  // be looser than the system-wide ceiling (DEFAULT_MAX_LOSS_PERCENT)
+  // regardless of this value.
   EXIT_V2_INITIAL_STOP_LOSS_PERCENT: z.coerce.number().positive().default(20),
   // ROI% that triggers TP1 ("Take Profit #1 — at +50% ROI").
   EXIT_V2_TP1_ROI_PERCENT: z.coerce.number().positive().default(50),

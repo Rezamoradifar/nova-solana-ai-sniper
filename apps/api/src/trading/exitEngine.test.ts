@@ -239,8 +239,8 @@ describe('resolveEffectiveStopLossPercent', () => {
   });
 
   it('honors a value exactly at the ceiling as the user value, not a default', () => {
-    expect(resolveEffectiveStopLossPercent(20)).toEqual({
-      effectiveStopLossPercent: 20,
+    expect(resolveEffectiveStopLossPercent(DEFAULT_MAX_LOSS_PERCENT)).toEqual({
+      effectiveStopLossPercent: DEFAULT_MAX_LOSS_PERCENT,
       isSystemDefault: false,
     });
   });

@@ -125,7 +125,7 @@ export interface RiskFlags {
  * user isn't surprised their own looser value gets capped at buy time).
  * Lives here, not duplicated in each app, since both need the same number.
  */
-export const DEFAULT_MAX_LOSS_PERCENT = 20;
+export const DEFAULT_MAX_LOSS_PERCENT = 25;
 
 /** Optional exit strategy — see apps/api/src/trading/adaptiveTrailingStop.ts. */
 export type TrailingStopPreset =
