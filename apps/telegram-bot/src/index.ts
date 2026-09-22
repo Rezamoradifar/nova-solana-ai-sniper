@@ -58,6 +58,10 @@ async function main() {
     }
   }
 
+  const apiBaseUrl = (env.INTERNAL_API_URL ?? `http://127.0.0.1:${env.API_PORT}`).replace(
+    /\/+$/,
+    '',
+  );
   const telegramTrend = {
     enabled: env.TELEGRAM_TREND_SOURCE_ENABLED,
     channels: env.TELEGRAM_TREND_CHANNELS.split(',')
@@ -65,7 +69,7 @@ async function main() {
       .filter(Boolean),
     minAiScore: env.TELEGRAM_TREND_MIN_AI_SCORE,
     pollIntervalMs: env.TELEGRAM_TREND_POLL_INTERVAL_MS,
-    metricsUrl: `http://127.0.0.1:${env.API_PORT}/metrics`,
+    metricsUrl: `${apiBaseUrl}/metrics`,
   };
 
   const solanaConnection = getBotConnection({
@@ -73,7 +77,7 @@ async function main() {
     SOLANA_RPC_URL: env.SOLANA_RPC_URL,
   });
 
-  const api = { baseUrl: `http://127.0.0.1:${env.API_PORT}`, jwtSecret: env.JWT_SECRET };
+  const api = { baseUrl: apiBaseUrl, jwtSecret: env.JWT_SECRET };
 
   registerAdminCommands(bot, prisma, adminIds, logger, redis);
   registerUiRouter(bot, {

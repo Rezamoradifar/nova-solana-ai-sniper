@@ -38,6 +38,7 @@ async function request<T>(
 ): Promise<T> {
   const res = await fetch(`${api.baseUrl}${path}`, {
     ...init,
+    signal: init.signal ?? AbortSignal.timeout(30_000),
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${tokenFor(user, api.jwtSecret)}`,
