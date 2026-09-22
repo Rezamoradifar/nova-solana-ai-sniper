@@ -1,6 +1,6 @@
 # Build context is the repo root: docker build -f apps/api/Dockerfile .
 FROM node:20-alpine AS deps
-RUN apk add --no-cache python3 make g++ libc6-compat
+RUN apk add --no-cache python3 make g++ libc6-compat openssl
 WORKDIR /repo
 
 COPY package.json package-lock.json ./
