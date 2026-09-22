@@ -511,8 +511,12 @@ export const en = {
     globalNote: '_This is a global setting, not per-user._',
     statusPaused: '🟡 Paused (admin)',
     statusNotConfigured: '🔴 Disabled',
+    // The env var name's own underscores must be escaped (\_) - Telegram's
+    // legacy Markdown parser reads a bare "_" as an italic delimiter, so an
+    // unescaped env var name inside this already-italicized sentence breaks
+    // entity parsing outright (GrammyError 400: "can't parse entities").
     notConfiguredNote:
-      '\n_TELEGRAM_TREND_SOURCE_ENABLED is off — an operator must set it and restart nova-api before this can run._',
+      '\n_TELEGRAM\\_TREND\\_SOURCE\\_ENABLED is off — an operator must set it and restart nova-api before this can run._',
     pauseBtn: '⏸ Pause Trend Monitor',
     resumeBtn: '▶️ Resume Trend Monitor',
   },

@@ -516,7 +516,7 @@ export const fa = {
     statusPaused: '🟡 متوقف‌شده (توسط ادمین)',
     statusNotConfigured: '🔴 غیرفعال',
     notConfiguredNote:
-      '\n_TELEGRAM_TREND_SOURCE_ENABLED خاموش است — یک اپراتور باید آن را فعال کند و nova-api را ری‌استارت کند تا این بخش کار کند._',
+      '\n_TELEGRAM\\_TREND\\_SOURCE\\_ENABLED خاموش است — یک اپراتور باید آن را فعال کند و nova-api را ری‌استارت کند تا این بخش کار کند._',
     pauseBtn: '⏸ توقف مانیتور ترند',
     resumeBtn: '▶️ ازسرگیری مانیتور ترند',
   },
