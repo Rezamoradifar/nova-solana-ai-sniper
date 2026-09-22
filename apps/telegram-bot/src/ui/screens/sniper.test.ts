@@ -6,6 +6,7 @@ import {
   renderSniperStart,
   handlePauseAll,
   handlePauseConfig,
+  handleResumeAll,
   handleResumeConfig,
   handleDeleteConfig,
   renderDeleteConfigConfirm,
@@ -93,6 +94,10 @@ function fakeDeps(
     prisma,
     encryptionKey: 'key',
     logger: { error: vi.fn() } as never,
+    // Matches every fixture user's telegramId below, so existing tests keep
+    // exercising the fee-policy gate (and everything else) rather than the
+    // separate trading-restriction gate covered by its own dedicated test.
+    adminIds: new Set(['tg-1']),
     telegramTrend: {
       enabled: false,
       channels: [],
@@ -108,6 +113,7 @@ function fakeDeps(
 // exercise the screen's normal (post-consent-gate) behavior unchanged.
 const user = {
   id: 'user-1',
+  telegramId: 'tg-1',
   feePolicyAcceptedAt: new Date(),
   feePolicyAcceptedFeeBps: 2000,
 } as User;
@@ -296,6 +302,7 @@ describe('pause all configs for one user only', () => {
 describe('fee policy consent gate', () => {
   const unacceptedUser = {
     id: 'user-2',
+    telegramId: 'tg-1',
     feePolicyAcceptedAt: null,
     feePolicyAcceptedFeeBps: null,
   } as User;
@@ -318,6 +325,7 @@ describe('fee policy consent gate', () => {
   it('re-prompts when the accepted fee % is stale (an admin changed it since acceptance)', async () => {
     const staleUser = {
       id: 'user-3',
+      telegramId: 'tg-1',
       feePolicyAcceptedAt: new Date(),
       feePolicyAcceptedFeeBps: 1500,
     } as User;
@@ -332,5 +340,44 @@ describe('fee policy consent gate', () => {
     const result = await handleResumeConfig(deps, unacceptedUser, 'config-1');
     expect(update).not.toHaveBeenCalled();
     expect(result.text).toContain('Performance Fee & Referral Policy');
+  });
+});
+
+describe('trading-restriction gate (TELEGRAM_ADMIN_IDS)', () => {
+  const otherUser = {
+    id: 'user-4',
+    telegramId: 'tg-2',
+    feePolicyAcceptedAt: new Date(),
+    feePolicyAcceptedFeeBps: 2000,
+  } as User;
+
+  it('handleQuickStart refuses a non-admin Telegram user before even checking the fee policy', async () => {
+    const { deps, create } = fakeDeps([]);
+    const result = await handleQuickStart(deps, otherUser);
+    expect(create).not.toHaveBeenCalled();
+    expect(result.text).toContain('restricted to the bot operator');
+  });
+
+  it('handleResumeAll refuses a non-admin Telegram user', async () => {
+    const { deps, updateMany } = fakeDeps([makeConfig({ userId: 'user-4', isActive: false })]);
+    const result = await handleResumeAll(deps, otherUser);
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(result.text).toContain('restricted to the bot operator');
+  });
+
+  it('handleResumeConfig refuses a non-admin Telegram user', async () => {
+    const { deps, update } = fakeDeps([
+      makeConfig({ id: 'config-1', userId: 'user-4', isActive: false }),
+    ]);
+    const result = await handleResumeConfig(deps, otherUser, 'config-1');
+    expect(update).not.toHaveBeenCalled();
+    expect(result.text).toContain('restricted to the bot operator');
+  });
+
+  it('the same admin Telegram user is unaffected', async () => {
+    const { deps, create } = fakeDeps([]);
+    const result = await handleQuickStart(deps, user);
+    expect(create).toHaveBeenCalled();
+    expect(result.text).not.toContain('restricted to the bot operator');
   });
 });

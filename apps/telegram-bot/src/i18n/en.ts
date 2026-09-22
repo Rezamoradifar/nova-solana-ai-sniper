@@ -104,6 +104,8 @@ export const en = {
     deleteConfirmBody:
       'This only removes the config itself — your wallet, open positions, and full trade/PnL history are never touched.',
     confirmDeleteBtn: '✅ Confirm Delete',
+    tradingRestricted:
+      '🔒 Live trading is restricted to the bot operator right now. You can still browse every other screen, but starting/resuming a sniper config is disabled for this account.',
   },
 
   settings: {

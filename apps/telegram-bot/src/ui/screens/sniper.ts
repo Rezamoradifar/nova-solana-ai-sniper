@@ -9,6 +9,23 @@ import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
 
 const DEFAULT_BUY_AMOUNT_SOL = 0.1;
 
+/** Whether this Telegram user is allowed to actually enable live trading
+ * (create/resume a SnipeConfig with isActive:true). Reuses TELEGRAM_ADMIN_IDS
+ * (deps.adminIds) - same source of truth as trendSettings.ts's isAdmin() -
+ * rather than a second env var, since the requester is the same person
+ * either way for a single-operator deployment. Every other screen (wallet,
+ * portfolio, settings, ...) stays open to any Telegram user; this only gates
+ * the three actions below that flip isActive:true. */
+function isTradingAllowed(deps: ScreenDeps, user: ScreenUser): boolean {
+  return user.telegramId !== null && (deps.adminIds?.has(user.telegramId) ?? false);
+}
+
+function renderTradingRestricted(user: ScreenUser): ScreenResult {
+  const lang = getLocale(user);
+  const d = t(lang).sniper;
+  return { text: d.tradingRestricted, keyboard: withNav(new InlineKeyboard(), 'home', lang) };
+}
+
 // Telegram rejects a sendMessage whose text exceeds 4096 chars and a keyboard
 // with more than 100 buttons outright — cap how many configs this screen ever
 // renders with full per-config controls so a user who's at (or, for pre-cap
@@ -158,6 +175,8 @@ function renderPausedConfirmation(
 }
 
 export async function handleQuickStart(deps: ScreenDeps, user: ScreenUser): Promise<ScreenResult> {
+  if (!isTradingAllowed(deps, user)) return renderTradingRestricted(user);
+
   // Defense in depth: renderSniperStart already hides this button unless the fee
   // policy has been accepted, but an old message/replayed callback could still
   // reach here directly — re-check server-side, same convention as the
@@ -196,6 +215,7 @@ export async function handleQuickStart(deps: ScreenDeps, user: ScreenUser): Prom
 }
 
 export async function handleResumeAll(deps: ScreenDeps, user: ScreenUser): Promise<ScreenResult> {
+  if (!isTradingAllowed(deps, user)) return renderTradingRestricted(user);
   if (!(await hasAcceptedCurrentFeePolicy(deps, user))) {
     return renderFeePolicyConsent(deps, user);
   }
@@ -252,6 +272,7 @@ export async function handleResumeConfig(
   user: ScreenUser,
   configId: string,
 ): Promise<ScreenResult> {
+  if (!isTradingAllowed(deps, user)) return renderTradingRestricted(user);
   if (!(await hasAcceptedCurrentFeePolicy(deps, user))) {
     return renderFeePolicyConsent(deps, user);
   }
