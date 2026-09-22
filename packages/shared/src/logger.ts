@@ -4,6 +4,13 @@ const SECRET_KEY_PATTERN = /(key|token|secret|password|seed|private|mnemonic)/i;
 
 function redactUnknownKeys(obj: unknown): unknown {
   if (Array.isArray(obj)) return obj.map(redactUnknownKeys);
+  // Error's own message/stack are non-enumerable, so the generic
+  // Object.entries walk below silently produces {} for any logged error -
+  // exactly the "err":{} that was hiding every real crash reason. Pull them
+  // out explicitly before the generic object path ever sees it.
+  if (obj instanceof Error) {
+    return { name: obj.name, message: obj.message, stack: obj.stack, ...redactUnknownKeys({ ...obj }) };
+  }
   if (obj && typeof obj === 'object') {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj)) {
