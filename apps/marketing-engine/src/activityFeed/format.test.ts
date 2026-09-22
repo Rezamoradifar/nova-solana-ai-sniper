@@ -42,7 +42,7 @@ describe('formatNewOpportunityMessage', () => {
     expect(text).not.toContain('Liquidity:');
     expect(text).not.toContain('AI Score:');
     expect(text).toContain('View on DexScreener');
-    expect(text).toContain('Nova Solana AI Sniper');
+    expect(text).toContain('GSP Bank Sniper');
   });
 
   it('includes DexScreener enrichment lines when available', () => {
@@ -184,6 +184,6 @@ describe('formatWeeklySummaryMessage', () => {
     expect(text).toContain('WEEKLY SUMMARY');
     expect(text).toContain('1 win, 0 loss');
     expect(text).toContain('Best: *AAA* +30.0%');
-    expect(text).toContain('Nova Solana AI Sniper');
+    expect(text).toContain('GSP Bank Sniper');
   });
 });

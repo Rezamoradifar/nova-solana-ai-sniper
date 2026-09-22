@@ -41,7 +41,7 @@ export const fa = {
   },
 
   home: {
-    title: '👋 *Nova Solana AI Sniper*',
+    title: '👋 *GSP Bank Sniper*',
     freeNote: 'همه امکانات زیر رایگان است — بدون سطح‌بندی، بدون محدودیت.',
     wallets: (n: number) => `👛 کیف پول‌ها: *${n}*`,
     activeSnipes: (n: number) => `🎯 پیکربندی‌های فعال اسنایپ: *${n}*`,
@@ -50,7 +50,7 @@ export const fa = {
   },
 
   welcome: {
-    text: '👋 *Nova Solana AI Sniper* آماده است. برای پیمایش از منوی زیر استفاده کنید.',
+    text: '👋 *GSP Bank Sniper* آماده است. برای پیمایش از منوی زیر استفاده کنید.',
   },
 
   language: {

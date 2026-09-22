@@ -21,7 +21,7 @@ export function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-export const NOVA_BRAND_FOOTER_HTML = '\n\n🔷 <b>Nova Solana AI Sniper</b>';
+export const NOVA_BRAND_FOOTER_HTML = '\n\n🔷 <b>GSP Bank Sniper</b>';
 
 /** Telegram's hard limit on a photo caption. */
 const PHOTO_CAPTION_LIMIT = 1024;

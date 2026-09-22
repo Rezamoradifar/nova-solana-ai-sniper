@@ -37,7 +37,7 @@ export const en = {
   },
 
   home: {
-    title: '👋 *Nova Solana AI Sniper*',
+    title: '👋 *GSP Bank Sniper*',
     freeNote: 'Every feature below is free — no tiers, no limits.',
     wallets: (n: number) => `👛 Wallets: *${n}*`,
     activeSnipes: (n: number) => `🎯 Active snipe configs: *${n}*`,
@@ -46,7 +46,7 @@ export const en = {
   },
 
   welcome: {
-    text: '👋 *Nova Solana AI Sniper* is ready. Use the menu below to navigate.',
+    text: '👋 *GSP Bank Sniper* is ready. Use the menu below to navigate.',
   },
 
   language: {
@@ -310,7 +310,7 @@ export const en = {
     transactionRow: (date: string, type: string, sign: string, amount: string) =>
       `${date} — ${type} ${sign}${amount}`,
     invalidBackupFile:
-      "⚠️ That doesn't look like a valid Nova wallet backup file. Send the correct file, or ⬅️ Back to cancel.",
+      "⚠️ That doesn't look like a valid GSP Bank Sniper wallet backup file. Send the correct file, or ⬅️ Back to cancel.",
     couldNotReadFile: '⚠️ Could not read that file. Try again, or ⬅️ Back to cancel.',
     sendAsDocumentNote:
       'Send the backup file as a Telegram document (attach the .json file), not as text.',

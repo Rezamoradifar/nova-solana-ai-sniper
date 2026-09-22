@@ -11,10 +11,10 @@ const CATEGORY_BRIEFS: Record<MarketingCategory, string> = {
   referral:
     'A referral-program promo encouraging users to invite friends and earn rewards through the platform.',
   announcements:
-    'A platform announcement about a feature of Nova Solana AI Sniper (auto-buy, AI risk scoring, copy trading, TP/SL/trailing stop, backtesting, dashboard, etc).',
+    'A platform announcement about a feature of GSP Bank Sniper (auto-buy, AI risk scoring, copy trading, TP/SL/trailing stop, backtesting, dashboard, etc).',
 };
 
-const SYSTEM_PROMPT = `You are the bilingual marketing copywriter for "Nova Solana AI Sniper", an
+const SYSTEM_PROMPT = `You are the bilingual marketing copywriter for "GSP Bank Sniper", an
 AI-powered Solana memecoin sniping platform (auto-buy/sell, AI risk scoring, honeypot detection,
 copy trading, TP/SL/trailing stops, backtesting, live dashboard).
 

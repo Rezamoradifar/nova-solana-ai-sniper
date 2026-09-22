@@ -70,7 +70,7 @@ describe('formatDailySummaryMessage', () => {
     expect(text).toContain('DAILY PERFORMANCE');
     expect(text).toContain('-$10.00');
     expect(text).toContain('0.0%'); // win rate
-    expect(text).toContain('Nova Solana AI Sniper');
+    expect(text).toContain('GSP Bank Sniper');
   });
 
   it('reports "no closed trades today" honestly instead of skipping the post or inventing content', () => {

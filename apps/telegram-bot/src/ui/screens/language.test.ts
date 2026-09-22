@@ -60,7 +60,7 @@ describe('applyLanguage', () => {
 describe('renderHome in Persian', () => {
   it('renders Persian copy end-to-end when user.language is "fa"', async () => {
     const result = await renderHome(fakeDeps(), { ...user, language: 'fa' } as User);
-    expect(result.text).toContain('👋 *Nova Solana AI Sniper*');
+    expect(result.text).toContain('👋 *GSP Bank Sniper*');
     expect(result.text).toContain('بدون سطح‌بندی');
     const labels = result.keyboard.inline_keyboard.flat().map((b) => b.text);
     expect(labels).toContain('👛 کیف پول');

@@ -34,7 +34,7 @@ export function Login() {
     <div className="flex min-h-screen items-center justify-center bg-surface px-4">
       <div className="card w-full max-w-sm">
         <div className="mb-6 text-center">
-          <div className="text-xl font-bold text-white">Nova Solana AI Sniper</div>
+          <div className="text-xl font-bold text-white">GSP Bank Sniper</div>
           <div className="mt-1 text-sm text-slate-500">
             {mode === 'login' ? 'Sign in to your account' : 'Create an account'}
           </div>

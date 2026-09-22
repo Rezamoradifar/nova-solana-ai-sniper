@@ -88,7 +88,7 @@ describe('buildTokenCaptionHtml', () => {
     expect(html).toContain('DexScreener');
     expect(html).toContain('Solscan');
     expect(html).toContain('Birdeye');
-    expect(html).toContain('Nova Solana AI Sniper');
+    expect(html).toContain('GSP Bank Sniper');
   });
 
   it('HTML-escapes a token name containing special characters', () => {
@@ -112,7 +112,7 @@ describe('truncateForPhotoCaption', () => {
     const long = 'x'.repeat(2000);
     const truncated = truncateForPhotoCaption(long);
     expect(truncated.length).toBeLessThanOrEqual(1024);
-    expect(truncated).toContain('Nova Solana AI Sniper');
+    expect(truncated).toContain('GSP Bank Sniper');
   });
 });
 

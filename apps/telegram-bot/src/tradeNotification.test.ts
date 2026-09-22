@@ -65,7 +65,7 @@ describe('formatTradePhotoCaption', () => {
     expect(text).toContain('https://solscan.io/tx/buySig123');
     expect(text).toContain('https://solscan.io/tx/sellSig456');
     expect(text).toContain('https://dexscreener.com/solana/MintAbc123');
-    expect(text).toContain('Nova Solana AI Sniper');
+    expect(text).toContain('GSP Bank Sniper');
   });
 
   it('renders N/A rather than omitting a line when AI score/enrichment/tx signatures are unavailable', () => {
@@ -99,7 +99,7 @@ describe('formatTradePhotoCaption', () => {
     const text = formatTradePhotoCaption(trade({ tokenName: 'X'.repeat(2000) }));
     expect(text.length).toBeLessThanOrEqual(1024);
     expect(text).toContain('https://dexscreener.com/solana/MintAbc123');
-    expect(text).toContain('Nova Solana AI Sniper');
+    expect(text).toContain('GSP Bank Sniper');
   });
 });
 

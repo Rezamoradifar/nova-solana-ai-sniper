@@ -102,7 +102,7 @@ export function formatTradePhotoCaption(trade: TradeNotificationData): string {
       : `Sell TX: ${NOT_AVAILABLE}`,
     `[View on DexScreener](${dexscreenerChartUrl(trade.mint)})`,
     '',
-    `🔷 *Nova Solana AI Sniper*`,
+    `🔷 *GSP Bank Sniper*`,
   ];
 
   const text = lines.join('\n');
@@ -110,7 +110,7 @@ export function formatTradePhotoCaption(trade: TradeNotificationData): string {
 
   // Truncates the body only — the DexScreener link and brand footer (the two
   // things a shortened caption must never lose) are always appended intact.
-  const footer = `\n…\n[View on DexScreener](${dexscreenerChartUrl(trade.mint)})\n\n🔷 *Nova Solana AI Sniper*`;
+  const footer = `\n…\n[View on DexScreener](${dexscreenerChartUrl(trade.mint)})\n\n🔷 *GSP Bank Sniper*`;
   return `${text.slice(0, Math.max(0, PHOTO_CAPTION_LIMIT - footer.length))}${footer}`;
 }
 

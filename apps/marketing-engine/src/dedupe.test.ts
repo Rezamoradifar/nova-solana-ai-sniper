@@ -29,9 +29,7 @@ describe('isNearDuplicate', () => {
   });
 
   it('is true for an exact repeat', () => {
-    const recent = [
-      'Nova Solana AI Sniper screens every launch before it ever reaches your wallet.',
-    ];
+    const recent = ['GSP Bank Sniper screens every launch before it ever reaches your wallet.'];
     expect(isNearDuplicate(recent[0]!, recent)).toBe(true);
   });
 

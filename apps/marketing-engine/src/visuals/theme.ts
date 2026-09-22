@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * Nova Solana AI Sniper brand identity for generated marketing visuals —
+ * GSP Bank Sniper brand identity for generated marketing visuals —
  * deliberately the same palette as the project's investor presentation
  * (docs/presentation/interactive-fa.html) so every public-facing asset reads
  * as one consistent brand, not a one-off. Distinct from cards/render.ts's
@@ -37,5 +37,5 @@ export const FONTS = {
 
 export const CANVAS_SIZE = 1080;
 
-export const BRAND_WORDMARK = 'NOVA SOLANA AI SNIPER';
+export const BRAND_WORDMARK = 'GSP BANK SNIPER';
 export const BRAND_HANDLE = 't.me/SolanaSniperAI';

@@ -316,7 +316,7 @@ export function registerAdminCommands(
       `PnL: *${usd(12.34)}*\n` +
       `AI Score: *87/100*\n` +
       `[View chart on DexScreener](${chartUrl})\n\n` +
-      `🔷 *Nova Solana AI Sniper*`;
+      `🔷 *GSP Bank Sniper*`;
 
     try {
       await ctx.api.sendMessage(chatId, text, {

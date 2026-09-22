@@ -71,7 +71,7 @@ const CATEGORY_LABEL: Record<NetworkTradeCategory, string> = {
   NETWORK_LOSS: '🌐 NETWORK TRADE',
 };
 
-export const NOVA_BRAND_FOOTER_HTML = '\n\n🔷 <b>Nova Solana AI Sniper</b> · Network Feed';
+export const NOVA_BRAND_FOOTER_HTML = '\n\n🔷 <b>GSP Bank Sniper</b> · Network Feed';
 
 const PHOTO_CAPTION_LIMIT = 1024;
 
