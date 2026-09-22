@@ -7,9 +7,14 @@ function redactUnknownKeys(obj: unknown): unknown {
   // Error's own message/stack are non-enumerable, so the generic
   // Object.entries walk below silently produces {} for any logged error -
   // exactly the "err":{} that was hiding every real crash reason. Pull them
-  // out explicitly before the generic object path ever sees it.
+  // out explicitly, plus any extra enumerable properties a subclass added
+  // (e.g. a custom `code`), before the generic object path ever sees it.
   if (obj instanceof Error) {
-    return { name: obj.name, message: obj.message, stack: obj.stack, ...redactUnknownKeys({ ...obj }) };
+    const extra: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      extra[k] = SECRET_KEY_PATTERN.test(k) ? '[REDACTED]' : redactUnknownKeys(v);
+    }
+    return { name: obj.name, message: obj.message, stack: obj.stack, ...extra };
   }
   if (obj && typeof obj === 'object') {
     const out: Record<string, unknown> = {};

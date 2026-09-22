@@ -192,6 +192,11 @@ export const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
   TELEGRAM_ADMIN_IDS: z.string().optional(),
+  // When true, only senders in TELEGRAM_ADMIN_IDS may use the bot at all -
+  // every other update (including /start) is dropped before any handler
+  // runs. Default false keeps the bot open to any Telegram user, same as
+  // before this flag existed.
+  TELEGRAM_PRIVATE_MODE: booleanFlag(false),
   // Public broadcast channel for apps/marketing-engine's scheduled posts —
   // deliberately separate from TELEGRAM_CHAT_ID (an admin/ops chat, not a
   // public audience). Accepts either "@channelusername" or a numeric chat id,

@@ -38,6 +38,26 @@ async function main() {
     );
   }
 
+  // Private-mode gate - registered before any other handler, so a
+  // non-admin sender's update (including /start) never reaches
+  // registerAdminCommands/registerUiRouter below at all.
+  if (env.TELEGRAM_PRIVATE_MODE) {
+    if (adminIds.size === 0) {
+      logger.warn(
+        'TELEGRAM_PRIVATE_MODE=true but TELEGRAM_ADMIN_IDS is empty — the bot would be unusable by anyone; ignoring TELEGRAM_PRIVATE_MODE',
+      );
+    } else {
+      bot.use(async (ctx, next) => {
+        const senderId = ctx.from?.id?.toString();
+        if (!senderId || !adminIds.has(senderId)) {
+          logger.warn({ senderId }, 'blocked non-admin sender - TELEGRAM_PRIVATE_MODE is on');
+          return;
+        }
+        return next();
+      });
+    }
+  }
+
   const telegramTrend = {
     enabled: env.TELEGRAM_TREND_SOURCE_ENABLED,
     channels: env.TELEGRAM_TREND_CHANNELS.split(',')
