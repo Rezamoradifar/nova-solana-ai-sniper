@@ -119,3 +119,64 @@ describe('/stats admin command', () => {
     expect(text).toContain('Total Volume: 0 SOL');
   });
 });
+
+describe('/resumeautobuy admin command', () => {
+  // Live-reported bug: an admin ran `/resumeautobuy on` expecting to resume
+  // (matching the command's own name), and got "Auto-buy paused" instead -
+  // "on"/"off" previously described the underlying *pause* flag, not
+  // auto-buy itself. "on" now resumes and "off" now pauses, matching the
+  // command name; "resume"/"pause" remain as unambiguous synonyms.
+  function fakeRedisStore() {
+    const store = new Map<string, string>();
+    return {
+      get: vi.fn(async (key: string) => store.get(key) ?? null),
+      set: vi.fn(async (key: string, value: string) => {
+        store.set(key, value);
+      }),
+      del: vi.fn(async (key: string) => {
+        store.delete(key);
+      }),
+    } as unknown as Redis;
+  }
+
+  it('"on" resumes auto-buy', async () => {
+    const { bot, run } = fakeBot();
+    const redis = fakeRedisStore();
+    registerAdminCommands(bot, {} as PrismaClient, new Set(['999']), fakeLogger, redis);
+
+    const reply = vi.fn();
+    await run('resumeautobuy', { from: { id: 999 }, reply, match: 'on' } as unknown as Context);
+
+    expect(reply).toHaveBeenCalledWith(
+      '✅ Auto-buy resumed — new launches will be evaluated again.',
+    );
+    expect(await redis.get('nova:trading:scanner_autobuy_paused')).toBe('0');
+  });
+
+  it('"off" pauses auto-buy', async () => {
+    const { bot, run } = fakeBot();
+    const redis = fakeRedisStore();
+    registerAdminCommands(bot, {} as PrismaClient, new Set(['999']), fakeLogger, redis);
+
+    const reply = vi.fn();
+    await run('resumeautobuy', { from: { id: 999 }, reply, match: 'off' } as unknown as Context);
+
+    expect(reply).toHaveBeenCalledWith('⏸️ Auto-buy paused — existing positions are unaffected.');
+    expect(await redis.get('nova:trading:scanner_autobuy_paused')).toBe('1');
+  });
+
+  it('"resume" and "pause" remain unambiguous synonyms', async () => {
+    const { bot, run } = fakeBot();
+    const redis = fakeRedisStore();
+    registerAdminCommands(bot, {} as PrismaClient, new Set(['999']), fakeLogger, redis);
+
+    const reply = vi.fn();
+    await run('resumeautobuy', { from: { id: 999 }, reply, match: 'pause' } as unknown as Context);
+    expect(reply).toHaveBeenCalledWith('⏸️ Auto-buy paused — existing positions are unaffected.');
+
+    await run('resumeautobuy', { from: { id: 999 }, reply, match: 'resume' } as unknown as Context);
+    expect(reply).toHaveBeenCalledWith(
+      '✅ Auto-buy resumed — new launches will be evaluated again.',
+    );
+  });
+});

@@ -163,7 +163,13 @@ export function registerAdminCommands(
   bot.command('resumeautobuy', admin, async (ctx) => {
     const arg = String(ctx.match).trim().toLowerCase();
 
-    if (arg === 'off' || arg === 'resume') {
+    // "on"/"off" describe auto-buy itself (matching the command's own name -
+    // "on" resumes, "off" pauses), not the underlying pause flag. This was
+    // previously inverted ("on" set the *pause* flag on, i.e. paused it) -
+    // live-reported by an admin who ran `/resumeautobuy on` expecting to
+    // resume and got "Auto-buy paused" instead. "resume"/"pause" are kept as
+    // unambiguous synonyms for the same two branches.
+    if (arg === 'on' || arg === 'resume') {
       await setScannerAutoBuyPauseState(redis, false);
       logger.warn(
         { adminId: ctx.from?.id },
@@ -172,7 +178,7 @@ export function registerAdminCommands(
       await ctx.reply('✅ Auto-buy resumed — new launches will be evaluated again.');
       return;
     }
-    if (arg === 'on' || arg === 'pause') {
+    if (arg === 'off' || arg === 'pause') {
       await setScannerAutoBuyPauseState(redis, true, 'manually paused by admin');
       logger.warn({ adminId: ctx.from?.id }, 'admin manually paused auto-buy');
       await ctx.reply('⏸️ Auto-buy paused — existing positions are unaffected.');
