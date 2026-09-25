@@ -1,6 +1,10 @@
 import type { Redis } from 'ioredis';
 import type { Logger } from '@nova/shared';
-import { setScannerAutoBuyPauseState } from '@nova/shared';
+import {
+  getScannerAutoBuyPauseReason,
+  getScannerAutoBuyPauseState,
+  setScannerAutoBuyPauseState,
+} from '@nova/shared';
 import type { NotificationService } from '@nova/telegram-bot';
 import type { PumpFunMonitor } from '../solana/pumpfun.js';
 import type { ActiveScanResult, FallbackLaunchDiscovery } from './fallbackLaunchDiscovery.js';
@@ -43,6 +47,7 @@ export interface ScannerHealthSnapshot {
 }
 
 const DEFAULT_CHECK_INTERVAL_MS = 30_000;
+const AUTO_PAUSE_REASON = 'all launch-detection sources unhealthy';
 const DEFAULT_RECOVERING_CEILING_MS = 5 * 60 * 1000;
 
 /**
@@ -170,7 +175,10 @@ export class ScannerHealthCoordinator {
   ): Promise<void> {
     const previous = this.state;
     if (next === previous) {
-      if (next === 'HEALTHY') this.lastHealthyAt = Date.now();
+      if (next === 'HEALTHY') {
+        this.lastHealthyAt = Date.now();
+        await this.clearStaleAutoPause();
+      }
       return;
     }
 
@@ -186,11 +194,7 @@ export class ScannerHealthCoordinator {
     );
 
     if (next === 'UNHEALTHY') {
-      await setScannerAutoBuyPauseState(
-        this.deps.redis,
-        true,
-        'all launch-detection sources unhealthy',
-      ).catch((err) =>
+      await setScannerAutoBuyPauseState(this.deps.redis, true, AUTO_PAUSE_REASON).catch((err) =>
         this.deps.logger.error({ err }, 'failed to set scanner auto-buy pause flag'),
       );
     } else if (next === 'HEALTHY' && this.opts.autoBuyAutoResumeEnabled) {
@@ -204,6 +208,22 @@ export class ScannerHealthCoordinator {
     if (next === 'HEALTHY') this.lastHealthyAt = Date.now();
 
     await this.sendTransitionAlert(previous, next, outageDurationMs, context);
+  }
+
+  /** A pause set automatically before a restart (or before auto-resume was
+   * enabled) never sees a HEALTHY transition, so it would otherwise stay on
+   * forever. Only clears the automatic pause — a manual admin pause is kept. */
+  private async clearStaleAutoPause(): Promise<void> {
+    if (!this.opts.autoBuyAutoResumeEnabled) return;
+    try {
+      if (!(await getScannerAutoBuyPauseState(this.deps.redis))) return;
+      const reason = await getScannerAutoBuyPauseReason(this.deps.redis);
+      if (reason !== AUTO_PAUSE_REASON) return;
+      await setScannerAutoBuyPauseState(this.deps.redis, false);
+      this.deps.logger.warn('scanner healthy — cleared stale automatic auto-buy pause');
+    } catch (err) {
+      this.deps.logger.error({ err }, 'failed to clear stale scanner auto-buy pause flag');
+    }
   }
 
   private async sendTransitionAlert(

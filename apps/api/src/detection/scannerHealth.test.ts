@@ -248,6 +248,64 @@ describe('ScannerHealthCoordinator', () => {
     expect(redis.set).toHaveBeenCalledWith(expect.stringContaining('scanner_autobuy_paused'), '0');
   });
 
+  function storeRedis(initial: Record<string, string>) {
+    const store = new Map(Object.entries(initial));
+    return {
+      store,
+      get: vi.fn(async (k: string) => store.get(k) ?? null),
+      set: vi.fn(async (k: string, v: string) => {
+        store.set(k, v);
+        return 'OK';
+      }),
+      del: vi.fn(async (k: string) => {
+        store.delete(k);
+        return 1;
+      }),
+    };
+  }
+
+  it('clears a stale automatic pause (e.g. from before a restart) while steadily HEALTHY', async () => {
+    const redis = storeRedis({
+      'nova:trading:scanner_autobuy_paused': '1',
+      'nova:trading:scanner_autobuy_paused_reason': 'all launch-detection sources unhealthy',
+    });
+    const coordinator = new ScannerHealthCoordinator(
+      {
+        pumpFunMonitor: fakePumpFunMonitor(true) as never,
+        fallbackDiscovery: fakeFallbackDiscovery(true) as never,
+        redis: redis as never,
+        logger: fakeLogger(),
+        notifier: fakeNotifier() as never,
+      },
+      { autoBuyAutoResumeEnabled: true },
+    );
+
+    await coordinator.tick();
+
+    expect(redis.store.get('nova:trading:scanner_autobuy_paused')).toBe('0');
+  });
+
+  it('keeps a manual admin pause while steadily HEALTHY', async () => {
+    const redis = storeRedis({
+      'nova:trading:scanner_autobuy_paused': '1',
+      'nova:trading:scanner_autobuy_paused_reason': 'manually paused by admin',
+    });
+    const coordinator = new ScannerHealthCoordinator(
+      {
+        pumpFunMonitor: fakePumpFunMonitor(true) as never,
+        fallbackDiscovery: fakeFallbackDiscovery(true) as never,
+        redis: redis as never,
+        logger: fakeLogger(),
+        notifier: fakeNotifier() as never,
+      },
+      { autoBuyAutoResumeEnabled: true },
+    );
+
+    await coordinator.tick();
+
+    expect(redis.store.get('nova:trading:scanner_autobuy_paused')).toBe('1');
+  });
+
   it('promotes RECOVERING to HEALTHY once the ceiling elapses even if reconciliation never resolves', async () => {
     vi.useFakeTimers();
     try {
