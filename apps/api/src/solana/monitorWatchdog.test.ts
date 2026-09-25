@@ -35,6 +35,34 @@ afterEach(() => {
 });
 
 describe('MonitorWatchdog', () => {
+  it('forwards raw activity to the caller and counts it as liveness', async () => {
+    let raw: (() => void) | undefined;
+    let starts = 0;
+    const monitor: RestartableMonitor<{ n: number }> = {
+      start(_onEvent, onRawActivity) {
+        starts += 1;
+        raw = onRawActivity;
+      },
+      stop() {},
+    };
+    const onRawActivity = vi.fn();
+    const watchdog = new MonitorWatchdog(monitor, fakeLogger() as never, {
+      label: 'test',
+      idleThresholdMs: 10_000,
+      checkIntervalMs: 1_000,
+    });
+    watchdog.start(vi.fn(), onRawActivity);
+
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(5_000);
+      raw!();
+    }
+
+    expect(onRawActivity).toHaveBeenCalledTimes(5);
+    expect(starts).toBe(1);
+    await watchdog.stop();
+  });
+
   it('starts the wrapped monitor exactly once and forwards events', () => {
     const monitor = fakeMonitor();
     const onEvent = vi.fn();

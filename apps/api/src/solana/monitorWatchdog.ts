@@ -6,7 +6,7 @@ import type { Logger } from '@nova/shared';
  * exactly the DexMonitor interface, generalized over the monitor's event type.
  */
 export interface RestartableMonitor<E> {
-  start(onEvent: (event: E) => void | Promise<void>): void;
+  start(onEvent: (event: E) => void | Promise<void>, onRawActivity?: () => void): void;
   stop(): Promise<void> | void;
 }
 
@@ -42,6 +42,7 @@ export interface MonitorWatchdogOptions {
 export class MonitorWatchdog<E> implements RestartableMonitor<E> {
   private lastEventAt = Date.now();
   private handler: ((event: E) => void | Promise<void>) | undefined;
+  private rawActivityHandler: (() => void) | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
   private restarting = false;
 
@@ -51,8 +52,9 @@ export class MonitorWatchdog<E> implements RestartableMonitor<E> {
     private readonly options: MonitorWatchdogOptions,
   ) {}
 
-  start(onEvent: (event: E) => void | Promise<void>): void {
+  start(onEvent: (event: E) => void | Promise<void>, onRawActivity?: () => void): void {
     this.handler = onEvent;
+    this.rawActivityHandler = onRawActivity;
     this.lastEventAt = Date.now();
     this.subscribe();
 
@@ -63,10 +65,19 @@ export class MonitorWatchdog<E> implements RestartableMonitor<E> {
   }
 
   private subscribe(): void {
+    // Raw traffic also proves the websocket is alive, so it counts toward
+    // liveness — otherwise a quiet DEX with no new pools gets resubscribed
+    // needlessly, and the caller's own raw-activity callback is never fired.
+    const onRaw = this.rawActivityHandler
+      ? () => {
+          this.lastEventAt = Date.now();
+          this.rawActivityHandler!();
+        }
+      : undefined;
     this.monitor.start((event) => {
       this.lastEventAt = Date.now();
       return this.handler!(event);
-    });
+    }, onRaw);
   }
 
   private async checkAlive(): Promise<void> {
