@@ -537,13 +537,11 @@ export const envSchema = z.object({
   // per-DEX SourceHealthMonitor to decide the overall detection health and whether
   // NEW auto-buys must be safety-paused (see scannerHealth.ts).
   SCANNER_HEALTH_CHECK_INTERVAL_MS: z.coerce.number().min(5_000).default(30_000),
-  // Default false: once a total detection outage (UNHEALTHY) safety-pauses NEW
-  // auto-buys, recovery back to HEALTHY does NOT automatically clear that pause —
-  // an admin must explicitly resume it (see the /resumeautobuy Telegram command),
-  // matching this task's "request admin approval" requirement. Flipping this to
-  // true is an explicit, auditable operator decision to allow automatic resume
-  // instead, same opt-in convention as ENTRY_FILTER_ENABLED etc.
-  SCANNER_AUTO_BUY_AUTO_RESUME_ENABLED: booleanFlag(false),
+  // Default true: once a total detection outage (UNHEALTHY) safety-pauses NEW
+  // auto-buys, recovery back to HEALTHY clears that pause automatically. With
+  // false, the pause persists until an admin runs /resumeautobuy — in practice
+  // a brief RPC failover left auto-buy silently paused for days.
+  SCANNER_AUTO_BUY_AUTO_RESUME_ENABLED: booleanFlag(true),
 
   // Two-stage discovery pipeline (2026-07-22): bounds how many candidates the
   // discovery queue (raw WS event -> parsed tx -> candidatePipeline.ts) and

@@ -158,7 +158,7 @@ export function registerAdminCommands(
   // down (every source unhealthy) — narrower than the kill switch above (blocks
   // NEW auto-buys only; SELL/TP/SL and existing position monitoring are never
   // affected). By design this does NOT auto-clear when detection recovers
-  // (unless SCANNER_AUTO_BUY_AUTO_RESUME_ENABLED is explicitly set) — an admin
+  // (unless SCANNER_AUTO_BUY_AUTO_RESUME_ENABLED is on, the default) — an admin
   // must confirm it's safe to resume auto-buying via this command.
   bot.command('resumeautobuy', admin, async (ctx) => {
     const arg = String(ctx.match).trim().toLowerCase();
