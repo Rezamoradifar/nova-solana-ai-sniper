@@ -522,6 +522,24 @@ describe('NotificationService — sniper alert fan-out (notifyTrade/notifyExit/n
   });
 });
 
+describe('NotificationService — comma-separated owner chat ids', () => {
+  it('sends launch alerts and owner-only alerts to every listed owner, once each', async () => {
+    const { bot, sendMessage } = fakeBot();
+    const service = new NotificationService(
+      bot,
+      'ADMIN_1, ADMIN_2,ADMIN_1',
+      fakePrisma([]),
+      fakeLogger,
+    );
+
+    await service.notifyNewToken({ mint: 'MintABC', dex: 'PUMPFUN' });
+    await service.notifyError('worker', 'boom');
+
+    const chats = sendMessage.mock.calls.map((c) => c[0]);
+    expect(chats.sort()).toEqual(['ADMIN_1', 'ADMIN_1', 'ADMIN_2', 'ADMIN_2']);
+  });
+});
+
 describe('NotificationService — operational alerts stay owner-only', () => {
   beforeEach(() => vi.clearAllMocks());
 

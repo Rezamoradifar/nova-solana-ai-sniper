@@ -492,12 +492,24 @@ function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
  * or a Telegram outage entirely, never breaks the caller (worker/API request path).
  */
 export class NotificationService {
+  /** TELEGRAM_CHAT_ID may hold several comma-separated chat ids, e.g. two admins. */
+  private readonly ownerChatIds: string[];
+
   constructor(
     private readonly bot: Bot,
-    private readonly ownerChatId: string,
+    ownerChatId: string,
     private readonly prisma: PrismaClient,
     private readonly logger: Logger,
-  ) {}
+  ) {
+    this.ownerChatIds = [
+      ...new Set(
+        ownerChatId
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    ];
+  }
 
   /**
    * The owner chat plus every user with telegramId set and a live SnipeConfig
@@ -509,10 +521,10 @@ export class NotificationService {
    * per-recipient rather than broadcasting one language to everyone.
    */
   private async activeRecipients(): Promise<{ chatId: string; lang: Locale }[]> {
-    const [ownerRow, activeUsers] = await Promise.all([
-      this.prisma.user.findUnique({
-        where: { telegramId: this.ownerChatId },
-        select: { language: true },
+    const [ownerRows, activeUsers] = await Promise.all([
+      this.prisma.user.findMany({
+        where: { telegramId: { in: this.ownerChatIds } },
+        select: { telegramId: true, language: true },
       }),
       this.prisma.user.findMany({
         where: {
@@ -523,7 +535,10 @@ export class NotificationService {
       }),
     ]);
     const byChatId = new Map<string, Locale>();
-    byChatId.set(this.ownerChatId, resolveLocale(ownerRow?.language));
+    for (const chatId of this.ownerChatIds) {
+      const row = ownerRows.find((r) => r.telegramId === chatId);
+      byChatId.set(chatId, resolveLocale(row?.language));
+    }
     for (const u of activeUsers) {
       byChatId.set(u.telegramId!, resolveLocale(u.language));
     }
@@ -543,7 +558,7 @@ export class NotificationService {
 
   /** Owner-only — used by the ops/operational notifications, not the sniper alert types. */
   private async sendToOwner(text: string): Promise<void> {
-    await this.sendToChat(this.ownerChatId, text);
+    await Promise.all(this.ownerChatIds.map((chatId) => this.sendToChat(chatId, text)));
   }
 
   /** Fans out to the owner + every currently-active user, formatting the message in
