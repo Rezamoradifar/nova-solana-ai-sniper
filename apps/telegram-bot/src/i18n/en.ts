@@ -508,15 +508,20 @@ export const en = {
     channels: (c: string) => `Channels: ${c}`,
     minAiScore: (n: number) => `Min AI Score: *${n}*`,
     pollInterval: (s: string) => `Poll Interval: *${s}s*`,
-    globalNote: '_This is a global setting, not per-user._',
+    // Plain text, not italicized (_..._) - Telegram's legacy Markdown parser
+    // can fail to parse entities when one italic span ends right where the
+    // next begins (globalNote's trailing "._" immediately followed by
+    // notConfiguredNote's leading "_"), even separated by a newline -
+    // GrammyError 400: "can't parse entities". The env var name's own
+    // underscores are still escaped (\_) even in plain text - three bare
+    // underscores is an odd count, so the parser would otherwise pair the
+    // first two into an unwanted italic span and leave the third as an
+    // unmatched, unclosed entity - the same error under a different cause.
+    globalNote: 'This is a global setting, not per-user.',
     statusPaused: '🟡 Paused (admin)',
     statusNotConfigured: '🔴 Disabled',
-    // The env var name's own underscores must be escaped (\_) - Telegram's
-    // legacy Markdown parser reads a bare "_" as an italic delimiter, so an
-    // unescaped env var name inside this already-italicized sentence breaks
-    // entity parsing outright (GrammyError 400: "can't parse entities").
     notConfiguredNote:
-      '\n_TELEGRAM\\_TREND\\_SOURCE\\_ENABLED is off — an operator must set it and restart nova-api before this can run._',
+      '\nTELEGRAM\\_TREND\\_SOURCE\\_ENABLED is off — an operator must set it and restart nova-api before this can run.',
     pauseBtn: '⏸ Pause Trend Monitor',
     resumeBtn: '▶️ Resume Trend Monitor',
   },

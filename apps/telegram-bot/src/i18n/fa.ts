@@ -512,11 +512,11 @@ export const fa = {
     channels: (c: string) => `کانال‌ها: ${c}`,
     minAiScore: (n: number) => `حداقل امتیاز هوش مصنوعی: *${n}*`,
     pollInterval: (s: string) => `فاصله بررسی: *${s} ثانیه*`,
-    globalNote: '_این یک تنظیم سراسری است، نه مخصوص هر کاربر._',
+    globalNote: 'این یک تنظیم سراسری است، نه مخصوص هر کاربر.',
     statusPaused: '🟡 متوقف‌شده (توسط ادمین)',
     statusNotConfigured: '🔴 غیرفعال',
     notConfiguredNote:
-      '\n_TELEGRAM\\_TREND\\_SOURCE\\_ENABLED خاموش است — یک اپراتور باید آن را فعال کند و nova-api را ری‌استارت کند تا این بخش کار کند._',
+      '\nTELEGRAM\\_TREND\\_SOURCE\\_ENABLED خاموش است — یک اپراتور باید آن را فعال کند و nova-api را ری‌استارت کند تا این بخش کار کند.',
     pauseBtn: '⏸ توقف مانیتور ترند',
     resumeBtn: '▶️ ازسرگیری مانیتور ترند',
   },
