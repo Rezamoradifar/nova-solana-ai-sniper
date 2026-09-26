@@ -38,59 +38,71 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [attempt, setAttempt] = useState(0);
 
   const authenticate = useCallback(async () => {
-    setStatus('loading');
-    setErrorMessage(null);
-    setOutsideTelegram(false);
+    try {
+      await runAuthentication();
+    } catch (err) {
+      // Never leave the app on the loading skeleton forever.
+      console.error('[auth] sign-in failed unexpectedly', err);
+      clearToken();
+      setErrorMessage('Could not start the app — please close it and open it again.');
+      setStatus('error');
+    }
 
-    const { isInsideTelegram } = initTelegram();
+    async function runAuthentication() {
+      setStatus('loading');
+      setErrorMessage(null);
+      setOutsideTelegram(false);
 
-    // A previously-issued token is tried first — avoids re-exchanging
-    // initData (and the HMAC verification round trip that entails) on every
-    // single app open for a user who authenticated recently.
-    if (getToken()) {
+      const { isInsideTelegram } = initTelegram();
+
+      // A previously-issued token is tried first — avoids re-exchanging
+      // initData (and the HMAC verification round trip that entails) on every
+      // single app open for a user who authenticated recently.
+      if (getToken()) {
+        try {
+          const me = await api.get<CurrentUser>('/auth/me');
+          setUser(me);
+          setStatus('authenticated');
+          return;
+        } catch {
+          // Expired/invalid token — fall through to a fresh initData exchange
+          // rather than getting the user stuck; clearToken() so a repeat
+          // failure below doesn't keep retrying against a token already known bad.
+          clearToken();
+        }
+      }
+
+      if (!isInsideTelegram) {
+        setOutsideTelegram(true);
+        setStatus('unauthenticated');
+        return;
+      }
+
+      const initData = getInitDataRaw();
+      if (!initData) {
+        // Real Telegram client, but the SDK hasn't received launch params yet
+        // (e.g. opened via a path Telegram doesn't attach initData to) —
+        // distinct from "not in Telegram at all," but equally unauthenticatable.
+        setErrorMessage('Telegram did not provide sign-in data for this session.');
+        setStatus('error');
+        return;
+      }
+
       try {
+        const { token } = await api.post<{ token: string }>('/auth/telegram', { initData });
+        setToken(token);
         const me = await api.get<CurrentUser>('/auth/me');
         setUser(me);
         setStatus('authenticated');
-        return;
-      } catch {
-        // Expired/invalid token — fall through to a fresh initData exchange
-        // rather than getting the user stuck; clearToken() so a repeat
-        // failure below doesn't keep retrying against a token already known bad.
+      } catch (err) {
         clearToken();
+        setErrorMessage(
+          err instanceof ApiError
+            ? err.message
+            : 'Could not sign in — check your connection and try again.',
+        );
+        setStatus('error');
       }
-    }
-
-    if (!isInsideTelegram) {
-      setOutsideTelegram(true);
-      setStatus('unauthenticated');
-      return;
-    }
-
-    const initData = getInitDataRaw();
-    if (!initData) {
-      // Real Telegram client, but the SDK hasn't received launch params yet
-      // (e.g. opened via a path Telegram doesn't attach initData to) —
-      // distinct from "not in Telegram at all," but equally unauthenticatable.
-      setErrorMessage('Telegram did not provide sign-in data for this session.');
-      setStatus('error');
-      return;
-    }
-
-    try {
-      const { token } = await api.post<{ token: string }>('/auth/telegram', { initData });
-      setToken(token);
-      const me = await api.get<CurrentUser>('/auth/me');
-      setUser(me);
-      setStatus('authenticated');
-    } catch (err) {
-      clearToken();
-      setErrorMessage(
-        err instanceof ApiError
-          ? err.message
-          : 'Could not sign in — check your connection and try again.',
-      );
-      setStatus('error');
     }
   }, []);
 

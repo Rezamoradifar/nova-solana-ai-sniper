@@ -11,10 +11,9 @@ import {
   isTMA,
   restoreInitData,
   initDataRaw,
-  mountMiniApp,
+  mountMiniAppSync,
   miniAppReady,
-  mountThemeParams,
-  isThemeParamsDark,
+  mountThemeParamsSync,
   bindThemeParamsCssVars,
   mountViewport,
   expandViewport,
@@ -28,23 +27,6 @@ import {
   isHapticFeedbackSupported,
 } from '@telegram-apps/sdk';
 
-/**
- * Flips <html data-theme> to match Telegram's real theme (dark/light) and
- * keeps it in sync as the user changes it inside Telegram — this is what
- * index.css's [data-theme="light"] / [data-theme="dark"] blocks respond to.
- * Design brief: dark-first, "fall back to your dark theme when colorScheme
- * is unavailable" — so outside Telegram (isTMA() false, e.g. plain-browser
- * local dev) this never runs and the html tag's default data-theme="dark"
- * (set in index.html) simply stands.
- */
-function syncTelegramTheme(): void {
-  const applyTheme = () => {
-    document.documentElement.dataset.theme = isThemeParamsDark() ? 'dark' : 'light';
-  };
-  applyTheme();
-  isThemeParamsDark.sub(applyTheme);
-}
-
 export interface TelegramInitResult {
   /** True only when actually running inside a Telegram client. Every other
    * export in this module is safe to call either way (SDK calls are simply
@@ -54,6 +36,14 @@ export interface TelegramInitResult {
 }
 
 let initialized = false;
+
+function safely(step: () => void): void {
+  try {
+    step();
+  } catch (err) {
+    console.warn('[telegram] optional Mini App setup step failed', err);
+  }
+}
 
 /**
  * Call exactly once, before rendering the app. Idempotent — a second call
@@ -70,22 +60,23 @@ export function initTelegram(): TelegramInitResult {
   init();
   restoreInitData();
 
-  mountMiniApp();
-  mountThemeParams();
-  bindThemeParamsCssVars();
-  syncTelegramTheme();
-
-  mountViewport().catch(() => {
-    // Best-effort — an unsupported/older Telegram client just keeps the
-    // browser's own viewport; nothing downstream depends on this succeeding.
+  // Everything below is cosmetic (theme, full-height, back button). Each step
+  // is isolated so one unsupported feature on some Telegram client can never
+  // throw out of here and block sign-in.
+  safely(() => mountMiniAppSync());
+  safely(() => {
+    // The GSP brand is dark-only, so Telegram's light theme is not mirrored.
+    mountThemeParamsSync();
+    bindThemeParamsCssVars();
   });
-  expandViewport();
-
-  if (isBackButtonSupported()) {
-    mountBackButton();
-  }
-
-  miniAppReady();
+  safely(() => {
+    mountViewport().catch(() => undefined);
+    expandViewport();
+  });
+  safely(() => {
+    if (isBackButtonSupported()) mountBackButton();
+  });
+  safely(() => miniAppReady());
 
   return { isInsideTelegram: true };
 }
