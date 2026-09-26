@@ -8,6 +8,7 @@ import { haptics } from '../lib/telegram.js';
 import { sol, usd } from '../lib/format.js';
 import type { AdminOverview } from '../lib/types.js';
 import { TopBar } from '../components/TopBar.js';
+import { AdminPerformance } from '../components/AdminPerformance.js';
 import { Button, Card, CardSkeleton, Input, Modal } from '../components/ui/index.js';
 
 type EditField = 'treasury' | 'fee' | 'level1' | 'level2';
@@ -347,6 +348,8 @@ export function Admin() {
               <Stat label="Referral paid" value={usd(data.stats.referralPaidUsd)} />
             </div>
           </section>
+
+          <AdminPerformance />
 
           <section className="flex flex-col gap-3">
             <SectionTitle icon={<Radar size={14} />}>System health</SectionTitle>

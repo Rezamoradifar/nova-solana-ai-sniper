@@ -13,6 +13,11 @@ import {
   setTreasuryWallet,
 } from '@nova/shared';
 import { requireAdminUser } from '../lib/adminAccess.js';
+import {
+  computePerformance,
+  INVALID_PAPER_HOLD_MS,
+  type ClosedPositionResult,
+} from '../lib/performance.js';
 
 const percentBody = z.object({ percent: z.number().min(0).max(100) });
 const treasuryBody = z.object({ address: z.string().min(1).max(100) });
@@ -170,5 +175,64 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     });
     fastify.log.warn({ userId: req.user.userId, enabled }, 'admin changed auto-buy');
     return reply.send({ ok: true });
+  });
+
+  const performanceQuery = z.object({
+    mode: z.enum(['paper', 'live']).default('paper'),
+    days: z.coerce.number().int().min(1).max(365).default(30),
+  });
+
+  fastify.get('/admin/performance', guard, async (req) => {
+    const { mode, days } = performanceQuery.parse(req.query);
+    const since = new Date(Date.now() - days * DAY_MS);
+    const positions = await fastify.prisma.position.findMany({
+      where: { status: 'CLOSED', isPaperTrade: mode === 'paper', closedAt: { gte: since } },
+      include: { token: { select: { dex: true } } },
+      orderBy: { closedAt: 'desc' },
+      take: 1000,
+    });
+    if (positions.length === 0)
+      return { mode, days, excludedInvalid: 0, ...computePerformance([]) };
+
+    const sells = await fastify.prisma.trade.findMany({
+      where: {
+        side: 'SELL',
+        status: 'CONFIRMED',
+        walletId: { in: [...new Set(positions.map((p) => p.walletId))] },
+        tokenId: { in: [...new Set(positions.map((p) => p.tokenId))] },
+        createdAt: { gte: new Date(Math.min(...positions.map((p) => p.createdAt.getTime()))) },
+      },
+      select: { walletId: true, tokenId: true, amountSol: true, createdAt: true },
+    });
+
+    let excludedInvalid = 0;
+    const rows: ClosedPositionResult[] = [];
+    for (const p of positions) {
+      const closedAt = p.closedAt ?? p.createdAt;
+      const holdMs = closedAt.getTime() - p.createdAt.getTime();
+      if (p.isPaperTrade && holdMs < INVALID_PAPER_HOLD_MS && p.exitReason === 'stop_loss') {
+        excludedInvalid++;
+        continue;
+      }
+      // A position's sells land between its open and a little after its close.
+      const windowEnd = closedAt.getTime() + 2 * 60_000;
+      const returnedSol = sells
+        .filter(
+          (t) =>
+            t.walletId === p.walletId &&
+            t.tokenId === p.tokenId &&
+            t.createdAt.getTime() >= p.createdAt.getTime() &&
+            t.createdAt.getTime() <= windowEnd,
+        )
+        .reduce((sum, t) => sum + t.amountSol, 0);
+      rows.push({
+        investedSol: p.amountSolInvested,
+        returnedSol,
+        exitReason: p.exitReason,
+        dex: p.token.dex,
+        holdMs,
+      });
+    }
+    return { mode, days, excludedInvalid, ...computePerformance(rows) };
   });
 }

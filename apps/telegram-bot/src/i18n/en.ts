@@ -190,6 +190,7 @@ export const en = {
       trailing_stop: 'trailing stop',
       emergency: 'emergency',
       manual_emergency: 'manual emergency',
+      time_stop: 'time stop',
     } as Record<string, string>,
     emergencyExitLabel: 'EMERGENCY EXIT',
     emergencyReasonLabels: {

@@ -1,3 +1,9 @@
+import {
+  buyPriceImpactTooHigh,
+  DEFAULT_ENTRY_EXIT_GUARDS,
+  shouldTimeStop,
+  type EntryExitGuards,
+} from './entryExitGuards.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { Connection, Keypair, PublicKey, VersionedTransaction } from '@solana/web3.js';
 import { getMint } from '@solana/spl-token';
@@ -408,6 +414,7 @@ export class PositionManager {
      */
     private readonly exitStrategyV2GloballyEnabled: boolean = false,
     private readonly exitV2Config: Tp1TrailingConfig = DEFAULT_TP1_TRAILING_CONFIG,
+    private readonly guards: EntryExitGuards = DEFAULT_ENTRY_EXIT_GUARDS,
   ) {}
 
   /**
@@ -1015,6 +1022,34 @@ export class PositionManager {
       throw new SafetyCheckError(reason, check.code, check.details);
     }
     latencyTracker.mark(traceId, 'filters_complete');
+
+    if (this.guards.maxBuyPriceImpactPercent > 0) {
+      const probe = await this.jupiter
+        .getQuote({
+          inputMint: SOL_MINT,
+          outputMint: params.mint,
+          amountLamports: BigInt(Math.floor(params.amountSol * LAMPORTS_PER_SOL)),
+          slippageBps: params.slippageBps,
+        })
+        .catch(() => undefined);
+      const impact = buyPriceImpactTooHigh(
+        probe?.priceImpactPct,
+        this.guards.maxBuyPriceImpactPercent,
+      );
+      if (impact.tooHigh) {
+        const reason = `price_impact_too_high: ${impact.impactPercent!.toFixed(2)}% > ${this.guards.maxBuyPriceImpactPercent}%`;
+        this.logger.warn(
+          {
+            walletId: params.walletId,
+            mint: params.mint,
+            location: 'positionManager.openPosition (price impact)',
+          },
+          `BUY CANCELLED\nReason:\n${reason}`,
+        );
+        latencyTracker.finish(traceId, 'failure');
+        throw new SafetyCheckError(reason);
+      }
+    }
     this.logger.debug(
       { walletId: params.walletId, mint: params.mint, paperTrading: this.paperTrading },
       'Wallet: safety check passed — Buy Executor starting',
@@ -1444,6 +1479,28 @@ export class PositionManager {
         );
         return { closed: false as const };
       }
+    }
+
+    if (
+      shouldTimeStop(
+        {
+          openedAt: position.createdAt,
+          now: new Date(),
+          entryPriceUsd: position.entryPriceUsd,
+          currentPriceUsd,
+          takeProfitStageReached: position.trailingActivatedAt != null,
+        },
+        this.guards,
+      )
+    ) {
+      this.logger.info(
+        { positionId, currentPriceUsd, entryPriceUsd: position.entryPriceUsd },
+        'time stop: position did not reach the minimum profit in time — closing',
+      );
+      return this.closePosition(position.id, position.walletId, encryptedSecret, encryptionKey, {
+        currentPriceUsd,
+        reason: 'time_stop',
+      });
     }
 
     const institutionalActive =

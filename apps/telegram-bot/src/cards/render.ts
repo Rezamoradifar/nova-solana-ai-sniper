@@ -433,7 +433,13 @@ export interface SellCardData {
   pnlPercent: number;
   holdingTimeMs: number;
   exitReason:
-    'take_profit' | 'stop_loss' | 'trailing_stop' | 'manual' | 'emergency' | 'manual_emergency';
+    | 'take_profit'
+    | 'stop_loss'
+    | 'trailing_stop'
+    | 'manual'
+    | 'emergency'
+    | 'manual_emergency'
+    | 'time_stop';
   highestProfitPercent?: number;
   lockedProfitPercent?: number;
   walletPublicKey: string;
@@ -449,6 +455,7 @@ const EXIT_REASON_LABELS: Record<SellCardData['exitReason'], string> = {
   manual: 'Manual Sell',
   emergency: 'Emergency Sell',
   manual_emergency: 'Manual Emergency Sell',
+  time_stop: 'Time Stop',
 };
 
 /**

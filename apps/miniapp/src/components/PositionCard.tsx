@@ -15,6 +15,7 @@ const EXIT_REASON_LABEL: Record<string, string> = {
   trailing_stop: 'Trailing stop',
   manual: 'Manual sell',
   manual_emergency: 'Emergency sell',
+  time_stop: 'Time stop',
 };
 
 export function PositionCard({ position, onAction }: PositionCardProps) {

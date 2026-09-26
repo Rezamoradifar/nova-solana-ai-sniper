@@ -1,3 +1,8 @@
+import {
+  ConfirmationScheduler,
+  evaluateConfirmation,
+  snapshotFromPair,
+} from './trading/entryConfirmation.js';
 import { Connection, type ParsedTransactionWithMeta } from '@solana/web3.js';
 import type { FastifyInstance } from 'fastify';
 import { getConnection, resolveAllRpcEndpoints } from './solana/connection.js';
@@ -43,7 +48,12 @@ import { securityGateStats } from './detection/securityGateStats.js';
 import { JupiterClient } from './solana/jupiter.js';
 import { DexScreenerClient } from './solana/dexscreener.js';
 import { TokenEventClassifier } from './detection/detectors.js';
-import { RiskAnalyzer, isFastPathCandidate, type LaunchableDex } from './detection/riskAnalyzer.js';
+import {
+  RiskAnalyzer,
+  isFastPathCandidate,
+  resolveRecentActivity,
+  type LaunchableDex,
+} from './detection/riskAnalyzer.js';
 import { extractMintFromParsedTx } from './detection/extractMint.js';
 import { MigrationMonitor } from './detection/migrationMonitor.js';
 import { DexRegistry } from './solana/dex/registry.js';
@@ -296,6 +306,11 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     app.config.SELL_PERMANENT_RETRY_BACKOFF_MAX_MS,
     app.config.EXIT_STRATEGY_V2_ENABLED,
     exitV2Config,
+    {
+      maxBuyPriceImpactPercent: app.config.MAX_BUY_PRICE_IMPACT_PERCENT,
+      timeStopMinutes: app.config.TIME_STOP_MINUTES,
+      timeStopMinProfitPercent: app.config.TIME_STOP_MIN_PROFIT_PERCENT,
+    },
   );
   if (!app.hasDecorator('positionManager')) {
     app.decorate('positionManager', positionManager);
@@ -1153,6 +1168,61 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       }
     }
 
+    // Wait-for-confirmation entry — see entryConfirmation.ts. Token age fails
+    // closed to 0 when unknown, so an undated token waits the full delay.
+    const confirmationDelayMs = app.config.ENTRY_CONFIRMATION_DELAY_MS;
+    const tokenAgeMs = resolveTokenAgeMs(Date.now(), riskFlags.pairCreatedAt);
+    if (confirmationDelayMs > 0 && tokenAgeMs < confirmationDelayMs) {
+      const initial = snapshotFromPair(
+        await dexScreener.getBestSolanaPair(mint).catch(() => undefined),
+      );
+      const waitMs = confirmationDelayMs - tokenAgeMs;
+      const scheduled = confirmationScheduler.schedule(
+        mint,
+        waitMs,
+        async () => {
+          const pair = await dexScreener.getBestSolanaPair(mint).catch(() => undefined);
+          const fresh = snapshotFromPair(pair);
+          const verdict = evaluateConfirmation(initial, fresh, {
+            maxPriceDropPercent: app.config.ENTRY_CONFIRMATION_MAX_PRICE_DROP_PERCENT,
+            maxLiquidityDropPercent: app.config.ENTRY_CONFIRMATION_MAX_LIQUIDITY_DROP_PERCENT,
+          });
+          if (!verdict.confirmed) {
+            app.log.info(
+              { mint, initial, fresh, reasons: verdict.reasons },
+              `BUY CANCELLED\nReason:\nentry_confirmation_failed: ${verdict.reasons.join(', ')}`,
+            );
+            return;
+          }
+          const refreshedFlags = {
+            ...riskFlags,
+            liquidityUsd: fresh.liquidityUsd ?? riskFlags.liquidityUsd,
+            priceChangeH1: pair?.priceChange?.h1 ?? riskFlags.priceChangeH1,
+            ...resolveRecentActivity(pair),
+          };
+          app.log.info({ mint, initial, fresh }, 'ENTRY CONFIRMED — evaluating auto-buy');
+          const confirmedResults = await autoTrader.evaluateAndMaybeBuy(
+            mint,
+            tokenId,
+            refreshedFlags,
+            aiScoreValue,
+            { ...pipelineTimestamps, aiScoringStartAt, aiScoringEndAt, decisionAt: Date.now() },
+            opportunityScore.finalScore,
+            resolveTokenAgeMs(Date.now(), riskFlags.pairCreatedAt),
+          );
+          metrics.increment('executedTrades', confirmedResults.filter((r) => r.bought).length);
+        },
+        (err) => app.log.error({ err, mint }, 'entry confirmation re-check failed'),
+      );
+      app.log.info(
+        { mint, tokenAgeMs, waitMs, scheduled, pending: confirmationScheduler.size },
+        scheduled
+          ? 'ENTRY CONFIRMATION: waiting before deciding to buy'
+          : 'ENTRY CONFIRMATION: already waiting or queue full — skipped',
+      );
+      return;
+    }
+
     const results = await autoTrader.evaluateAndMaybeBuy(
       mint,
       tokenId,
@@ -1163,10 +1233,12 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       // Dynamic Risk Tiers (2026-07-23): real on-chain token age, fails
       // closed to 0 (Tier A: ULTRA_EARLY) when DexScreener hasn't resolved a
       // pair-creation timestamp yet — see riskTier.ts's resolveTokenAgeMs.
-      resolveTokenAgeMs(Date.now(), riskFlags.pairCreatedAt),
+      tokenAgeMs,
     );
     metrics.increment('executedTrades', results.filter((r) => r.bought).length);
   }
+
+  const confirmationScheduler = new ConfirmationScheduler();
 
   const aiQueue = new PriorityConcurrencyQueue<AiQueueItem>(
     app.config.AI_QUEUE_CONCURRENCY,
@@ -1816,5 +1888,6 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       scannerConcurrencyGovernor.stop();
     }
     await dexRegistry.stopAll();
+    confirmationScheduler.stop();
   };
 }

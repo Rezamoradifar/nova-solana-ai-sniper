@@ -17,7 +17,7 @@ export type EvaluateExitReason = 'take_profit' | 'stop_loss' | 'trailing_stop';
 // safety signal); 'manual_emergency' by a user-initiated emergency close from
 // the API (see routes/positions.ts). Neither is ever returned by evaluateExit
 // itself — only accepted by closePosition's exit reason.
-export type ExitReason = EvaluateExitReason | 'emergency' | 'manual_emergency';
+export type ExitReason = EvaluateExitReason | 'emergency' | 'manual_emergency' | 'time_stop';
 
 export type PriceReconciliationSource =
   'jupiter_reverse_quote' | 'native_dex_reserves' | 'liquidity_collapse' | 'forced_after_ceiling';

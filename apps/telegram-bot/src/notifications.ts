@@ -27,7 +27,8 @@ export interface PositionExitNotification {
   symbol: string;
   mint?: string;
   dex?: string;
-  reason: 'take_profit' | 'stop_loss' | 'trailing_stop' | 'emergency' | 'manual_emergency';
+  reason:
+    'take_profit' | 'stop_loss' | 'trailing_stop' | 'emergency' | 'manual_emergency' | 'time_stop';
   pnlPercent: number;
   pnlUsd?: number;
   isPaperTrade?: boolean;

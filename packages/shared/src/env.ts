@@ -91,6 +91,18 @@ export const envSchema = z.object({
   // logic runs. Lets an operator dark-launch or kill a whole stage instantly,
   // without a redeploy, independent of what any individual user has configured.
   ENTRY_FILTER_ENABLED: booleanFlag(false),
+  // Wait-for-confirmation entry: a token younger than this is not bought on
+  // detection; it is re-checked once it reaches this age and bought only if its
+  // price and liquidity held up. 0 disables (buy on detection).
+  ENTRY_CONFIRMATION_DELAY_MS: z.coerce.number().int().min(0).max(3_600_000).default(0),
+  ENTRY_CONFIRMATION_MAX_PRICE_DROP_PERCENT: z.coerce.number().min(0).max(100).default(15),
+  ENTRY_CONFIRMATION_MAX_LIQUIDITY_DROP_PERCENT: z.coerce.number().min(0).max(100).default(30),
+  // Skip a buy whose own quote would move the price more than this (percent). 0 disables.
+  MAX_BUY_PRICE_IMPACT_PERCENT: z.coerce.number().min(0).max(100).default(0),
+  // Sell a position still below TIME_STOP_MIN_PROFIT_PERCENT after this many
+  // minutes (and before any take-profit stage has triggered). 0 disables.
+  TIME_STOP_MINUTES: z.coerce.number().min(0).max(1440).default(0),
+  TIME_STOP_MIN_PROFIT_PERCENT: z.coerce.number().min(-100).max(1000).default(10),
   DYNAMIC_SIZING_ENABLED: booleanFlag(false),
   PARTIAL_EXITS_ENABLED: booleanFlag(false),
   BEST_ROUTE_EXECUTION_ENABLED: booleanFlag(false),

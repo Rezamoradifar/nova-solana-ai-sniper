@@ -240,3 +240,29 @@ export interface AdminOverview {
     tokens24h: number;
   };
 }
+
+export interface PerformanceBucket {
+  key: string;
+  trades: number;
+  wins: number;
+  winRatePercent: number;
+  netSol: number;
+  roiPercent: number;
+}
+
+/** GET /admin/performance (apps/api/src/routes/admin.ts). */
+export interface AdminPerformance {
+  mode: 'paper' | 'live';
+  days: number;
+  excludedInvalid: number;
+  summary: PerformanceBucket & {
+    losses: number;
+    investedSol: number;
+    returnedSol: number;
+    avgWinPercent: number;
+    avgLossPercent: number;
+  };
+  byExitReason: PerformanceBucket[];
+  byDex: PerformanceBucket[];
+  byHoldTime: PerformanceBucket[];
+}

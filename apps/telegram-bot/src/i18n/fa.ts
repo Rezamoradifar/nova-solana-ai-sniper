@@ -195,6 +195,7 @@ export const fa = {
       trailing_stop: 'تریلینگ استاپ',
       emergency: 'اضطراری',
       manual_emergency: 'اضطراری دستی',
+      time_stop: 'خروج زمانی',
     } as Record<string, string>,
     emergencyExitLabel: 'خروج اضطراری',
     emergencyReasonLabels: {
