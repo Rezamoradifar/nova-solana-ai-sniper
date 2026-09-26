@@ -6,12 +6,15 @@ import {
   getOrCreateBusinessSettings,
   getScannerAutoBuyPauseReason,
   getScannerAutoBuyPauseState,
+  setPlatformFee,
+  setReferralLevel,
+  setReferralProgramEnabled,
   setKillSwitchState,
   setScannerAutoBuyPauseState,
   type Logger,
 } from '@nova/shared';
 import { fmtDate, fmtHoldingTimeShort, usd } from '../ui/format.js';
-import { checkFeeBudget, registerSettingsPanel } from './settingsPanel.js';
+import { registerSettingsPanel } from './settingsPanel.js';
 
 /** Restricts every command registered after this middleware to known admin Telegram IDs. */
 function requireAdmin(adminIds: Set<string>) {
@@ -205,23 +208,12 @@ export function registerAdminCommands(
       await ctx.reply('Usage: /setfee <percent> (0-100, e.g. `/setfee 20` for 20%)');
       return;
     }
-    const settings = await getOrCreateBusinessSettings(prisma);
     const feeBps = Math.round(percent * 100);
-    const budgetError = checkFeeBudget(settings, { feeBps });
-    if (budgetError) {
-      await ctx.reply(`❌ ${budgetError}`);
+    const error = await setPlatformFee(prisma, { telegramId: ctx.from?.id }, feeBps);
+    if (error) {
+      await ctx.reply(`❌ ${error}`);
       return;
     }
-    await prisma.businessSettings.update({
-      where: { id: settings.id },
-      data: { performanceFeeBps: feeBps },
-    });
-    await prisma.auditLog.create({
-      data: {
-        action: 'admin.set_performance_fee',
-        metadata: { adminId: ctx.from?.id, oldBps: settings.performanceFeeBps, newBps: feeBps },
-      },
-    });
     logger.warn({ adminId: ctx.from?.id, feeBps }, 'admin changed the performance fee');
     await ctx.reply(
       `💸 Performance fee set to *${percent}%*.\nUsers who already accepted the old rate will be prompted to re-accept before auto-trading again.`,
@@ -245,24 +237,12 @@ export function registerAdminCommands(
       );
       return;
     }
-    const settings = await getOrCreateBusinessSettings(prisma);
     const percentBps = Math.round(percent * 100);
-    const budgetError = checkFeeBudget(settings, { level, levelBps: percentBps });
-    if (budgetError) {
-      await ctx.reply(`❌ ${budgetError}`);
+    const error = await setReferralLevel(prisma, { telegramId: ctx.from?.id }, level, percentBps);
+    if (error) {
+      await ctx.reply(`❌ ${error}`);
       return;
     }
-    await prisma.referralLevelConfig.upsert({
-      where: { businessSettingsId_level: { businessSettingsId: settings.id, level } },
-      create: { businessSettingsId: settings.id, level, percentBps, enabled: true },
-      update: { percentBps },
-    });
-    await prisma.auditLog.create({
-      data: {
-        action: 'admin.set_referral_level',
-        metadata: { adminId: ctx.from?.id, level, percentBps },
-      },
-    });
     logger.warn(
       { adminId: ctx.from?.id, level, percentBps },
       'admin changed a referral level percentage',
@@ -300,17 +280,7 @@ export function registerAdminCommands(
       return;
     }
     const enabled = arg === 'on';
-    const settings = await getOrCreateBusinessSettings(prisma);
-    await prisma.businessSettings.update({
-      where: { id: settings.id },
-      data: { referralProgramEnabled: enabled },
-    });
-    await prisma.auditLog.create({
-      data: {
-        action: 'admin.toggle_referral_program',
-        metadata: { adminId: ctx.from?.id, enabled },
-      },
-    });
+    await setReferralProgramEnabled(prisma, { telegramId: ctx.from?.id }, enabled);
     logger.warn({ adminId: ctx.from?.id, enabled }, 'admin toggled the referral program');
     await ctx.reply(`🔗 Referral program ${enabled ? 'ENABLED' : 'DISABLED'}.`);
   });

@@ -5,6 +5,8 @@ export interface CurrentUser {
   id: string;
   email: string | null;
   role: 'ADMIN' | 'TRADER';
+  /** True for TELEGRAM_ADMIN_IDS members (or a DB ADMIN) — shows the Admin screen. */
+  isAdmin?: boolean;
   subscriptionTier: 'FREE' | 'PRO';
   referralCode: string | null;
 }
@@ -202,4 +204,39 @@ export interface Position {
   currentPriceUsd?: number | null;
   unrealizedPnlUsd?: number | null;
   token: Token;
+}
+
+/** GET /admin/overview (apps/api/src/routes/admin.ts). */
+export interface AdminOverview {
+  settings: {
+    treasuryWalletAddress: string | null;
+    envTreasuryWalletAddress: string;
+    performanceFeeBps: number;
+    referralProgramEnabled: boolean;
+    referralLevels: { level: number; percentBps: number; enabled: boolean }[];
+  };
+  trading: {
+    mode: 'LIVE' | 'PAPER' | null;
+    killSwitch: boolean;
+    autoBuyPaused: boolean;
+    autoBuyPausedReason: string | null;
+    activeSnipeConfigs: number;
+  };
+  stats: {
+    users: number;
+    newUsers24h: number;
+    openPositions: number;
+    trades24h: number;
+    totalTrades: number;
+    volumeSol24h: number;
+    volumeSolTotal: number;
+    feeRevenueUsd: number;
+    referralPaidUsd: number;
+  };
+  health: {
+    scannerState: string | null;
+    activeProvider: string | null;
+    tokens10m: number;
+    tokens24h: number;
+  };
 }

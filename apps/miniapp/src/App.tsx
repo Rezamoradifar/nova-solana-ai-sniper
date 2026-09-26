@@ -17,6 +17,7 @@ import { Settings } from './pages/Settings.js';
 import { Portfolio } from './pages/Portfolio.js';
 import { History } from './pages/History.js';
 import { Withdraw } from './pages/Withdraw.js';
+import { Admin } from './pages/Admin.js';
 
 /**
  * Premium-rebuild milestone (Increment 4): full navigation shell replaces
@@ -50,6 +51,7 @@ export function App() {
                   <Route path="/portfolio" element={<Portfolio />} />
                   <Route path="/history" element={<History />} />
                   <Route path="/withdraw" element={<Withdraw />} />
+                  <Route path="/admin" element={<Admin />} />
                   <Route path="*" element={<Home />} />
                 </Routes>
               </div>

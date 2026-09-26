@@ -9,6 +9,7 @@ import {
   PieChart,
   Settings as SettingsIcon,
   Shield,
+  ShieldCheck,
   User,
   Wallet,
 } from 'lucide-react';
@@ -50,7 +51,7 @@ export function Profile() {
           </p>
           <div className="mt-1 flex gap-1.5">
             <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-secondary">
-              {user?.role ?? 'TRADER'}
+              {user?.isAdmin ? 'ADMIN' : (user?.role ?? 'TRADER')}
             </span>
             <span className="rounded-full bg-accent-gradient px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#07090F]">
               {user?.subscriptionTier ?? 'FREE'}
@@ -58,6 +59,21 @@ export function Profile() {
           </div>
         </div>
       </Card>
+
+      {user?.isAdmin && (
+        <NavLink
+          to="/admin"
+          onClick={() => haptics.tap()}
+          className="flex items-center gap-3 rounded-card border border-success/30 bg-success/10 px-4 py-4"
+        >
+          <ShieldCheck size={20} className="text-success" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-text-primary">Admin panel</p>
+            <p className="text-xs text-text-secondary">Fees, treasury, trading controls</p>
+          </div>
+          <ChevronRight size={16} className="text-success" />
+        </NavLink>
+      )}
 
       <Card className="flex flex-col divide-y divide-white/[0.06] p-0">
         {LINKS.map(({ to, label, icon: Icon }) => (

@@ -2,7 +2,11 @@ import { InlineKeyboard, type Bot, type Context, type NextFunction } from 'gramm
 import type { PrismaClient } from '@prisma/client';
 import {
   getOrCreateBusinessSettings,
-  isValidSolanaPublicKey,
+  parsePercentToBps,
+  setPlatformFee,
+  setReferralLevel,
+  setReferralProgramEnabled,
+  setTreasuryWallet,
   type BusinessSettingsWithLevels,
   type Logger,
 } from '@nova/shared';
@@ -19,34 +23,6 @@ function pct(bps: number): string {
 function levelBps(settings: BusinessSettingsWithLevels, level: number): number {
   const cfg = settings.referralLevels.find((l) => l.level === level);
   return cfg && cfg.enabled ? cfg.percentBps : 0;
-}
-
-/** Parses "20", "20%", "12.5" into basis points; undefined if not a 0-100 number. */
-export function parsePercentToBps(text: string): number | undefined {
-  const n = Number(text.trim().replace(/%$/, '').replace(',', '.'));
-  if (!Number.isFinite(n) || n < 0 || n > 100) return undefined;
-  return Math.round(n * 100);
-}
-
-/**
- * Referral levels are paid out of the platform fee, so the enabled levels
- * together may never exceed it. Returns an error message, or undefined if OK.
- */
-export function checkFeeBudget(
-  settings: Pick<BusinessSettingsWithLevels, 'performanceFeeBps' | 'referralLevels'>,
-  change: { feeBps?: number; level?: number; levelBps?: number },
-): string | undefined {
-  const feeBps = change.feeBps ?? settings.performanceFeeBps;
-  const levels = new Map<number, number>();
-  for (const l of settings.referralLevels) levels.set(l.level, l.enabled ? l.percentBps : 0);
-  if (change.level !== undefined && change.levelBps !== undefined) {
-    levels.set(change.level, change.levelBps);
-  }
-  const referralTotal = [...levels.values()].reduce((a, b) => a + b, 0);
-  if (referralTotal > feeBps) {
-    return `Referral levels total ${pct(referralTotal)}, which is more than the platform fee ${pct(feeBps)}. Referral rewards are paid out of the fee — raise the fee or lower a level first.`;
-  }
-  return undefined;
 }
 
 export function renderPanel(
@@ -131,16 +107,7 @@ export function registerSettingsPanel(
       pendingEdits.delete(chatId);
       const settings = await getOrCreateBusinessSettings(prisma);
       const enabled = !settings.referralProgramEnabled;
-      await prisma.businessSettings.update({
-        where: { id: settings.id },
-        data: { referralProgramEnabled: enabled },
-      });
-      await prisma.auditLog.create({
-        data: {
-          action: 'admin.toggle_referral_program',
-          metadata: { adminId: ctx.from?.id, enabled },
-        },
-      });
+      await setReferralProgramEnabled(prisma, { telegramId: ctx.from?.id }, enabled);
       logger.warn({ adminId: ctx.from?.id, enabled }, 'admin toggled the referral program');
       await showPanel(ctx, true);
       return;
@@ -193,55 +160,18 @@ export async function applyEdit(
   field: PanelField,
   text: string,
 ): Promise<string | undefined> {
-  const settings = await getOrCreateBusinessSettings(prisma);
-
+  const actor = { telegramId: adminId };
+  let error: string | undefined;
   if (field === 'treasury') {
-    if (!isValidSolanaPublicKey(text)) return 'That is not a valid Solana wallet address.';
-    await prisma.businessSettings.update({
-      where: { id: settings.id },
-      data: { treasuryWalletAddress: text },
-    });
-    await prisma.auditLog.create({
-      data: {
-        action: 'admin.set_treasury_wallet',
-        metadata: { adminId, old: settings.treasuryWalletAddress, new: text },
-      },
-    });
-    logger.warn({ adminId, treasury: text }, 'admin changed the treasury wallet');
-    return undefined;
+    error = await setTreasuryWallet(prisma, actor, text);
+  } else {
+    const bps = parsePercentToBps(text);
+    if (bps === undefined) return 'Send a number between 0 and 100.';
+    error =
+      field === 'fee'
+        ? await setPlatformFee(prisma, actor, bps)
+        : await setReferralLevel(prisma, actor, field === 'level1' ? 1 : 2, bps);
   }
-
-  const bps = parsePercentToBps(text);
-  if (bps === undefined) return 'Send a number between 0 and 100.';
-
-  if (field === 'fee') {
-    const budgetError = checkFeeBudget(settings, { feeBps: bps });
-    if (budgetError) return budgetError;
-    await prisma.businessSettings.update({
-      where: { id: settings.id },
-      data: { performanceFeeBps: bps },
-    });
-    await prisma.auditLog.create({
-      data: {
-        action: 'admin.set_performance_fee',
-        metadata: { adminId, oldBps: settings.performanceFeeBps, newBps: bps },
-      },
-    });
-    logger.warn({ adminId, feeBps: bps }, 'admin changed the performance fee');
-    return undefined;
-  }
-
-  const level = field === 'level1' ? 1 : 2;
-  const budgetError = checkFeeBudget(settings, { level, levelBps: bps });
-  if (budgetError) return budgetError;
-  await prisma.referralLevelConfig.upsert({
-    where: { businessSettingsId_level: { businessSettingsId: settings.id, level } },
-    create: { businessSettingsId: settings.id, level, percentBps: bps, enabled: true },
-    update: { percentBps: bps, enabled: true },
-  });
-  await prisma.auditLog.create({
-    data: { action: 'admin.set_referral_level', metadata: { adminId, level, percentBps: bps } },
-  });
-  logger.warn({ adminId, level, percentBps: bps }, 'admin changed a referral level percentage');
-  return undefined;
+  if (!error) logger.warn({ adminId, field, value: text }, 'admin changed a business setting');
+  return error;
 }

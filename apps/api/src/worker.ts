@@ -26,6 +26,8 @@ declare module 'fastify' {
     // /metrics/rpc, same "same instance, not a second one" convention as
     // every other decorator above.
     scannerConcurrencyGovernor?: ScannerConcurrencyGovernor;
+    /** The mode the worker actually started in (LIVE_TRADING can be forced to PAPER). */
+    tradingMode?: 'LIVE' | 'PAPER';
   }
 }
 import {
@@ -233,6 +235,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       );
     }
   }
+  app.decorate('tradingMode', paperTrading ? 'PAPER' : 'LIVE');
   app.log.warn(
     paperTrading
       ? '📝 PAPER TRADING mode — auto-buys are simulated, no real swaps or wallet keys used'

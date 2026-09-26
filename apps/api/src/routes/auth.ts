@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { isAdminUser } from '../lib/adminAccess.js';
 import type { User } from '@prisma/client';
 import { z } from 'zod';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
@@ -234,6 +235,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
       id: user.id,
       email: user.email,
       role: user.role,
+      isAdmin: isAdminUser(user, fastify.config.TELEGRAM_ADMIN_IDS),
       subscriptionTier: user.subscriptionTier,
       referralCode: user.referralCode,
     };

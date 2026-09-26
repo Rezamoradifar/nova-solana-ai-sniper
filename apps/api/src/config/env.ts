@@ -44,6 +44,7 @@ export const apiEnvSchema = envSchema.pick({
   OLLAMA_MODEL: true,
   CONSENSUS_MIN_WEIGHTED_CONFIDENCE: true,
   TELEGRAM_BOT_TOKEN: true,
+  TELEGRAM_ADMIN_IDS: true,
   TELEGRAM_CHAT_ID: true,
   TWITTER_BEARER_TOKEN: true,
   TWITTER_SEARCH_QUERY: true,

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
-import { applyEdit, checkFeeBudget, parsePercentToBps, renderPanel } from './settingsPanel.js';
+import { checkFeeBudget, parsePercentToBps } from '@nova/shared';
+import { applyEdit, renderPanel } from './settingsPanel.js';
 
 const TREASURY = '7TxyBBtqKN6CuhA1jG7zwpuUG4DgwvwzZLctJ2Dno5zP';
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as Logger;
