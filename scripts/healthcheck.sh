@@ -29,5 +29,16 @@ echo "=== snipe configs ==="
 sql "SELECT \"buyAmountSol\" || ' SOL, minAiScore=' || \"minAiScore\" || ', active=' || \"isActive\" || ', autoBuy=' || \"autoBuyOnLaunch\" FROM snipe_configs;"
 
 echo
+echo "=== buy pipeline, last 2h ==="
+LOGS2H="$(docker compose logs api --since=2h 2>&1)"
+echo "token accepted: $(grep -c 'TOKEN ACCEPTED' <<<"$LOGS2H")"
+echo "buy started:    $(grep -c '"msg":"BUY STARTED"' <<<"$LOGS2H")"
+echo "buy executed:   $(grep -c '"msg":"BUY EXECUTED' <<<"$LOGS2H")"
+echo "--- why buys were cancelled ---"
+grep -oE 'BUY CANCELLED\\nReason:\\n[^"]{0,70}' <<<"$LOGS2H" | sed -E 's/BUY CANCELLED\\nReason:\\n//; s/[=:][^ ]*//g' | sort | uniq -c | sort -rn | head -8
+echo "--- security gate blocks ---"
+grep -oE 'SECURITY GATE BLOCKED CANDIDATE\\nReasons:\\n[^"]*' <<<"$LOGS2H" | sed -E 's/.*Reasons:\\n//' | tr ',' '\n' | sed 's/^ *//' | sort | uniq -c | sort -rn | head -8
+
+echo
 echo "=== recent api warnings/errors ==="
 docker compose logs api --since=30m 2>&1 | grep -E '"level":(40|50|60)' | grep -o '"msg":"[^"]*"' | sort | uniq -c | sort -rn | head -10
