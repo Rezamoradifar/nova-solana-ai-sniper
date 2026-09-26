@@ -41,6 +41,7 @@ export async function buildApp() {
     trustProxy: true,
   });
 
+  app.decorate('backgroundWorkersReady', false);
   await app.register(configPlugin);
   await app.register(helmet);
   await app.register(cors, { origin: app.config.CORS_ORIGIN, credentials: true });
