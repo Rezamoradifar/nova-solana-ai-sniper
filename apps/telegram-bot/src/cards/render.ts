@@ -98,80 +98,203 @@ interface Theme {
   glow: string;
 }
 
-const PROFIT_THEME: Theme = { accent: '#22d97a', accentSoft: '#7cf5b6', glow: '#0f5c34' };
-const LOSS_THEME: Theme = { accent: '#f5433c', accentSoft: '#ff8f89', glow: '#5c1512' };
-const NEUTRAL_THEME: Theme = { accent: '#4f8cff', accentSoft: '#9dc0ff', glow: '#12305c' };
+const PROFIT_THEME: Theme = { accent: '#22d97a', accentSoft: '#a6f7cf', glow: '#1fbf6c' };
+const LOSS_THEME: Theme = { accent: '#f5433c', accentSoft: '#ffb3ae', glow: '#e0342d' };
+const NEUTRAL_THEME: Theme = { accent: '#4f8cff', accentSoft: '#b9d1ff', glow: '#3a6fe0' };
 
-function cardShell(theme: Theme, bodySvg: string): string {
+// Bundled into the runtime images (see the Dockerfiles); DejaVu is the fallback.
+const SANS = "Vazirmatn, 'DejaVu Sans', sans-serif";
+const MONO = "'JetBrains Mono', 'DejaVu Sans Mono', monospace";
+const TEXT = '#f2f4fa';
+const MUTED = '#7d879e';
+const FAINT = '#4a5369';
+
+/** Rough advance width, good enough to size pills and fit headline numbers. */
+function approxWidth(text: string, fontSize: number, mono = false): number {
+  return text.length * fontSize * (mono ? 0.6 : 0.56);
+}
+
+function fitFontSize(text: string, maxWidth: number, maxSize: number, mono = true): number {
+  const size = maxWidth / (text.length * (mono ? 0.6 : 0.56));
+  return Math.floor(Math.min(maxSize, size));
+}
+
+function cardShell(
+  theme: Theme,
+  status: string,
+  bodySvg: string,
+  footer: [string, string],
+): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0a0e17"/>
-      <stop offset="100%" stop-color="#141a2e"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="50%" cy="0%" r="75%">
-      <stop offset="0%" stop-color="${theme.glow}" stop-opacity="0.55"/>
+    <radialGradient id="heroGlow" cx="50%" cy="36%" r="55%">
+      <stop offset="0%" stop-color="${theme.glow}" stop-opacity="0.34"/>
+      <stop offset="55%" stop-color="${theme.glow}" stop-opacity="0.08"/>
       <stop offset="100%" stop-color="${theme.glow}" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.07"/>
-      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.03"/>
+    <radialGradient id="dotFade" cx="50%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#fff" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" width="34" height="34" patternUnits="userSpaceOnUse">
+      <circle cx="17" cy="17" r="1.3" fill="#ffffff" fill-opacity="0.07"/>
+    </pattern>
+    <mask id="dotMask"><rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="url(#dotFade)"/></mask>
+    <linearGradient id="accentText" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${theme.accentSoft}"/>
+      <stop offset="100%" stop-color="${theme.accent}"/>
     </linearGradient>
-    <filter id="softBlur" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="40"/>
-    </filter>
-    <clipPath id="logoClip"><circle cx="0" cy="0" r="56"/></clipPath>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="${theme.accentSoft}"/>
+      <stop offset="100%" stop-color="${theme.accent}"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.055"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.02"/>
+    </linearGradient>
+    <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${theme.accent}" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="${theme.accent}" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="logoClip"><circle cx="0" cy="0" r="44"/></clipPath>
   </defs>
-  <rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="url(#bg)"/>
-  <rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="url(#glow)"/>
+  <rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="#07090f"/>
+  <rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="url(#dots)" mask="url(#dotMask)"/>
+  <rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="url(#heroGlow)"/>
+  <rect x="0" y="0" width="${CARD_WIDTH}" height="6" fill="url(#mark)"/>
+
+  <g transform="translate(64,62)">
+    <rect width="48" height="48" rx="13" fill="url(#mark)"/>
+    <polyline points="11,33 20,24 27,29 37,15" fill="none" stroke="#07090f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="37" cy="15" r="3.5" fill="#07090f"/>
+  </g>
+  <text x="128" y="94" font-family="${SANS}" font-size="25" font-weight="700" letter-spacing="4" fill="${TEXT}">GSP BANK SNIPER</text>
+  ${pill(CARD_WIDTH - 64, 86, status, theme.accent, 'end', true)}
+
   ${bodySvg}
-  <text x="${CARD_WIDTH / 2}" y="${CARD_HEIGHT - 40}" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="#5b6478" letter-spacing="2">GSP BANK SNIPER</text>
+
+  <line x1="64" y1="1262" x2="${CARD_WIDTH - 64}" y2="1262" stroke="#ffffff" stroke-opacity="0.07"/>
+  <text x="64" y="1300" font-family="${MONO}" font-size="19" font-weight="500" fill="${FAINT}">${escapeXml(footer[0])}</text>
+  <text x="${CARD_WIDTH - 64}" y="1300" text-anchor="end" font-family="${MONO}" font-size="19" font-weight="500" fill="${FAINT}">${escapeXml(footer[1])}</text>
 </svg>`;
 }
 
-function glassPanel(x: number, y: number, w: number, h: number, theme: Theme): string {
-  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="24" fill="url(#panel)" stroke="${theme.accent}" stroke-opacity="0.25" stroke-width="1.5"/>`;
+/** Chip width for a 20px semibold label with 1px letter-spacing and 20px padding. */
+function pillWidth(label: string): number {
+  const caps = label.replace(/[^A-Z0-9%+-]/g, '').length;
+  const lower = label.length - caps;
+  return Math.round(caps * 14.2 + lower * 11.2 + 40);
 }
 
-/** One label/value row inside a stat grid — two columns, `col` 0 or 1. */
-function statCell(x: number, y: number, label: string, value: string): string {
-  return `
-    <text x="${x}" y="${y}" font-family="Arial, sans-serif" font-size="22" fill="#8992a8">${escapeXml(label)}</text>
-    <text x="${x}" y="${y + 34}" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#f0f2f8">${escapeXml(value)}</text>`;
+/**
+ * Rounded label chip. `anchor` is where (x) sits: the chip's start, centre or end.
+ * With `dot`, a small status dot is drawn before the label.
+ */
+function pill(
+  x: number,
+  cy: number,
+  label: string,
+  color: string,
+  anchor: 'start' | 'middle' | 'end' = 'start',
+  dot = false,
+): string {
+  const fontSize = 20;
+  const padX = 20;
+  const dotSpace = dot ? 20 : 0;
+  const w = pillWidth(label) + dotSpace;
+  const h = 40;
+  const left = anchor === 'start' ? x : anchor === 'middle' ? x - w / 2 : x - w;
+  return `<g>
+    <rect x="${left}" y="${cy - h / 2}" width="${w}" height="${h}" rx="${h / 2}" fill="${color}" fill-opacity="0.12" stroke="${color}" stroke-opacity="0.35"/>
+    ${dot ? `<circle cx="${left + padX + 4}" cy="${cy}" r="5" fill="${color}"/>` : ''}
+    <text x="${left + padX + dotSpace}" y="${cy + 7}" font-family="${SANS}" font-size="${fontSize}" font-weight="600" letter-spacing="1" fill="${color}">${escapeXml(label)}</text>
+  </g>`;
 }
 
-function statGrid(startY: number, rows: [string, string][]): { svg: string; endY: number } {
-  const colX = [80, 570];
-  const rowHeight = 108;
-  let svg = '';
-  rows.forEach((row, i) => {
-    const col = i % 2;
-    const rowIdx = Math.floor(i / 2);
-    const [label, value] = row;
-    svg += statCell(colX[col]!, startY + rowIdx * rowHeight, label, value);
+/** A row of pills centred on `cx`. */
+function pillRow(cx: number, cy: number, items: { label: string; color: string }[]): string {
+  const gap = 14;
+  const widths = items.map((i) => pillWidth(i.label));
+  const total = widths.reduce((a, b) => a + b, 0) + gap * (items.length - 1);
+  let x = cx - total / 2;
+  return items
+    .map((item, idx) => {
+      const svg = pill(x, cy, item.label, item.color);
+      x += widths[idx]! + gap;
+      return svg;
+    })
+    .join('');
+}
+
+function glassPanel(x: number, y: number, w: number, h: number): string {
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="28" fill="url(#panel)" stroke="#ffffff" stroke-opacity="0.08"/>`;
+}
+
+/** Stat cells laid out `cols` per row inside a panel, with hairline dividers. */
+function statPanel(y: number, cols: number, cells: [string, string, string?][]): string {
+  const x = 64;
+  const w = CARD_WIDTH - 128;
+  const rowH = 104;
+  const rows = Math.ceil(cells.length / cols);
+  const colW = w / cols;
+  let svg = glassPanel(x, y, w, rows * rowH);
+  for (let c = 1; c < cols; c++) {
+    svg += `<line x1="${x + c * colW}" y1="${y + 22}" x2="${x + c * colW}" y2="${y + rows * rowH - 22}" stroke="#ffffff" stroke-opacity="0.06"/>`;
+  }
+  for (let r = 1; r < rows; r++) {
+    svg += `<line x1="${x + 28}" y1="${y + r * rowH}" x2="${x + w - 28}" y2="${y + r * rowH}" stroke="#ffffff" stroke-opacity="0.06"/>`;
+  }
+  cells.forEach(([label, value, color], i) => {
+    const cx = x + (i % cols) * colW + 30;
+    const cy = y + Math.floor(i / cols) * rowH;
+    const size = fitFontSize(value, colW - 50, 29);
+    svg += `
+    <text x="${cx}" y="${cy + 40}" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">${escapeXml(label.toUpperCase())}</text>
+    <text x="${cx}" y="${cy + 78}" font-family="${MONO}" font-size="${size}" font-weight="600" fill="${color ?? TEXT}">${escapeXml(value)}</text>`;
   });
-  const rowCount = Math.ceil(rows.length / 2);
-  return { svg, endY: startY + rowCount * rowHeight };
+  return svg;
 }
 
-function logoBlock(x: number, y: number, symbol: string, logoDataUri: string | undefined): string {
+function logoBlock(
+  x: number,
+  y: number,
+  symbol: string,
+  logoDataUri: string | undefined,
+  theme: Theme,
+): string {
+  const ring = `<circle r="50" fill="none" stroke="${theme.accent}" stroke-opacity="0.6" stroke-width="3"/>`;
   if (logoDataUri) {
     return `<g transform="translate(${x},${y})">
-      <circle r="58" fill="#1c2338"/>
-      <image href="${logoDataUri}" x="-56" y="-56" width="112" height="112" clip-path="url(#logoClip)"/>
+      <circle r="44" fill="#161c2c"/>
+      <image href="${logoDataUri}" x="-44" y="-44" width="88" height="88" clip-path="url(#logoClip)"/>
+      ${ring}
     </g>`;
   }
   const initial = escapeXml((symbol || '?').slice(0, 1).toUpperCase());
   return `<g transform="translate(${x},${y})">
-    <circle r="58" fill="#1c2338"/>
-    <text x="0" y="16" text-anchor="middle" font-family="Arial, sans-serif" font-size="48" font-weight="700" fill="#6b7690">${initial}</text>
+    <circle r="44" fill="#161c2c"/>
+    <text x="0" y="14" text-anchor="middle" font-family="${SANS}" font-size="40" font-weight="700" fill="${MUTED}">${initial}</text>
+    ${ring}
   </g>`;
 }
 
-function header(icon: string, title: string, theme: Theme): string {
+function tokenRow(t: TradeCardTokenInfo, logoDataUri: string | undefined, theme: Theme): string {
+  const name = truncateText(t.name || t.symbol || t.mint.slice(0, 8), 22);
+  const symbol = t.symbol ? `$${truncateText(t.symbol, 12)}` : '';
+  const symbolW = symbol ? approxWidth(symbol, 24, true) + 18 : 0;
   return `
-    <text x="80" y="120" font-family="Arial, sans-serif" font-size="40" font-weight="800" fill="${theme.accent}">${icon} ${escapeXml(title)}</text>
-    <rect x="80" y="145" width="200" height="6" rx="3" fill="${theme.accent}"/>`;
+    ${logoBlock(118, 222, t.symbol ?? '', logoDataUri, theme)}
+    <text x="192" y="212" font-family="${SANS}" font-size="44" font-weight="700" fill="${TEXT}">${escapeXml(name)}</text>
+    <text x="192" y="256" font-family="${MONO}" font-size="24" font-weight="500" fill="${MUTED}">${escapeXml(symbol)}</text>
+    ${pill(192 + symbolW, 248, t.dex, MUTED)}`;
+}
+
+function signed(n: number, digits: number, suffix = ''): string {
+  return `${n >= 0 ? '+' : '-'}${Math.abs(n).toFixed(digits)}${suffix}`;
+}
+
+function signedUsd(n: number): string {
+  return `${n >= 0 ? '+' : '-'}${fmtUsd(Math.abs(n))}`;
 }
 
 // --- Buy card ------------------------------------------------------------
@@ -221,42 +344,72 @@ export function buildBuyCardSvg(data: BuyCardData, logoDataUri: string | undefin
   const theme = PROFIT_THEME;
   const t = data.token;
   const risk = computeRiskRating(t);
-  const name = truncateText(t.name || t.symbol || t.mint.slice(0, 8), 22);
-  const symbol = t.symbol ? `$${truncateText(t.symbol, 12)}` : '';
+  const amount = `${data.amountSol.toFixed(4)} SOL`;
+  const heroSize = fitFontSize(amount, 900, 128);
+  const aiScore = t.aiScore !== undefined ? Math.max(0, Math.min(100, t.aiScore)) : undefined;
 
-  let body = header('🟢', 'BUY EXECUTED', theme);
-  body += logoBlock(140, 250, t.symbol ?? '', logoDataUri);
+  let body = tokenRow(t, logoDataUri, theme);
   body += `
-    <text x="230" y="238" font-family="Arial, sans-serif" font-size="38" font-weight="700" fill="#f0f2f8">${escapeXml(name)}</text>
-    <text x="230" y="280" font-family="Arial, sans-serif" font-size="28" fill="#8992a8">${escapeXml(symbol)}</text>
-    <rect x="230" y="298" width="${44 + t.dex.length * 15}" height="40" rx="20" fill="${theme.accent}" fill-opacity="0.15"/>
-    <text x="252" y="325" font-family="Arial, sans-serif" font-size="22" font-weight="600" fill="${theme.accent}">${escapeXml(t.dex)}</text>`;
+    <text x="${CARD_WIDTH / 2}" y="392" text-anchor="middle" font-family="${SANS}" font-size="22" font-weight="600" letter-spacing="6" fill="${MUTED}">POSITION OPENED</text>
+    <text x="${CARD_WIDTH / 2}" y="${392 + heroSize * 1.05}" text-anchor="middle" font-family="${MONO}" font-size="${heroSize}" font-weight="700" fill="url(#accentText)">${escapeXml(amount)}</text>
+    <text x="${CARD_WIDTH / 2}" y="${452 + heroSize * 1.05}" text-anchor="middle" font-family="${MONO}" font-size="30" font-weight="500" fill="${TEXT}" xml:space="preserve">≈ ${escapeXml(fmtUsd(data.estimatedUsdValue))}<tspan fill="${FAINT}"> · </tspan><tspan fill="${MUTED}">@ ${escapeXml(fmtPrice(data.entryPriceUsd))}</tspan></text>`;
+  body += pillRow(CARD_WIDTH / 2, 700, [
+    { label: `Risk ${risk.label}`, color: risk.color },
+    ...(t.priceChangeH1 !== undefined
+      ? [
+          {
+            label: `1h ${signed(t.priceChangeH1, 1, '%')}`,
+            color: t.priceChangeH1 >= 0 ? PROFIT_THEME.accent : LOSS_THEME.accent,
+          },
+        ]
+      : []),
+  ]);
 
-  body += glassPanel(60, 400, 960, 620, theme);
-  const { svg: gridSvg } = statGrid(470, [
+  // AI score gauge.
+  body += glassPanel(64, 770, CARD_WIDTH - 128, 170);
+  body += `
+    <text x="100" y="828" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">AI SCORE</text>
+    <text x="${CARD_WIDTH - 100}" y="832" text-anchor="end" font-family="${MONO}" font-size="34" font-weight="700" fill="${TEXT}">${aiScore !== undefined ? `${aiScore.toFixed(0)}/100` : '—'}</text>
+    <rect x="100" y="868" width="${CARD_WIDTH - 200}" height="16" rx="8" fill="#ffffff" fill-opacity="0.07"/>
+    ${aiScore !== undefined ? `<rect x="100" y="868" width="${Math.max(16, ((CARD_WIDTH - 200) * aiScore) / 100)}" height="16" rx="8" fill="url(#mark)"/>` : ''}
+    <text x="100" y="916" font-family="${MONO}" font-size="16" fill="${FAINT}">0</text>
+    <text x="${CARD_WIDTH - 100}" y="916" text-anchor="end" font-family="${MONO}" font-size="16" fill="${FAINT}">100</text>`;
+
+  body += statPanel(966, 4, [
     ['Entry Price', fmtPrice(data.entryPriceUsd)],
-    ['Buy Amount', `${data.amountSol.toFixed(4)} SOL`],
-    ['Est. USD Value', fmtUsd(data.estimatedUsdValue)],
     ['Market Cap', fmtUsd(t.marketCapUsd)],
     ['Liquidity', fmtUsd(t.liquidityUsd)],
-    ['AI Score', t.aiScore !== undefined ? `${t.aiScore.toFixed(0)}/100` : '—'],
-    ['Risk Rating', risk.label],
-    ['Whale Activity', 'N/A'],
     ['Top Holders', t.holderCount !== undefined ? `${t.holderCount}` : '—'],
     [
-      'Momentum (1h)',
-      t.priceChangeH1 !== undefined
-        ? `${t.priceChangeH1 >= 0 ? '+' : ''}${t.priceChangeH1.toFixed(1)}%`
-        : '—',
+      'Top 10 Hold',
+      t.top10HolderPercent !== undefined ? `${t.top10HolderPercent.toFixed(1)}%` : '—',
+    ],
+    [
+      'Mint Auth',
+      t.mintAuthorityRevoked === undefined ? '—' : t.mintAuthorityRevoked ? 'Revoked' : 'Active',
+      t.mintAuthorityRevoked === false ? LOSS_THEME.accent : undefined,
+    ],
+    [
+      'Freeze Auth',
+      t.freezeAuthorityRevoked === undefined
+        ? '—'
+        : t.freezeAuthorityRevoked
+          ? 'Revoked'
+          : 'Active',
+      t.freezeAuthorityRevoked === false ? LOSS_THEME.accent : undefined,
+    ],
+    [
+      'LP',
+      t.lpBurnedOrLocked === undefined ? '—' : t.lpBurnedOrLocked ? 'Locked' : 'Unlocked',
+      t.lpBurnedOrLocked === false ? LOSS_THEME.accent : undefined,
     ],
   ]);
-  body += gridSvg;
 
-  body += `
-    <text x="80" y="1090" font-family="Arial, sans-serif" font-size="20" fill="#5b6478">Wallet: ${escapeXml(shortAddr(data.walletPublicKey))}   ·   Position: ${escapeXml(shortAddr(data.positionId))}</text>
-    <text x="80" y="1122" font-family="Arial, sans-serif" font-size="20" fill="#5b6478">Tx: ${escapeXml(shortAddr(data.signature))}   ·   ${escapeXml(data.timestamp.toISOString().slice(0, 16).replace('T', ' '))} UTC</text>`;
-
-  return cardShell(theme, body);
+  const when = data.timestamp.toISOString().slice(0, 16).replace('T', ' ');
+  return cardShell(theme, 'BUY EXECUTED', body, [
+    `Wallet ${shortAddr(data.walletPublicKey)}  ·  Tx ${shortAddr(data.signature)}`,
+    `${when} UTC`,
+  ]);
 }
 
 export async function renderBuyCardPng(data: BuyCardData): Promise<Buffer> {
@@ -298,59 +451,88 @@ const EXIT_REASON_LABELS: Record<SellCardData['exitReason'], string> = {
   manual_emergency: 'Manual Emergency Sell',
 };
 
+/**
+ * Entry -> peak -> exit drawn from the three real PnL points only (0%, highest
+ * profit if known, final PnL) — a trade summary, not an intraday price chart.
+ */
+function tradePath(y: number, h: number, pnl: number, peak: number | undefined): string {
+  const x0 = 110;
+  const x1 = CARD_WIDTH - 110;
+  const pts: { x: number; v: number; label?: string }[] = [{ x: x0, v: 0 }];
+  if (peak !== undefined && peak > Math.max(0, pnl)) {
+    pts.push({ x: x0 + (x1 - x0) * 0.62, v: peak, label: `PEAK ${signed(peak, 1, '%')}` });
+  }
+  pts.push({ x: x1, v: pnl });
+  const lo = Math.min(...pts.map((p) => p.v));
+  const hi = Math.max(...pts.map((p) => p.v));
+  const span = hi - lo || 1;
+  const top = y + 44;
+  const bottom = y + h - 44;
+  const py = (v: number) => bottom - ((v - lo) / span) * (bottom - top);
+
+  let d = `M ${pts[0]!.x} ${py(pts[0]!.v)}`;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1]!;
+    const b = pts[i]!;
+    const mx = (a.x + b.x) / 2;
+    d += ` C ${mx} ${py(a.v)}, ${mx} ${py(b.v)}, ${b.x} ${py(b.v)}`;
+  }
+  const area = `${d} L ${x1} ${bottom + 30} L ${x0} ${bottom + 30} Z`;
+  const zeroY = py(0);
+
+  let svg = `
+    <line x1="${x0}" y1="${zeroY}" x2="${x1}" y2="${zeroY}" stroke="#ffffff" stroke-opacity="0.12" stroke-dasharray="6 8"/>
+    <path d="${area}" fill="url(#area)"/>
+    <path d="${d}" fill="none" stroke="url(#mark)" stroke-width="5" stroke-linecap="round"/>`;
+  for (const p of pts) {
+    svg += `<circle cx="${p.x}" cy="${py(p.v)}" r="9" fill="#07090f" stroke="${TEXT}" stroke-width="3"/>`;
+    if (p.label) {
+      svg += `<text x="${p.x}" y="${py(p.v) - 22}" text-anchor="middle" font-family="${MONO}" font-size="18" font-weight="600" fill="${MUTED}">${escapeXml(p.label)}</text>`;
+    }
+  }
+  return svg;
+}
+
 export function buildSellCardSvg(data: SellCardData, logoDataUri: string | undefined): string {
   const isProfit = data.pnlPercent >= 0;
   const theme = isProfit ? PROFIT_THEME : LOSS_THEME;
   const t = data.token;
   const risk = computeRiskRating(t);
-  const name = truncateText(t.name || t.symbol || t.mint.slice(0, 8), 22);
-  const symbol = t.symbol ? `$${truncateText(t.symbol, 12)}` : '';
+  const pnlText = signed(data.pnlPercent, 1, '%');
+  const heroSize = fitFontSize(pnlText, 920, 184);
 
-  let body = header(isProfit ? '🟢' : '🔴', 'POSITION CLOSED', theme);
-  body += logoBlock(140, 250, t.symbol ?? '', logoDataUri);
+  let body = tokenRow(t, logoDataUri, theme);
   body += `
-    <text x="230" y="238" font-family="Arial, sans-serif" font-size="38" font-weight="700" fill="#f0f2f8">${escapeXml(name)}</text>
-    <text x="230" y="280" font-family="Arial, sans-serif" font-size="28" fill="#8992a8">${escapeXml(symbol)}</text>
-    <rect x="230" y="298" width="${44 + t.dex.length * 15}" height="40" rx="20" fill="${theme.accent}" fill-opacity="0.15"/>
-    <text x="252" y="325" font-family="Arial, sans-serif" font-size="22" font-weight="600" fill="${theme.accent}">${escapeXml(t.dex)}</text>`;
-
-  body += `
-    <text x="700" y="270" text-anchor="end" font-family="Arial, sans-serif" font-size="56" font-weight="800" fill="${theme.accent}">${isProfit ? '+' : ''}${data.pnlPercent.toFixed(1)}%</text>
-    <text x="700" y="305" text-anchor="end" font-family="Arial, sans-serif" font-size="24" fill="#8992a8">PnL</text>`;
-
-  body += glassPanel(60, 400, 960, 760, theme);
-  const { svg: gridSvg } = statGrid(470, [
-    ['Entry Price', fmtPrice(data.entryPriceUsd)],
-    ['Exit Price', fmtPrice(data.exitPriceUsd)],
-    ['Buy Amount', `${data.buyAmountSol.toFixed(4)} SOL`],
-    ['Sell Amount', `${data.sellAmountSol.toFixed(4)} SOL`],
-    ['Profit', `${data.profitSol >= 0 ? '+' : ''}${data.profitSol.toFixed(4)} SOL`],
-    ['Profit (USD)', `${data.profitUsd >= 0 ? '+' : '-'}${fmtUsd(Math.abs(data.profitUsd))}`],
-    ['ROI', `${data.roiPercent >= 0 ? '+' : ''}${data.roiPercent.toFixed(1)}%`],
-    ['Holding Time', formatHoldingTime(data.holdingTimeMs)],
-    ['Exit Reason', EXIT_REASON_LABELS[data.exitReason]],
-    [
-      'Highest Profit',
-      data.highestProfitPercent !== undefined
-        ? `${data.highestProfitPercent >= 0 ? '+' : ''}${data.highestProfitPercent.toFixed(1)}%`
-        : '—',
-    ],
-    [
-      'Locked Profit',
-      data.lockedProfitPercent !== undefined
-        ? `${data.lockedProfitPercent >= 0 ? '+' : ''}${data.lockedProfitPercent.toFixed(1)}%`
-        : '—',
-    ],
-    ['AI Score', t.aiScore !== undefined ? `${t.aiScore.toFixed(0)}/100` : '—'],
-    ['Risk Rating', risk.label],
+    <text x="${CARD_WIDTH / 2}" y="378" text-anchor="middle" font-family="${SANS}" font-size="22" font-weight="600" letter-spacing="6" fill="${MUTED}">PROFIT / LOSS</text>
+    <text x="${CARD_WIDTH / 2}" y="${372 + heroSize * 0.98}" text-anchor="middle" font-family="${MONO}" font-size="${heroSize}" font-weight="700" fill="url(#accentText)">${escapeXml(pnlText)}</text>
+    <text x="${CARD_WIDTH / 2}" y="${436 + heroSize * 0.98}" text-anchor="middle" font-family="${MONO}" font-size="36" font-weight="600" fill="${TEXT}" xml:space="preserve">${escapeXml(signed(data.profitSol, 4, ' SOL'))}<tspan fill="${FAINT}"> · </tspan><tspan fill="${theme.accentSoft}">${escapeXml(signedUsd(data.profitUsd))}</tspan></text>`;
+  body += pillRow(CARD_WIDTH / 2, 690, [
+    { label: EXIT_REASON_LABELS[data.exitReason], color: theme.accent },
+    { label: `Held ${formatHoldingTime(data.holdingTimeMs)}`, color: MUTED },
   ]);
-  body += gridSvg;
 
+  body += glassPanel(64, 740, CARD_WIDTH - 128, 230);
+  body += tradePath(740, 230, data.pnlPercent, data.highestProfitPercent);
   body += `
-    <text x="80" y="1220" font-family="Arial, sans-serif" font-size="20" fill="#5b6478">Wallet: ${escapeXml(shortAddr(data.walletPublicKey))}   ·   Position: ${escapeXml(shortAddr(data.positionId))}</text>
-    <text x="80" y="1252" font-family="Arial, sans-serif" font-size="20" fill="#5b6478">Buy Tx: ${escapeXml(shortAddr(data.buySignature))}   ·   Sell Tx: ${escapeXml(shortAddr(data.sellSignature))}</text>`;
+    <text x="100" y="1000" font-family="${SANS}" font-size="16" font-weight="600" letter-spacing="1.5" fill="${MUTED}">ENTRY <tspan font-family="${MONO}" fill="${TEXT}">${escapeXml(fmtPrice(data.entryPriceUsd))}</tspan></text>
+    <text x="${CARD_WIDTH - 100}" y="1000" text-anchor="end" font-family="${SANS}" font-size="16" font-weight="600" letter-spacing="1.5" fill="${MUTED}">EXIT <tspan font-family="${MONO}" fill="${TEXT}">${escapeXml(fmtPrice(data.exitPriceUsd))}</tspan></text>`;
 
-  return cardShell(theme, body);
+  const pct = (n: number | undefined) => (n !== undefined ? signed(n, 1, '%') : '—');
+  body += statPanel(1030, 4, [
+    ['Invested', `${data.buyAmountSol.toFixed(4)} SOL`],
+    ['Returned', `${data.sellAmountSol.toFixed(4)} SOL`],
+    ['Highest Profit', pct(data.highestProfitPercent)],
+    ['Locked Profit', pct(data.lockedProfitPercent)],
+  ]);
+  body += `
+    <text x="100" y="1178" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">ROI <tspan font-family="${MONO}" font-size="22" fill="${theme.accent}">${escapeXml(signed(data.roiPercent, 1, '%'))}</tspan></text>
+    <text x="${CARD_WIDTH / 2}" y="1178" text-anchor="middle" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">AI SCORE <tspan font-family="${MONO}" font-size="22" fill="${TEXT}">${t.aiScore !== undefined ? `${t.aiScore.toFixed(0)}/100` : '—'}</tspan></text>
+    <text x="${CARD_WIDTH - 100}" y="1178" text-anchor="end" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">RISK <tspan font-size="22" fill="${risk.color}">${risk.label}</tspan></text>`;
+
+  return cardShell(theme, 'POSITION CLOSED', body, [
+    `Wallet ${shortAddr(data.walletPublicKey)}  ·  Buy ${shortAddr(data.buySignature)}`,
+    `Sell ${shortAddr(data.sellSignature)}`,
+  ]);
 }
 
 export async function renderSellCardPng(data: SellCardData): Promise<Buffer> {

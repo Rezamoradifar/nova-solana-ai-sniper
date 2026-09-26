@@ -146,7 +146,7 @@ function sellData(overrides: Partial<SellCardData> = {}): SellCardData {
 }
 
 describe('buildBuyCardSvg', () => {
-  it('renders valid SVG containing the real trade fields, honest Whale Activity, and Top Holders (not "Total Holders")', () => {
+  it('renders valid SVG containing the real trade fields and Top Holders (not "Total Holders")', () => {
     const svg = buildBuyCardSvg(buyData(), undefined);
     expect(svg.startsWith('<svg')).toBe(true);
     expect(svg).toContain('BUY EXECUTED');
@@ -155,10 +155,8 @@ describe('buildBuyCardSvg', () => {
     expect(svg).toContain('PUMPFUN');
     expect(svg).toContain('0.5000 SOL');
     expect(svg).toContain('82/100');
-    expect(svg).toContain('Whale Activity');
-    expect(svg).toContain('N/A');
-    expect(svg).toContain('Top Holders');
-    expect(svg).not.toContain('Total Holders');
+    expect(svg).toMatch(/Top Holders/i);
+    expect(svg).not.toMatch(/Total Holders/i);
   });
 
   it('escapes an untrusted token name/symbol instead of injecting raw markup', () => {
@@ -172,8 +170,8 @@ describe('buildBuyCardSvg', () => {
 
   it('falls back to "—" for entry price when it is not a finite number', () => {
     const svg = buildBuyCardSvg(buyData({ entryPriceUsd: 0 }), undefined);
-    expect(svg).toContain('Entry Price');
-    expect(svg).toMatch(/Entry Price[\s\S]*?—/);
+    expect(svg).toMatch(/Entry Price/i);
+    expect(svg).toMatch(/Entry Price[\s\S]*?—/i);
   });
 });
 
@@ -221,7 +219,7 @@ describe('buildSellCardSvg', () => {
       sellData({ highestProfitPercent: undefined, lockedProfitPercent: undefined }),
       undefined,
     );
-    expect(svg).toContain('Highest Profit');
-    expect(svg).toContain('Locked Profit');
+    expect(svg).toMatch(/Highest Profit/i);
+    expect(svg).toMatch(/Locked Profit/i);
   });
 });
