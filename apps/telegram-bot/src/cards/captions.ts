@@ -1,13 +1,20 @@
 import { escapeMd } from '../ui/format.js';
 import type { BuyCardData, SellCardData } from './render.js';
 
+/** Fixed-precision number with an explicit sign; a value that rounds to zero gets none. */
+function signedFixed(n: number, digits: number): string {
+  const r = Math.abs(n).toFixed(digits);
+  if (Number(r) === 0) return r;
+  return `${n > 0 ? '+' : '-'}${r}`;
+}
+
 /** Caption sent with the BUY card photo — exact format requested. */
 export function buildBuyCaption(data: BuyCardData): string {
   const tokenLabel = escapeMd(
     data.token.symbol ? `$${data.token.symbol}` : data.token.mint.slice(0, 8),
   );
   return (
-    `🎯 *Nova Sniper AI*\n\n` +
+    `🎯 *GSP Bank Sniper*\n\n` +
     `Successfully entered a new position.\n\n` +
     `Token: ${tokenLabel}\n` +
     `DEX: ${escapeMd(data.token.dex)}\n\n` +
@@ -28,19 +35,17 @@ export function buildShareCaption(data: SellCardData, botUsername: string | unde
   const tokenLabel = escapeMd(
     data.token.symbol ? `$${data.token.symbol}` : data.token.mint.slice(0, 8),
   );
-  const profitSign = data.profitSol >= 0 ? '+' : '';
-  const pnlSign = data.pnlPercent >= 0 ? '+' : '';
   const botLine = botUsername ? `https://t.me/${escapeMd(botUsername)}` : '';
   return (
-    `🚀 Trade completed with Nova Sniper AI\n\n` +
-    `💰 Profit: ${pnlSign}${data.pnlPercent.toFixed(0)}%\n\n` +
-    `💎 ${profitSign}${data.profitSol.toFixed(2)} SOL\n\n` +
-    `📈 ROI: ${pnlSign}${data.roiPercent.toFixed(0)}%\n\n` +
+    `🚀 Trade completed with GSP Bank Sniper\n\n` +
+    `💰 Profit: ${signedFixed(data.pnlPercent, 1)}%\n\n` +
+    `💎 ${signedFixed(data.profitSol, 4)} SOL\n\n` +
+    `📈 ROI: ${signedFixed(data.roiPercent, 1)}%\n\n` +
     (data.token.aiScore !== undefined
       ? `🤖 AI Score: ${data.token.aiScore.toFixed(0)}/100\n\n`
       : '') +
     `${tokenLabel} on ${escapeMd(data.token.dex)}\n\n` +
-    `Trade faster with Nova Sniper AI.\n` +
+    `Trade faster with GSP Bank Sniper.\n` +
     botLine
   ).trim();
 }

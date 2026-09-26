@@ -93,7 +93,7 @@ export function Home() {
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-6 sm:max-w-xl sm:gap-8">
       <TopBar
-        title={user?.subscriptionTier === 'PRO' ? 'Nova Pro' : 'Nova AI Sniper'}
+        title={user?.subscriptionTier === 'PRO' ? 'GSP Bank Pro' : 'GSP Bank Sniper'}
         subtitle="Welcome back"
       />
 

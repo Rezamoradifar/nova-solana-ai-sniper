@@ -18,7 +18,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <>
       <div className="border-b border-surface-border px-5 py-5">
-        <div className="text-lg font-bold text-white">Nova Sniper</div>
+        <div className="text-lg font-bold text-white">GSP Bank Sniper</div>
         <div className="text-xs text-slate-500">AI Solana Trading</div>
       </div>
       <nav className="flex-1 space-y-1 px-3 py-4">
@@ -62,7 +62,7 @@ export function Layout() {
 
       {/* Mobile top bar with hamburger toggle — only shown below md. */}
       <div className="fixed inset-x-0 top-0 z-30 flex items-center justify-between border-b border-surface-border bg-surface-raised px-4 py-3 md:hidden">
-        <div className="text-base font-bold text-white">Nova Sniper</div>
+        <div className="text-base font-bold text-white">GSP Bank Sniper</div>
         <button
           onClick={() => setMobileNavOpen(true)}
           className="rounded-lg p-2 text-slate-300 hover:bg-surface-hover"

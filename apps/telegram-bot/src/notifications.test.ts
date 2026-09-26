@@ -666,7 +666,7 @@ describe('NotificationService — trade cards (notifyBuyCard/notifySellCard)', (
     expect(new Set(chatIds)).toEqual(new Set(['OWNER_CHAT', '111', '222']));
     const captions = new Set(sendPhoto.mock.calls.map((c) => c[2].caption));
     expect(captions.size).toBe(1); // byte-identical caption to every recipient
-    expect([...captions][0]).toContain('Nova Sniper AI');
+    expect([...captions][0]).toContain('GSP Bank Sniper');
   });
 
   it('notifyBuyCard never throws even when every send fails (e.g. bot blocked everywhere)', async () => {
@@ -691,8 +691,8 @@ describe('NotificationService — trade cards (notifyBuyCard/notifySellCard)', (
 
     expect(sendPhoto).toHaveBeenCalledTimes(3);
     expect(caption).toBeDefined();
-    expect(caption).toContain('Trade completed with Nova Sniper AI');
-    expect(caption).toContain('+1.84 SOL');
+    expect(caption).toContain('Trade completed with GSP Bank Sniper');
+    expect(caption).toContain('+1.8400 SOL');
     const sentCaptions = new Set(sendPhoto.mock.calls.map((c) => c[2].caption));
     expect(sentCaptions).toEqual(new Set([caption]));
   });

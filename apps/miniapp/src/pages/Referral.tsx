@@ -36,7 +36,7 @@ export function Referral() {
 
   const copyInvite = async () => {
     if (!referrals.data?.referralCode) return;
-    const text = `Join me on Nova AI Sniper — use my referral code: ${referrals.data.referralCode}`;
+    const text = `Join me on GSP Bank Sniper — use my referral code: ${referrals.data.referralCode}`;
     await navigator.clipboard.writeText(text).catch(() => {});
     haptics.success();
     setCopied(true);

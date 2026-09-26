@@ -122,7 +122,7 @@ export class EcosystemTelegramTrendClient {
     afterMessageId?: number,
   ): Promise<EcosystemTelegramSignal[]> {
     const res = await fetch(`https://t.me/s/${encodeURIComponent(channel)}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NovaSniperBot/1.0)' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GSPBankSniperBot/1.0)' },
     });
     if (!res.ok) {
       throw new Error(`Telegram channel preview fetch failed for ${channel}: ${res.status}`);

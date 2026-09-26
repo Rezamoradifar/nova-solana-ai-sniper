@@ -46,7 +46,7 @@ describe('buildBuyCaption', () => {
   it('matches the exact requested format', () => {
     const caption = buildBuyCaption(buyData());
     expect(caption).toBe(
-      '🎯 *Nova Sniper AI*\n\n' +
+      '🎯 *GSP Bank Sniper*\n\n' +
         'Successfully entered a new position.\n\n' +
         'Token: $RAGEGUY\n' +
         'DEX: PUMPFUN\n\n' +
@@ -75,13 +75,13 @@ describe('buildShareCaption', () => {
   it('matches the exact requested format, including the bot deep link', () => {
     const caption = buildShareCaption(sellData(), 'YourBot');
     expect(caption).toBe(
-      '🚀 Trade completed with Nova Sniper AI\n\n' +
-        '💰 Profit: +245%\n\n' +
-        '💎 +1.84 SOL\n\n' +
-        '📈 ROI: +245%\n\n' +
+      '🚀 Trade completed with GSP Bank Sniper\n\n' +
+        '💰 Profit: +245.0%\n\n' +
+        '💎 +1.8400 SOL\n\n' +
+        '📈 ROI: +245.0%\n\n' +
         '🤖 AI Score: 97/100\n\n' +
         '$RAGEGUY on PUMPFUN\n\n' +
-        'Trade faster with Nova Sniper AI.\n' +
+        'Trade faster with GSP Bank Sniper.\n' +
         'https://t.me/YourBot',
     );
   });
@@ -97,16 +97,27 @@ describe('buildShareCaption', () => {
       }),
       'YourBot',
     );
-    expect(caption).toContain('Profit: -50%');
-    expect(caption).toContain('-0.50 SOL');
-    expect(caption).toContain('ROI: -50%');
+    expect(caption).toContain('Profit: -50.0%');
+    expect(caption).toContain('-0.5000 SOL');
+    expect(caption).toContain('ROI: -50.0%');
     expect(caption).not.toContain('AI Score');
+  });
+
+  it('regression: a break-even trade never shows "+-0%" or "-0.00 SOL"', () => {
+    const caption = buildShareCaption(
+      sellData({ profitSol: -0.00001, profitUsd: -0.001, roiPercent: -0.01, pnlPercent: 0.01 }),
+      'YourBot',
+    );
+    expect(caption).toContain('Profit: 0.0%');
+    expect(caption).toContain('💎 0.0000 SOL');
+    expect(caption).toContain('ROI: 0.0%');
+    expect(caption).not.toContain('+-');
   });
 
   it('omits the bot link entirely when the username could not be resolved', () => {
     const caption = buildShareCaption(sellData(), undefined);
     expect(caption).not.toContain('t.me');
-    expect(caption.endsWith('Trade faster with Nova Sniper AI.')).toBe(true);
+    expect(caption.endsWith('Trade faster with GSP Bank Sniper.')).toBe(true);
   });
 
   it('regression: escapes a "_" in the bot username so Telegram\'s legacy Markdown parser never rejects the send', () => {

@@ -32,7 +32,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         <Card className="flex flex-col items-center gap-3 p-6 text-center">
           <p className="text-lg font-semibold text-text-primary">Open in Telegram</p>
           <p className="text-sm text-text-secondary">
-            Nova AI Sniper is a Telegram Mini App — open it from the bot to sign in.
+            GSP Bank Sniper is a Telegram Mini App — open it from the bot to sign in.
           </p>
         </Card>
       </div>
