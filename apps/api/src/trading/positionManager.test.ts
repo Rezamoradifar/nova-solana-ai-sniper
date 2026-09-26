@@ -1004,6 +1004,7 @@ describe('PositionManager notification content', () => {
           id: 'position-1',
           tokenId: 'token-1',
           walletId: 'wallet-1',
+          isPaperTrade: true,
           entryPriceUsd: 0.001,
           amountToken: 1000,
           amountSolInvested: 0.01,
@@ -1741,6 +1742,67 @@ describe('PositionManager zero-balance reconciliation (regression: live incident
     expect(notifyError).toHaveBeenCalledTimes(1);
     expect(notifyError.mock.calls[0]![1]).toMatch(/wallet holds 0/);
   });
+
+  it('still sells a real position for real after LIVE_TRADING is switched off', async () => {
+    const getQuote = vi.fn();
+    const getParsedTokenAccountsByOwner = vi.fn().mockResolvedValue({ value: [] });
+    const prisma = {
+      positionCloseClaim: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      position: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          status: 'OPEN',
+          id: 'position-1',
+          tokenId: 'token-1',
+          walletId: 'wallet-1',
+          isPaperTrade: false,
+          entryPriceUsd: 0.0006949,
+          amountToken: 11169682606,
+          amountSolInvested: 0.1,
+          highWaterMarkUsd: 0.0007101,
+          trailingStopPercent: 15,
+          closedAt: null,
+          createdAt: new Date('2026-07-11T15:45:57Z'),
+          token: {
+            mint: 'GnM6XZ7DN9KSPW2ZVMNqCggsxjnxHMGb2t4kiWrUpump',
+            dex: 'PUMPSWAP',
+            poolAddress: 'DW6rLxPNi9nH42jinmToY8ii13UaeeDmC9sanLu2zUxD',
+            symbol: 'WAGMI',
+            name: 'WAGMI',
+            decimals: 9,
+          },
+        }),
+        update: vi.fn().mockResolvedValue({ id: 'position-1', status: 'CLOSED' }),
+      },
+      trade: { create: vi.fn().mockResolvedValue({ id: 'trade-1' }) },
+    } as never;
+
+    const manager = new PositionManager(
+      prisma,
+      { getParsedTokenAccountsByOwner, sendTransaction: vi.fn() } as never,
+      { prepareSwap: vi.fn(), getQuote } as never,
+      { getBestSolanaPair: vi.fn() } as never,
+      fakeLogger(),
+      fakeSafety(),
+      { notifyError: vi.fn() } as never,
+      true, // paper trading
+      undefined,
+      undefined,
+      undefined,
+      0,
+    );
+
+    await manager.closePosition('position-1', 'wallet-1', 'enc', 'key', {
+      currentPriceUsd: 0.0005859,
+    });
+
+    // Real path: the live wallet balance is read; the simulated quote-only path is not used.
+    expect(getParsedTokenAccountsByOwner).toHaveBeenCalled();
+    expect(getQuote).not.toHaveBeenCalled();
+  });
 });
 
 describe('PositionManager concurrent close protection (production blocking fix, 2026-07-14)', () => {
@@ -1756,6 +1818,7 @@ describe('PositionManager concurrent close protection (production blocking fix, 
       id: 'position-1',
       tokenId: 'token-1',
       walletId: 'wallet-1',
+      isPaperTrade: true,
       entryPriceUsd: 0.001,
       amountToken: 1000,
       amountSolInvested: 0.01,

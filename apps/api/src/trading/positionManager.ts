@@ -1802,6 +1802,9 @@ export class PositionManager {
       where: { id: positionId },
       include: { token: true },
     });
+    // A position sells the way it was bought: a real position is still sold
+    // for real after LIVE_TRADING is switched off, and vice versa.
+    const simulate = position.isPaperTrade;
 
     // Re-checked now that positionCloseLock is held — a full close that won
     // the race (or a duplicate partial-sell decision queued behind the lock)
@@ -1843,7 +1846,7 @@ export class PositionManager {
     let outAmountLamports: number;
     let signature: string;
 
-    if (this.paperTrading) {
+    if (simulate) {
       const quote = await this.jupiter.getQuote({
         inputMint: position.token.mint,
         outputMint: SOL_MINT,
@@ -1965,7 +1968,7 @@ export class PositionManager {
         amountToken: sellAmountToken,
         priceUsd: currentPriceUsd,
         txSignature: signature,
-        isPaperTrade: this.paperTrading,
+        isPaperTrade: simulate,
         confirmedAt: new Date(),
       },
     });
@@ -2051,7 +2054,7 @@ export class PositionManager {
           : 0,
       realizedPnlUsd: realizedPnlUsdThisTier,
       remainingPositionPercent,
-      isPaperTrade: this.paperTrading,
+      isPaperTrade: simulate,
     });
 
     return { sold: true as const, position: updated, signature };
@@ -2129,6 +2132,9 @@ export class PositionManager {
       where: { id: positionId },
       include: { token: true },
     });
+    // A position sells the way it was bought: a real position is still sold
+    // for real after LIVE_TRADING is switched off, and vice versa.
+    const simulate = position.isPaperTrade;
 
     // Re-checked now that positionCloseLock is held (not just at whatever
     // moment the caller decided to close): a second, now-redundant close
@@ -2169,7 +2175,7 @@ export class PositionManager {
     let soldAmountToken: number;
     let signature: string;
 
-    if (this.paperTrading) {
+    if (simulate) {
       const quote = await this.jupiter.getQuote({
         inputMint: position.token.mint,
         outputMint: SOL_MINT,
@@ -2419,7 +2425,7 @@ export class PositionManager {
         amountToken: soldAmountToken,
         priceUsd: exit.currentPriceUsd,
         txSignature: signature,
-        isPaperTrade: this.paperTrading,
+        isPaperTrade: simulate,
         confirmedAt: new Date(),
       },
     });
@@ -2497,7 +2503,7 @@ export class PositionManager {
       amountSol: outAmountLamports / LAMPORTS_PER_SOL,
       priceUsd: exit.currentPriceUsd || undefined,
       signature,
-      isPaperTrade: this.paperTrading,
+      isPaperTrade: simulate,
     });
 
     if (exit.reason) {
@@ -2518,7 +2524,7 @@ export class PositionManager {
         reason: exit.reason,
         pnlPercent,
         pnlUsd: realizedPnlUsd,
-        isPaperTrade: this.paperTrading,
+        isPaperTrade: simulate,
         entryPriceUsd: display.entryPriceUsd,
         athUsd: display.athUsd,
         lockedProfitPercent: display.lockedProfitPercent,
