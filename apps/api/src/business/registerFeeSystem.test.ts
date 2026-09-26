@@ -165,7 +165,10 @@ function fakePrisma(overrides: {
           referralProgramEnabled: true,
           maxReferralDepth: 2,
           feeSystemActivatedAt: FEE_SYSTEM_ACTIVATED_AT,
-          referralLevels: [{ level: 1, percentBps: 1000, enabled: true }],
+          referralLevels: [
+            { level: 1, percentBps: 1000, enabled: true },
+            { level: 2, percentBps: 500, enabled: true },
+          ],
         }
       : overrides.businessSettings,
   );
@@ -623,6 +626,32 @@ describe('registerFeeSystem — real on-chain payout integration (2026-07-23)', 
     expect(payoutParams.referralRewards[0]).toMatchObject({
       referrerUserId: 'user-2',
       payoutPublicKey: 'ReferrerWalletPublicKey1111111111111111111',
+    });
+  });
+
+  it('pays the platform share to the admin-panel treasury wallet when one is set, else the .env one', async () => {
+    await fireEvent({ positionId: 'position-1', status: 'CLOSED', realizedPnlUsd: 100 });
+    expect(mockPayoutExecutor.mock.calls[0]![0]).toMatchObject({
+      treasuryAddress: 'TreasuryWalletPublicKey111111111111111111',
+    });
+
+    mockPayoutExecutor.mockClear();
+    await fireEvent(
+      { positionId: 'position-2', status: 'CLOSED', realizedPnlUsd: 100 },
+      {
+        businessSettings: {
+          id: 'settings-1',
+          performanceFeeBps: 2000,
+          referralProgramEnabled: true,
+          maxReferralDepth: 2,
+          feeSystemActivatedAt: FEE_SYSTEM_ACTIVATED_AT,
+          treasuryWalletAddress: 'PanelTreasuryPublicKey1111111111111111111',
+          referralLevels: [{ level: 1, percentBps: 1000, enabled: true }],
+        },
+      },
+    );
+    expect(mockPayoutExecutor.mock.calls[0]![0]).toMatchObject({
+      treasuryAddress: 'PanelTreasuryPublicKey1111111111111111111',
     });
   });
 });

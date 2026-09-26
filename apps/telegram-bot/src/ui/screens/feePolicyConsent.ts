@@ -32,10 +32,8 @@ export async function renderFeePolicyConsent(
     ? settings.referralLevels.filter((l) => l.enabled)
     : [];
 
-  // Section 14 (2026-07-18): referral rewards are now a fixed percentage of
-  // net profit directly (registerFeeSystem.ts's calculateFixedProfitDistribution),
-  // not a cut of the platform fee shown above — this wording used to say "of
-  // the platform fee," which stopped being true once that computation changed.
+  // Referral rewards are a percentage of net profit, paid out of the platform
+  // fee (see calculateProfitDistribution in @nova/shared).
   const referralLines =
     enabledLevels.length > 0
       ? enabledLevels

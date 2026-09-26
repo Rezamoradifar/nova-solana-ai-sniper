@@ -75,7 +75,16 @@ async function main() {
 
   const api = { baseUrl: `http://127.0.0.1:${env.API_PORT}`, jwtSecret: env.JWT_SECRET };
 
-  registerAdminCommands(bot, prisma, adminIds, logger, redis);
+  // Shown in /admin as the fallback when no treasury is set in the panel; the
+  // api service validates this variable at boot.
+  registerAdminCommands(
+    bot,
+    prisma,
+    adminIds,
+    logger,
+    redis,
+    process.env.PLATFORM_TREASURY_WALLET_ADDRESS,
+  );
   registerUiRouter(bot, {
     prisma,
     encryptionKey: env.ENCRYPTION_KEY,

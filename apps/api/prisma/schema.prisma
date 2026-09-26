@@ -1282,6 +1282,10 @@ model BusinessSettings {
   // purely on when the TRADE closed, never on the user's own createdAt.
   feeSystemActivatedAt DateTime @default(now())
 
+  // Admin-panel override for where the platform's share is paid; null falls
+  // back to the PLATFORM_TREASURY_WALLET_ADDRESS env value.
+  treasuryWalletAddress String?
+
   // Final Opportunity Score (Section 7, 2026-07-18) — admin-configurable
   // weights for the 5-component weighted composite (see
   // packages/shared/src/opportunityScore.ts's calculateOpportunityScore).

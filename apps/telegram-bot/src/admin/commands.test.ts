@@ -16,6 +16,8 @@ function fakeBot() {
     command: (name: string, ...handlers: Handler[]) => {
       commands.set(name, handlers);
     },
+    callbackQuery: () => undefined,
+    on: () => undefined,
   } as unknown as Bot;
   return {
     bot,

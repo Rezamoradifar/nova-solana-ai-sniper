@@ -3,8 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
 import {
   calculatePerformanceFee,
-  calculateFixedProfitDistribution,
-  FIXED_USER_SHARE_BPS,
+  calculateProfitDistribution,
   getOrCreateBusinessSettings,
   isEligibleForFeeProcessing,
   resolveReferralChain,
@@ -230,20 +229,15 @@ export async function processProfitableClose(
   const chain = settings.referralProgramEnabled
     ? await resolveReferralChain(deps.prisma, position.wallet.userId, settings.maxReferralDepth)
     : [];
-  // Section 14 (2026-07-18): the actual credited amounts (user/L1/L2/platform)
-  // now come from the fixed 80/10/5/5 split, not from feeResult's
-  // performanceFeeBps-derived feeUsd/userShareUsd — calculatePerformanceFee is
-  // still called above only for its real-cost reconciliation (netProfitUsd
-  // clamped to the real on-chain SOL delta) and its "no fee on a loss" gate.
-  // poolUsd is the fixed 20% non-user pool (never derived from
-  // settings.performanceFeeBps) — used for both the PerformanceFeeLedger row
-  // and the OWNER_FEE debit below, same convention as before: the full pool
-  // is debited regardless of how much of it is subsequently paid to
-  // referrers, so the platform's own implicit net stays `poolUsd -
-  // referralPayouts` exactly as it always has.
-  const distribution = calculateFixedProfitDistribution(feeResult.netProfitUsd, chain);
+  // The credited amounts (user / referral levels / platform) follow the admin's
+  // BusinessSettings. calculatePerformanceFee above is still what reconciles
+  // netProfitUsd against the real on-chain SOL delta and skips losing closes.
+  const distribution = calculateProfitDistribution(feeResult.netProfitUsd, chain, {
+    platformFeeBps: settings.performanceFeeBps,
+    levels: settings.referralLevels,
+  });
   const poolUsd = feeResult.netProfitUsd - distribution.userShareUsd;
-  const poolBps = 10_000 - FIXED_USER_SHARE_BPS;
+  const poolBps = Math.min(10_000, Math.max(0, settings.performanceFeeBps));
 
   // Real on-chain payout (2026-07-23): a paper-trade position never had real
   // money to move in the first place — Trade.isPaperTrade (set once, at
@@ -278,7 +272,8 @@ export async function processProfitableClose(
         jito,
         logger: deps.log,
         encryptionKey: deps.config.ENCRYPTION_KEY,
-        treasuryAddress: deps.config.PLATFORM_TREASURY_WALLET_ADDRESS,
+        treasuryAddress:
+          settings.treasuryWalletAddress ?? deps.config.PLATFORM_TREASURY_WALLET_ADDRESS,
         minWalletReserveSol: deps.config.MIN_WALLET_RESERVE_SOL,
         staleMs: deps.config.PAYOUT_ATTEMPT_STALE_MS,
         notifier,

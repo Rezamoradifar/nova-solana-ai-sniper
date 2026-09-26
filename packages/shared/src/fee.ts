@@ -134,25 +134,6 @@ export function calculateReferralRewards(
   return results;
 }
 
-/**
- * Section 14 (2026-07-18): a FIXED, permanent profit split — 80% to the
- * trader, 10% to their Level-1 referrer, 5% to Level-2, 5% to the platform —
- * deliberately independent of BusinessSettings.performanceFeeBps (which stays
- * admin-adjustable for reporting/display purposes only). Before this, the
- * live referral system split the platform's *fee* 10%/5% between L1/L2 (a
- * cut of a cut — with the fee at its current 20% default, that worked out to
- * only 2%/1% of actual profit); this replaces that computation so referrers
- * get 10%/5% of profit directly, regardless of what performanceFeeBps is set
- * to now or in the future.
- */
-export const FIXED_USER_SHARE_BPS = 8000; // 80% of net profit, always
-export const FIXED_REFERRAL_L1_BPS = 1000; // 10% of net profit
-export const FIXED_REFERRAL_L2_BPS = 500; // 5% of net profit
-// The remaining 20% (poolUsd below) is the platform's base pool; unclaimed
-// referrer shares (no L1 and/or no L2) roll into the platform's share
-// automatically via the subtraction in calculateFixedProfitDistribution —
-// never a separate branch, so the four shares always sum to exactly 100%.
-
 export interface ProfitDistributionResult {
   userShareUsd: number;
   platformShareUsd: number;
@@ -160,38 +141,43 @@ export interface ProfitDistributionResult {
 }
 
 /**
- * chain[0] is the Level-1 referrer, chain[1] is Level-2 — same ordering as
- * resolveReferralChain, whose own walk-upward construction means index 1 can
- * only be present if index 0 also is (so "L2 present but not L1" can't
- * occur). Assumes netProfitUsd > 0 — callers already gate on that via
- * calculatePerformanceFee's own `netProfitUsd <= 0 -> undefined` return, so
- * this never runs on a losing or break-even close.
+ * Splits net profit using the admin's BusinessSettings: the platform fee
+ * (`platformFeeBps` of net profit) forms the pool, each referral level takes its
+ * `percentBps` of net profit out of that pool, and whatever is left (including
+ * any level with no referrer) goes to the platform. chain[0] is the Level-1
+ * referrer. If the configured levels ever exceed the pool they are scaled down
+ * so the four shares still sum to exactly net profit. Callers only invoke this
+ * on a profitable close.
  */
-export function calculateFixedProfitDistribution(
+export function calculateProfitDistribution(
   netProfitUsd: number,
   chain: ReferralChainLink[],
+  config: { platformFeeBps: number; levels: ReferralLevelInput[] },
 ): ProfitDistributionResult {
-  const userShareUsd = netProfitUsd * (FIXED_USER_SHARE_BPS / 10_000);
-  const poolUsd = netProfitUsd - userShareUsd;
+  const feeBps = Math.min(10_000, Math.max(0, config.platformFeeBps));
+  const poolUsd = netProfitUsd * (feeBps / 10_000);
+  const userShareUsd = netProfitUsd - poolUsd;
 
-  const referralRewards: ReferralRewardDistribution[] = [];
-  if (chain[0]) {
+  let referralRewards: ReferralRewardDistribution[] = [];
+  chain.forEach((link, i) => {
+    const level = i + 1;
+    const levelConfig = config.levels.find((l) => l.level === level);
+    if (!levelConfig || !levelConfig.enabled || levelConfig.percentBps <= 0) return;
     referralRewards.push({
-      referrerUserId: chain[0].userId,
-      level: 1,
-      percentBps: FIXED_REFERRAL_L1_BPS,
-      rewardUsd: netProfitUsd * (FIXED_REFERRAL_L1_BPS / 10_000),
+      referrerUserId: link.userId,
+      level,
+      percentBps: levelConfig.percentBps,
+      rewardUsd: netProfitUsd * (levelConfig.percentBps / 10_000),
     });
-  }
-  if (chain[1]) {
-    referralRewards.push({
-      referrerUserId: chain[1].userId,
-      level: 2,
-      percentBps: FIXED_REFERRAL_L2_BPS,
-      rewardUsd: netProfitUsd * (FIXED_REFERRAL_L2_BPS / 10_000),
-    });
-  }
+  });
 
+  const referralTotal = referralRewards.reduce((sum, r) => sum + r.rewardUsd, 0);
+  if (referralTotal > poolUsd && referralTotal > 0) {
+    const scale = poolUsd / referralTotal;
+    referralRewards = referralRewards
+      .map((r) => ({ ...r, rewardUsd: r.rewardUsd * scale }))
+      .filter((r) => r.rewardUsd > 0);
+  }
   const platformShareUsd = poolUsd - referralRewards.reduce((sum, r) => sum + r.rewardUsd, 0);
 
   return { userShareUsd, platformShareUsd, referralRewards };
@@ -242,6 +228,8 @@ export interface BusinessSettingsWithLevels {
   referralProgramEnabled: boolean;
   maxReferralDepth: number;
   feeSystemActivatedAt: Date;
+  /** Set from the admin panel; when null the PLATFORM_TREASURY_WALLET_ADDRESS env value is used. */
+  treasuryWalletAddress: string | null;
   referralLevels: ReferralLevelInput[];
   // Final Opportunity Score (Section 7) weights — see opportunityScore.ts.
   safetyWeightBps: number;
@@ -256,8 +244,8 @@ export interface BusinessSettingsWithLevels {
 
 const DEFAULT_PERFORMANCE_FEE_BPS = 2000; // 20%
 const DEFAULT_REFERRAL_LEVELS: Omit<ReferralLevelInput, 'level'>[] = [
-  { percentBps: 1000, enabled: true }, // level 1: 10% of the platform fee
-  { percentBps: 500, enabled: true }, // level 2: 5% of the platform fee
+  { percentBps: 1000, enabled: true }, // level 1: 10% of net profit
+  { percentBps: 500, enabled: true }, // level 2: 5% of net profit
 ];
 
 /**

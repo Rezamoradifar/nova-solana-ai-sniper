@@ -11,6 +11,7 @@ import {
   type Logger,
 } from '@nova/shared';
 import { fmtDate, fmtHoldingTimeShort, usd } from '../ui/format.js';
+import { checkFeeBudget, registerSettingsPanel } from './settingsPanel.js';
 
 /** Restricts every command registered after this middleware to known admin Telegram IDs. */
 function requireAdmin(adminIds: Set<string>) {
@@ -30,8 +31,10 @@ export function registerAdminCommands(
   adminIds: Set<string>,
   logger: Logger,
   redis: Redis,
+  envTreasuryAddress?: string,
 ): void {
   const admin = requireAdmin(adminIds);
+  registerSettingsPanel(bot, prisma, admin, logger, envTreasuryAddress);
 
   bot.command('status', admin, async (ctx) => {
     const [tokenCount, openPositions, users] = await Promise.all([
@@ -204,6 +207,11 @@ export function registerAdminCommands(
     }
     const settings = await getOrCreateBusinessSettings(prisma);
     const feeBps = Math.round(percent * 100);
+    const budgetError = checkFeeBudget(settings, { feeBps });
+    if (budgetError) {
+      await ctx.reply(`❌ ${budgetError}`);
+      return;
+    }
     await prisma.businessSettings.update({
       where: { id: settings.id },
       data: { performanceFeeBps: feeBps },
@@ -233,12 +241,17 @@ export function registerAdminCommands(
       percent > 100
     ) {
       await ctx.reply(
-        'Usage: /setreferral <level> <percent> (e.g. `/setreferral 1 10` for 10% of the fee)',
+        'Usage: /setreferral <level> <percent> (e.g. `/setreferral 1 10` for 10% of net profit)',
       );
       return;
     }
     const settings = await getOrCreateBusinessSettings(prisma);
     const percentBps = Math.round(percent * 100);
+    const budgetError = checkFeeBudget(settings, { level, levelBps: percentBps });
+    if (budgetError) {
+      await ctx.reply(`❌ ${budgetError}`);
+      return;
+    }
     await prisma.referralLevelConfig.upsert({
       where: { businessSettingsId_level: { businessSettingsId: settings.id, level } },
       create: { businessSettingsId: settings.id, level, percentBps, enabled: true },
@@ -254,9 +267,12 @@ export function registerAdminCommands(
       { adminId: ctx.from?.id, level, percentBps },
       'admin changed a referral level percentage',
     );
-    await ctx.reply(`🔗 Referral level ${level} set to *${percent}%* of the platform fee.`, {
-      parse_mode: 'Markdown',
-    });
+    await ctx.reply(
+      `🔗 Referral level ${level} set to *${percent}%* of net profit (paid from the platform fee).`,
+      {
+        parse_mode: 'Markdown',
+      },
+    );
   });
 
   bot.command('setreferraldepth', admin, async (ctx) => {

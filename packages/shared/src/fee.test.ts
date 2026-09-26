@@ -3,7 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import {
   calculatePerformanceFee,
   calculateReferralRewards,
-  calculateFixedProfitDistribution,
+  calculateProfitDistribution,
   getOrCreateBusinessSettings,
   isEligibleForFeeProcessing,
   resolveReferralChain,
@@ -146,51 +146,93 @@ describe('calculateReferralRewards', () => {
   });
 });
 
-describe('calculateFixedProfitDistribution', () => {
-  it('splits 80/10/5/5 across user/L1/L2/platform when both referrers exist', () => {
-    const result = calculateFixedProfitDistribution(100, [
-      { userId: 'referrer-l1' },
-      { userId: 'referrer-l2' },
-    ]);
+describe('calculateProfitDistribution', () => {
+  const defaults = {
+    platformFeeBps: 2000,
+    levels: [
+      { level: 1, percentBps: 1000, enabled: true },
+      { level: 2, percentBps: 500, enabled: true },
+    ],
+  };
+  const sumOf = (r: {
+    userShareUsd: number;
+    platformShareUsd: number;
+    referralRewards: { rewardUsd: number }[];
+  }) =>
+    r.userShareUsd + r.platformShareUsd + r.referralRewards.reduce((s, x) => s + x.rewardUsd, 0);
+
+  it('with the default settings splits 80/10/5/5 across user/L1/L2/platform', () => {
+    const result = calculateProfitDistribution(
+      100,
+      [{ userId: 'referrer-l1' }, { userId: 'referrer-l2' }],
+      defaults,
+    );
     expect(result.userShareUsd).toBe(80);
     expect(result.referralRewards).toEqual([
       { referrerUserId: 'referrer-l1', level: 1, percentBps: 1000, rewardUsd: 10 },
       { referrerUserId: 'referrer-l2', level: 2, percentBps: 500, rewardUsd: 5 },
     ]);
     expect(result.platformShareUsd).toBe(5);
-    // Always sums to exactly the original net profit.
-    const total =
-      result.userShareUsd +
-      result.platformShareUsd +
-      result.referralRewards.reduce((sum, r) => sum + r.rewardUsd, 0);
-    expect(total).toBeCloseTo(100);
+    expect(sumOf(result)).toBeCloseTo(100);
   });
 
-  it('rolls the unclaimed Level-2 share into the platform when only L1 exists', () => {
-    const result = calculateFixedProfitDistribution(100, [{ userId: 'referrer-l1' }]);
+  it('rolls an unclaimed level into the platform share', () => {
+    const result = calculateProfitDistribution(100, [{ userId: 'referrer-l1' }], defaults);
     expect(result.userShareUsd).toBe(80);
-    expect(result.referralRewards).toEqual([
-      { referrerUserId: 'referrer-l1', level: 1, percentBps: 1000, rewardUsd: 10 },
-    ]);
-    expect(result.platformShareUsd).toBe(10); // 5% base + unclaimed 5% from L2
+    expect(result.platformShareUsd).toBe(10);
   });
 
-  it('rolls the entire 20% pool to the platform when there is no referral chain at all', () => {
-    const result = calculateFixedProfitDistribution(100, []);
-    expect(result.userShareUsd).toBe(80);
+  it('gives the whole pool to the platform when there is no referral chain', () => {
+    const result = calculateProfitDistribution(100, [], defaults);
     expect(result.referralRewards).toEqual([]);
     expect(result.platformShareUsd).toBe(20);
   });
 
-  it('scales correctly for a small real-world profit amount', () => {
-    const result = calculateFixedProfitDistribution(0.01, [
-      { userId: 'referrer-l1' },
-      { userId: 'referrer-l2' },
-    ]);
-    expect(result.userShareUsd).toBeCloseTo(0.008);
-    expect(result.referralRewards[0]!.rewardUsd).toBeCloseTo(0.001);
-    expect(result.referralRewards[1]!.rewardUsd).toBeCloseTo(0.0005);
-    expect(result.platformShareUsd).toBeCloseTo(0.0005);
+  it('follows admin-set percentages', () => {
+    const result = calculateProfitDistribution(100, [{ userId: 'a' }, { userId: 'b' }], {
+      platformFeeBps: 3000,
+      levels: [
+        { level: 1, percentBps: 1500, enabled: true },
+        { level: 2, percentBps: 0, enabled: true },
+      ],
+    });
+    expect(result.userShareUsd).toBe(70);
+    expect(result.referralRewards).toHaveLength(1);
+    expect(result.referralRewards[0]!.rewardUsd).toBe(15);
+    expect(result.platformShareUsd).toBe(15);
+  });
+
+  it('skips a disabled level', () => {
+    const result = calculateProfitDistribution(100, [{ userId: 'a' }], {
+      platformFeeBps: 2000,
+      levels: [{ level: 1, percentBps: 1000, enabled: false }],
+    });
+    expect(result.referralRewards).toEqual([]);
+    expect(result.platformShareUsd).toBe(20);
+  });
+
+  it('scales referral rewards down if they exceed the fee pool, never touching the user share', () => {
+    const result = calculateProfitDistribution(100, [{ userId: 'a' }, { userId: 'b' }], {
+      platformFeeBps: 1000,
+      levels: [
+        { level: 1, percentBps: 1000, enabled: true },
+        { level: 2, percentBps: 1000, enabled: true },
+      ],
+    });
+    expect(result.userShareUsd).toBe(90);
+    expect(result.referralRewards.map((r) => r.rewardUsd)).toEqual([5, 5]);
+    expect(result.platformShareUsd).toBeCloseTo(0);
+    expect(sumOf(result)).toBeCloseTo(100);
+  });
+
+  it('with a 0% fee pays everything to the user', () => {
+    const result = calculateProfitDistribution(100, [{ userId: 'a' }], {
+      ...defaults,
+      platformFeeBps: 0,
+    });
+    expect(result.userShareUsd).toBe(100);
+    expect(result.referralRewards).toEqual([]);
+    expect(result.platformShareUsd).toBeCloseTo(0);
   });
 });
 

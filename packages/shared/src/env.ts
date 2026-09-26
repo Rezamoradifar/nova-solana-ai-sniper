@@ -6,7 +6,7 @@ import { PublicKey } from '@solana/web3.js';
  * error) rather than accepting a malformed/mistyped address silently, since
  * a wrong treasury address means real, unrecoverable fund loss the moment
  * the first payout fires — see payoutExecutor.ts. */
-function isValidSolanaPublicKey(value: string): boolean {
+export function isValidSolanaPublicKey(value: string): boolean {
   try {
     new PublicKey(value);
     return true;
