@@ -2548,8 +2548,6 @@ export class PositionManager {
         });
         const holdingTimeMs =
           (updated.closedAt ?? new Date()).getTime() - position.createdAt.getTime();
-        const pnlPercentForCard =
-          ((exit.currentPriceUsd - position.entryPriceUsd) / position.entryPriceUsd) * 100;
 
         // Production bug fixed here (Profit Distribution Audit, 2026-07-12):
         // profitSol/roiPercent below used to be computed from ONLY this final
@@ -2576,6 +2574,10 @@ export class PositionManager {
           0,
         );
         const totalProfitSol = totalSellAmountSol - position.amountSolInvested;
+        // The headline figure is what actually happened to the money (SOL in vs.
+        // SOL out, so slippage and price impact count), not the token's price move.
+        const solRoiPercent =
+          position.amountSolInvested > 0 ? (totalProfitSol / position.amountSolInvested) * 100 : 0;
         const displayForCard = computeTrailingStopDisplay({
           entryPriceUsd: position.entryPriceUsd,
           currentPriceUsd: exit.currentPriceUsd,
@@ -2607,11 +2609,8 @@ export class PositionManager {
           sellAmountSol: totalSellAmountSol,
           profitSol: totalProfitSol,
           profitUsd: realizedPnlUsd,
-          roiPercent:
-            position.amountSolInvested > 0
-              ? (totalProfitSol / position.amountSolInvested) * 100
-              : 0,
-          pnlPercent: pnlPercentForCard,
+          roiPercent: solRoiPercent,
+          pnlPercent: solRoiPercent,
           holdingTimeMs,
           exitReason: exit.reason ?? 'manual',
           highestProfitPercent: displayForCard.highestProfitPercent,

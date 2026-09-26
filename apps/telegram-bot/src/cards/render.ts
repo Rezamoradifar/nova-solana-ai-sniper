@@ -518,6 +518,10 @@ export function buildSellCardSvg(data: SellCardData, logoDataUri: string | undef
     <text x="${CARD_WIDTH - 100}" y="1000" text-anchor="end" font-family="${SANS}" font-size="16" font-weight="600" letter-spacing="1.5" fill="${MUTED}">EXIT <tspan font-family="${MONO}" fill="${TEXT}">${escapeXml(fmtPrice(data.exitPriceUsd))}</tspan></text>`;
 
   const pct = (n: number | undefined) => (n !== undefined ? signed(n, 1, '%') : '—');
+  const priceMove =
+    data.entryPriceUsd > 0 && data.exitPriceUsd > 0
+      ? signed(((data.exitPriceUsd - data.entryPriceUsd) / data.entryPriceUsd) * 100, 1, '%')
+      : '—';
   body += statPanel(1030, 4, [
     ['Invested', `${data.buyAmountSol.toFixed(4)} SOL`],
     ['Returned', `${data.sellAmountSol.toFixed(4)} SOL`],
@@ -525,7 +529,7 @@ export function buildSellCardSvg(data: SellCardData, logoDataUri: string | undef
     ['Locked Profit', pct(data.lockedProfitPercent)],
   ]);
   body += `
-    <text x="100" y="1178" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">ROI <tspan font-family="${MONO}" font-size="22" fill="${theme.accent}">${escapeXml(signed(data.roiPercent, 1, '%'))}</tspan></text>
+    <text x="100" y="1178" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">PRICE <tspan font-family="${MONO}" font-size="22" fill="${TEXT}">${escapeXml(priceMove)}</tspan></text>
     <text x="${CARD_WIDTH / 2}" y="1178" text-anchor="middle" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">AI SCORE <tspan font-family="${MONO}" font-size="22" fill="${TEXT}">${t.aiScore !== undefined ? `${t.aiScore.toFixed(0)}/100` : '—'}</tspan></text>
     <text x="${CARD_WIDTH - 100}" y="1178" text-anchor="end" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">RISK <tspan font-size="22" fill="${risk.color}">${risk.label}</tspan></text>`;
 

@@ -40,7 +40,6 @@ export function buildShareCaption(data: SellCardData, botUsername: string | unde
     `🚀 Trade completed with GSP Bank Sniper\n\n` +
     `💰 Profit: ${signedFixed(data.pnlPercent, 1)}%\n\n` +
     `💎 ${signedFixed(data.profitSol, 4)} SOL\n\n` +
-    `📈 ROI: ${signedFixed(data.roiPercent, 1)}%\n\n` +
     (data.token.aiScore !== undefined
       ? `🤖 AI Score: ${data.token.aiScore.toFixed(0)}/100\n\n`
       : '') +

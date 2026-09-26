@@ -78,7 +78,6 @@ describe('buildShareCaption', () => {
       '🚀 Trade completed with GSP Bank Sniper\n\n' +
         '💰 Profit: +245.0%\n\n' +
         '💎 +1.8400 SOL\n\n' +
-        '📈 ROI: +245.0%\n\n' +
         '🤖 AI Score: 97/100\n\n' +
         '$RAGEGUY on PUMPFUN\n\n' +
         'Trade faster with GSP Bank Sniper.\n' +
@@ -99,7 +98,7 @@ describe('buildShareCaption', () => {
     );
     expect(caption).toContain('Profit: -50.0%');
     expect(caption).toContain('-0.5000 SOL');
-    expect(caption).toContain('ROI: -50.0%');
+    expect(caption).not.toContain('ROI');
     expect(caption).not.toContain('AI Score');
   });
 
@@ -110,7 +109,6 @@ describe('buildShareCaption', () => {
     );
     expect(caption).toContain('Profit: 0.0%');
     expect(caption).toContain('💎 0.0000 SOL');
-    expect(caption).toContain('ROI: 0.0%');
     expect(caption).not.toContain('+-');
   });
 

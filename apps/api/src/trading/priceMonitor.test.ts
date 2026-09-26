@@ -125,6 +125,17 @@ describe('PriceMonitor — proactive zero-balance reconciliation (2026-07-21 aud
     expect(deps.dexScreener.getBestSolanaPair as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
 
+  it('regression: never closes a PAPER position just because the real wallet holds 0 of the token', async () => {
+    const position = { ...fakePosition(), isPaperTrade: true };
+    const deps = buildDeps({ connection: fakeConnectionWithBalance('0') }, [position]);
+    const monitor = new PriceMonitor(deps);
+
+    await monitor.tick();
+
+    expect(deps.positionManager.closePosition).not.toHaveBeenCalled();
+    expect(deps.positionManager.checkAndMaybeClose).toHaveBeenCalled();
+  });
+
   it('does not touch a position whose wallet still holds tokens', async () => {
     const position = fakePosition();
     const deps = buildDeps({ connection: fakeConnectionWithBalance('1000000') }, [position]);

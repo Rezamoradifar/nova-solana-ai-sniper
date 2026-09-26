@@ -250,6 +250,7 @@ export class PriceMonitor {
       /** TP1 / Breakeven / Trailing exit strategy (2026-07-29) — see
        * this.volatilityTracker's use below. */
       exitStrategy: string | null;
+      isPaperTrade: boolean;
       wallet: { publicKey: string; encryptedSecret: string };
     },
   ): Promise<void> {
@@ -434,6 +435,7 @@ export class PriceMonitor {
    */
   private async reconcileIfWalletEmpty(position: {
     id: string;
+    isPaperTrade: boolean;
     walletId: string;
     amountToken: number;
     remainingAmountToken: number | null;
@@ -442,6 +444,8 @@ export class PriceMonitor {
     wallet: { publicKey: string; encryptedSecret: string };
     token: { mint: string };
   }): Promise<boolean> {
+    // A paper position never bought real tokens, so its wallet always reads 0.
+    if (position.isPaperTrade) return false;
     if (!this.deps.connection) return false;
     const expectedAmount = position.remainingAmountToken ?? position.amountToken;
     if (expectedAmount <= 0) return false;
