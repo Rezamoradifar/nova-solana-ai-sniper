@@ -22,7 +22,7 @@ RUN npm prune --omit=dev
 
 # ---- runtime ----
 FROM node:20-alpine AS runtime
-RUN apk add --no-cache openssl dumb-init
+RUN apk add --no-cache openssl dumb-init fontconfig font-dejavu
 WORKDIR /repo
 ENV NODE_ENV=production
 

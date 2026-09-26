@@ -125,7 +125,7 @@ function cardShell(theme: Theme, bodySvg: string): string {
   <rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="url(#bg)"/>
   <rect width="${CARD_WIDTH}" height="${CARD_HEIGHT}" fill="url(#glow)"/>
   ${bodySvg}
-  <text x="${CARD_WIDTH / 2}" y="${CARD_HEIGHT - 40}" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="#5b6478" letter-spacing="2">NOVA SNIPER AI</text>
+  <text x="${CARD_WIDTH / 2}" y="${CARD_HEIGHT - 40}" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" fill="#5b6478" letter-spacing="2">GSP BANK SNIPER</text>
 </svg>`;
 }
 

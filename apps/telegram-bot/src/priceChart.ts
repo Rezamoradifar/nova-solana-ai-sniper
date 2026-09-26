@@ -192,7 +192,7 @@ export function buildTradePriceChartSvg(input: TradeChartInput): string {
   <polyline points="${linePoints}" fill="none" stroke="${lineColor}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
   ${buyMarker}
   ${sellMarker}
-  <text x="${CHART_WIDTH / 2}" y="${CHART_HEIGHT - 22}" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" letter-spacing="2" fill="#5b6478">NOVA SNIPER AI</text>
+  <text x="${CHART_WIDTH / 2}" y="${CHART_HEIGHT - 22}" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" letter-spacing="2" fill="#5b6478">GSP BANK SNIPER</text>
 </svg>`;
 }
 
