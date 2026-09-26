@@ -58,6 +58,8 @@ export interface ScreenDeps {
    * (undefined in most test fixtures), same convention as solanaConnection/
    * api above — an admin-only action just stays hidden/denied when unset. */
   adminIds?: Set<string>;
+  /** MINIAPP_URL — adds an "Open App" web-app button to the home screen when set. */
+  miniappUrl?: string;
   /** Live control-plane for global admin toggles that must take effect on the
    * running nova-api process without a restart — see
    * packages/shared/src/telegramTrendToggle.ts (same pattern as the trading

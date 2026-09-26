@@ -68,7 +68,7 @@ function WalletCard({ wallet, onBackup }: { wallet: WalletType; onBackup: () => 
     <Card className="flex flex-col gap-4 p-5 sm:p-6">
       <div className="flex items-center gap-4">
         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent-gradient">
-          <WalletIcon size={20} className="text-white" />
+          <WalletIcon size={20} className="text-[#07090F]" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
@@ -89,7 +89,7 @@ function WalletCard({ wallet, onBackup }: { wallet: WalletType; onBackup: () => 
       <div className="flex items-end justify-between">
         <div>
           <span className="text-xs uppercase tracking-wide text-text-secondary">Balance</span>
-          <p className="mt-0.5 text-2xl font-bold text-text-primary sm:text-3xl">
+          <p className="mt-0.5 font-mono text-2xl font-bold text-text-primary sm:text-3xl">
             {sol(lamportsToSol(wallet.lastKnownBalanceLamports))}
           </p>
           <span className="text-xs text-text-secondary">

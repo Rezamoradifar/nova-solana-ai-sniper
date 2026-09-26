@@ -35,7 +35,7 @@ export function App() {
       <AuthProvider>
         <AuthGate>
           <LiveEventsProvider>
-            <BrowserRouter>
+            <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
               <GradientBackground />
               <div className="min-h-screen px-4 pb-28 pt-6 sm:px-6 sm:pt-8">
                 <Routes>

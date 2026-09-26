@@ -15,7 +15,7 @@ export interface ButtonProps extends Omit<HTMLMotionProps<'button'>, 'onClick' |
 }
 
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  primary: 'bg-accent-gradient text-white',
+  primary: 'bg-accent-gradient text-[#07090F]',
   secondary: 'glass text-text-primary',
   danger: 'bg-danger text-white',
   ghost: 'bg-transparent text-text-secondary hover:text-text-primary',

@@ -38,6 +38,7 @@ export const en = {
 
   home: {
     title: '👋 *GSP Bank Sniper*',
+    openApp: '🚀 Open GSP App',
     freeNote: 'Every feature below is free — no tiers, no limits.',
     wallets: (n: number) => `👛 Wallets: *${n}*`,
     activeSnipes: (n: number) => `🎯 Active snipe configs: *${n}*`,

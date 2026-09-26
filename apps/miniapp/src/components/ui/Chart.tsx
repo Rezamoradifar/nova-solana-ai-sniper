@@ -16,8 +16,8 @@ export interface PnlChartProps {
 }
 
 const TREND_COLOR: Record<PnlChartProps['trend'], string> = {
-  up: '#00FFA3',
-  down: '#FF4D6D',
+  up: '#22D97A',
+  down: '#F5433C',
   flat: '#A2A2B2',
 };
 

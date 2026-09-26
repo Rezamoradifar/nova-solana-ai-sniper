@@ -42,6 +42,7 @@ export const fa = {
 
   home: {
     title: '👋 *GSP Bank Sniper*',
+    openApp: '🚀 باز کردن اپ GSP',
     freeNote: 'همه امکانات زیر رایگان است — بدون سطح‌بندی، بدون محدودیت.',
     wallets: (n: number) => `👛 کیف پول‌ها: *${n}*`,
     activeSnipes: (n: number) => `🎯 پیکربندی‌های فعال اسنایپ: *${n}*`,

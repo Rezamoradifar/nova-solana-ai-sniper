@@ -57,7 +57,7 @@ export function Referral() {
         <>
           <Card className="flex flex-col items-center gap-3 p-6 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-accent-gradient">
-              <Gift size={22} className="text-white" />
+              <Gift size={22} className="text-[#07090F]" />
             </div>
             <span className="text-xs uppercase tracking-wide text-text-secondary">
               Your referral code

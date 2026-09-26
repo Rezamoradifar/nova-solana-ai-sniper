@@ -106,8 +106,12 @@ export function Home() {
           </Card>
         ) : (
           <Card className="overflow-hidden p-5 sm:p-6">
-            <span className="text-xs uppercase tracking-wide text-text-secondary">Net P&amp;L</span>
-            <p className={`mt-1 text-3xl font-extrabold sm:text-4xl ${pnlToneClass(netPnlUsd)}`}>
+            <span className="text-xs uppercase tracking-[0.12em] text-text-secondary">
+              Net P&amp;L
+            </span>
+            <p
+              className={`mt-2 font-mono text-4xl font-bold tracking-tight sm:text-5xl ${pnlToneClass(netPnlUsd)}`}
+            >
               {usd(netPnlUsd)}
             </p>
             <p className="mt-0.5 text-xs text-text-secondary">Realized + unrealized, all wallets</p>
@@ -140,13 +144,13 @@ export function Home() {
         ) : (
           <Card className="flex items-center gap-4 p-5 sm:p-6">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-accent-gradient">
-              <WalletIcon size={20} className="text-white" />
+              <WalletIcon size={20} className="text-[#07090F]" />
             </div>
             <div>
-              <span className="text-xs uppercase tracking-wide text-text-secondary">
+              <span className="text-xs uppercase tracking-[0.12em] text-text-secondary">
                 {primaryWallet.label} balance
               </span>
-              <p className="mt-0.5 text-2xl font-bold text-text-primary sm:text-3xl">
+              <p className="mt-0.5 font-mono text-2xl font-bold text-text-primary sm:text-3xl">
                 {sol(lamportsToSol(primaryWallet.lastKnownBalanceLamports))}
               </p>
             </div>
@@ -171,19 +175,19 @@ export function Home() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Card className="p-4 sm:p-5">
               <Layers size={16} className="text-text-secondary" />
-              <span className="mt-2 block whitespace-nowrap text-xs uppercase tracking-wide text-text-secondary">
+              <span className="mt-2 block whitespace-nowrap text-xs uppercase tracking-[0.12em] text-text-secondary">
                 Open positions
               </span>
-              <p className="mt-1 text-xl font-bold text-text-primary">
+              <p className="mt-1 font-mono text-xl font-bold text-text-primary">
                 {numberOrFallback(totals.openPositions, '0')}
               </p>
             </Card>
             <Card className="p-4 sm:p-5">
               <Coins size={16} className="text-text-secondary" />
-              <span className="mt-2 block text-xs uppercase tracking-wide text-text-secondary">
+              <span className="mt-2 block text-xs uppercase tracking-[0.12em] text-text-secondary">
                 Invested
               </span>
-              <p className="mt-1 text-xl font-bold text-text-primary">
+              <p className="mt-1 font-mono text-xl font-bold text-text-primary">
                 {sol(totals.totalInvestedSol)}
               </p>
             </Card>
@@ -193,10 +197,12 @@ export function Home() {
               ) : (
                 <TrendingDown size={16} className="text-danger" />
               )}
-              <span className="mt-2 block whitespace-nowrap text-xs uppercase tracking-wide text-text-secondary">
+              <span className="mt-2 block whitespace-nowrap text-xs uppercase tracking-[0.12em] text-text-secondary">
                 Realized PnL
               </span>
-              <p className={`mt-1 text-xl font-bold ${pnlToneClass(totals.realizedPnlUsd)}`}>
+              <p
+                className={`mt-1 font-mono text-xl font-bold ${pnlToneClass(totals.realizedPnlUsd)}`}
+              >
                 {usd(totals.realizedPnlUsd)}
               </p>
             </Card>
@@ -206,10 +212,10 @@ export function Home() {
               ) : (
                 <TrendingDown size={16} className="text-danger" />
               )}
-              <span className="mt-2 block text-xs uppercase tracking-wide text-text-secondary">
+              <span className="mt-2 block text-xs uppercase tracking-[0.12em] text-text-secondary">
                 Net PnL
               </span>
-              <p className={`mt-1 text-xl font-bold ${pnlToneClass(netPnlUsd)}`}>
+              <p className={`mt-1 font-mono text-xl font-bold ${pnlToneClass(netPnlUsd)}`}>
                 {usd(netPnlUsd)}
               </p>
             </Card>

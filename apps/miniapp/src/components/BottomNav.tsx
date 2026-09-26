@@ -42,7 +42,7 @@ export function BottomNav() {
             <>
               <motion.span
                 className="relative flex h-8 w-8 items-center justify-center rounded-full"
-                animate={{ backgroundColor: isActive ? 'rgba(124,92,255,0.16)' : 'rgba(0,0,0,0)' }}
+                animate={{ backgroundColor: isActive ? 'rgba(34,217,122,0.16)' : 'rgba(0,0,0,0)' }}
                 transition={springTransition}
               >
                 <Icon
@@ -51,7 +51,7 @@ export function BottomNav() {
                   className={isActive ? 'text-text-primary' : 'text-text-secondary'}
                 />
                 {to === '/positions' && !!openPositions && openPositions > 0 && (
-                  <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent-gradient px-1 text-[10px] font-bold text-white">
+                  <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent-gradient px-1 text-[10px] font-bold text-[#07090F]">
                     {openPositions > 99 ? '99+' : openPositions}
                   </span>
                 )}

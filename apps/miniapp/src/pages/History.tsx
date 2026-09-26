@@ -104,7 +104,9 @@ export function History() {
                   setTradePage(1);
                 }}
                 className={`rounded-button px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  tradeFilter === f ? 'bg-accent-gradient text-white' : 'glass text-text-secondary'
+                  tradeFilter === f
+                    ? 'bg-accent-gradient text-[#07090F]'
+                    : 'glass text-text-secondary'
                 }`}
               >
                 {f === 'ALL' ? 'All' : f === 'BUY' ? 'Buys' : 'Sells'}
@@ -152,7 +154,7 @@ export function History() {
                 }}
                 className={`rounded-button px-3 py-1.5 text-xs font-semibold transition-colors ${
                   positionFilter === f
-                    ? 'bg-accent-gradient text-white'
+                    ? 'bg-accent-gradient text-[#07090F]'
                     : 'glass text-text-secondary'
                 }`}
               >

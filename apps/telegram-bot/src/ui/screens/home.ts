@@ -1,3 +1,4 @@
+import { InlineKeyboard } from 'grammy';
 import { homeGrid } from '../keyboards.js';
 import { getLocale, t } from '../../i18n/index.js';
 import type { ScreenDeps, ScreenResult, ScreenUser } from '../types.js';
@@ -21,5 +22,9 @@ export async function renderHome(deps: ScreenDeps, user: ScreenUser): Promise<Sc
     `${d.openPositions(openPositions)}\n\n` +
     `${d.pickSection}`;
 
-  return { text, keyboard: homeGrid(lang) };
+  const keyboard = homeGrid(lang);
+  if (deps.miniappUrl) {
+    keyboard.inline_keyboard.unshift([InlineKeyboard.webApp(d.openApp, deps.miniappUrl)]);
+  }
+  return { text, keyboard };
 }

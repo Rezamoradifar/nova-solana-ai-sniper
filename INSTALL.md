@@ -55,7 +55,7 @@ is not run a second time inside these containers.
 
 ### Nginx + TLS (Docker path)
 
-`docker/nginx/nginx.conf` expects a real domain and an existing Let's
+`docker/nginx/default.conf.template` expects a real domain and an existing Let's
 Encrypt certificate, neither of which exists on a fresh server. Bootstrap
 both with:
 
@@ -103,7 +103,7 @@ automatic.
    rsync -a --delete apps/dashboard/dist/ /var/www/nova-dashboard/
    chown -R www-data:www-data /var/www/nova-dashboard
    ```
-3. Create an Nginx site (adapt `docker/nginx/nginx.conf`'s convention —
+3. Create an Nginx site (adapt `docker/nginx/default.conf.template`'s convention —
    `/api/` proxied to `127.0.0.1:4000` with the prefix stripped, everything
    else served from `/var/www/nova-dashboard` with SPA fallback):
    ```nginx

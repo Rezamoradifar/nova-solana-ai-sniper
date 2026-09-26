@@ -94,7 +94,7 @@ export function ProfitAnalytics() {
             key={r}
             onClick={() => setRange(r)}
             className={`rounded-button px-3 py-1.5 text-xs font-semibold transition-colors ${
-              range === r ? 'bg-accent-gradient text-white' : 'glass text-text-secondary'
+              range === r ? 'bg-accent-gradient text-[#07090F]' : 'glass text-text-secondary'
             }`}
           >
             {r === '7d' ? '7D' : r === '30d' ? '30D' : 'All'}
@@ -106,7 +106,7 @@ export function ProfitAnalytics() {
         <span className="text-xs uppercase tracking-wide text-text-secondary">
           Realized PnL ({stats.closed.length} closed trade{stats.closed.length === 1 ? '' : 's'})
         </span>
-        <p className={`mt-1 text-2xl font-extrabold ${pnlToneClass(stats.totalRealized)}`}>
+        <p className={`mt-1 font-mono text-2xl font-bold ${pnlToneClass(stats.totalRealized)}`}>
           {usd(stats.totalRealized)}
         </p>
         {stats.points.length >= 2 ? (

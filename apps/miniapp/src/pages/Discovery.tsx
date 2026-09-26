@@ -75,7 +75,7 @@ export function Discovery() {
                 key={key}
                 onClick={() => setSort(key)}
                 className={`rounded-button px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  sort === key ? 'bg-accent-gradient text-white' : 'glass text-text-secondary'
+                  sort === key ? 'bg-accent-gradient text-[#07090F]' : 'glass text-text-secondary'
                 }`}
               >
                 {SORT_LABEL[key]}

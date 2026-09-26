@@ -30,7 +30,7 @@ export function Tabs({ items, value, onChange, children }: TabsProps) {
           <RadixTabs.Trigger
             key={item.value}
             value={item.value}
-            className="relative z-10 flex-1 rounded-button px-3 py-2 text-sm font-medium text-text-secondary outline-none transition-colors data-[state=active]:text-white"
+            className="relative z-10 flex-1 rounded-button px-3 py-2 text-sm font-medium text-text-secondary outline-none transition-colors data-[state=active]:font-semibold data-[state=active]:text-[#07090F]"
           >
             {value === item.value && (
               <motion.div

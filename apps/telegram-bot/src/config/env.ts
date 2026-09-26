@@ -9,6 +9,7 @@ export const botEnvSchema = envSchema.pick({
   TELEGRAM_CHAT_ID: true,
   TELEGRAM_ADMIN_IDS: true,
   TELEGRAM_PRIVATE_MODE: true,
+  MINIAPP_URL: true,
   ENCRYPTION_KEY: true,
   // Used only to mint short-lived service JWTs so the bot can call apps/api's
   // own authenticated position-close routes on behalf of the Telegram user it

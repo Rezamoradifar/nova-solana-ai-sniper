@@ -111,8 +111,10 @@ services:
     ports:
       - '80:80'
       - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
     volumes:
-      - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
       - ./data/certbot/www:/var/www/certbot:ro
       - ./data/certbot/conf:/etc/letsencrypt:ro
     depends_on:

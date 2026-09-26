@@ -197,6 +197,17 @@ export const envSchema = z.object({
   // runs. Default false keeps the bot open to any Telegram user, same as
   // before this flag existed.
   TELEGRAM_PRIVATE_MODE: booleanFlag(false),
+  // Public HTTPS URL of the Telegram Mini App (served by the nginx image under
+  // /app/, e.g. https://example.com/app/). When set, the bot shows it as its
+  // menu button and as an "Open App" button on the home screen.
+  MINIAPP_URL: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z
+      .string()
+      .url()
+      .refine((u) => u.startsWith('https://'), 'MINIAPP_URL must be an https:// URL')
+      .optional(),
+  ),
   // Public broadcast channel for apps/marketing-engine's scheduled posts —
   // deliberately separate from TELEGRAM_CHAT_ID (an admin/ops chat, not a
   // public audience). Accepts either "@channelusername" or a numeric chat id,

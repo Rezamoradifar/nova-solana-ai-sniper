@@ -52,7 +52,7 @@ export function Portfolio() {
         <span className="text-xs uppercase tracking-wide text-text-secondary">
           Total holdings value
         </span>
-        <p className="mt-1 text-3xl font-extrabold text-text-primary sm:text-4xl">
+        <p className="mt-1 font-mono text-3xl font-bold text-text-primary sm:text-4xl">
           {holdings.hasAnyValue ? usd(holdings.totalValueUsd) : 'No data'}
         </p>
         <p className="mt-0.5 text-xs text-text-secondary">

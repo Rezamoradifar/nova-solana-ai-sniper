@@ -42,7 +42,7 @@ export function Profile() {
 
       <Card className="flex items-center gap-4 p-5 sm:p-6">
         <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-accent-gradient">
-          <User size={26} className="text-white" />
+          <User size={26} className="text-[#07090F]" />
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-base font-semibold text-text-primary">
@@ -52,7 +52,7 @@ export function Profile() {
             <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-secondary">
               {user?.role ?? 'TRADER'}
             </span>
-            <span className="rounded-full bg-accent-gradient px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+            <span className="rounded-full bg-accent-gradient px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#07090F]">
               {user?.subscriptionTier ?? 'FREE'}
             </span>
           </div>

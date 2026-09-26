@@ -1,9 +1,7 @@
 /**
- * Fixed, decorative ambient glow behind every screen — three large blurred
- * blobs drifting slowly (see the `aurora` keyframes in tailwind.config.ts).
- * `aria-hidden` + `pointer-events-none` since this carries no information;
- * `prefers-reduced-motion` freezes it (index.css). Mount once at the app
- * root, not per-screen, so navigating between tabs doesn't restart/jump it.
+ * Fixed, decorative backdrop behind every screen — the same visual language
+ * as the GSP trade cards: a faint dot grid fading out from the top and a slow
+ * emerald glow. Decorative only; `prefers-reduced-motion` freezes it (index.css).
  */
 export function GradientBackground() {
   return (
@@ -11,9 +9,17 @@ export function GradientBackground() {
       aria-hidden
       className="pointer-events-none fixed inset-0 -z-10 overflow-hidden bg-background"
     >
-      <div className="animate-aurora absolute -left-1/4 -top-1/4 h-[70vh] w-[70vh] rounded-full bg-accent-from/20 blur-[120px]" />
-      <div className="animate-aurora-delayed absolute -right-1/3 top-1/4 h-[60vh] w-[60vh] rounded-full bg-accent-to/20 blur-[120px]" />
-      <div className="animate-aurora-slow absolute -bottom-1/4 left-1/4 h-[55vh] w-[55vh] rounded-full bg-success/10 blur-[120px]" />
+      <div
+        className="absolute inset-0 opacity-70"
+        style={{
+          backgroundImage: 'radial-gradient(rgba(255,255,255,0.07) 1.2px, transparent 1.2px)',
+          backgroundSize: '26px 26px',
+          maskImage: 'radial-gradient(ellipse 90% 60% at 50% 0%, #000 30%, transparent 100%)',
+          WebkitMaskImage: 'radial-gradient(ellipse 90% 60% at 50% 0%, #000 30%, transparent 100%)',
+        }}
+      />
+      <div className="animate-aurora absolute -top-[30vh] left-1/2 h-[70vh] w-[110vw] -translate-x-1/2 rounded-full bg-accent-from/20 blur-[120px]" />
+      <div className="animate-aurora-slow absolute -bottom-1/3 -right-1/4 h-[50vh] w-[60vh] rounded-full bg-accent-from/[0.06] blur-[120px]" />
     </div>
   );
 }

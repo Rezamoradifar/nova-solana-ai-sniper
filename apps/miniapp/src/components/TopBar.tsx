@@ -2,6 +2,7 @@ import { Bell } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { useLiveEvents } from '../lib/liveEvents.js';
 import { haptics } from '../lib/telegram.js';
+import { BrandMark } from './BrandMark.js';
 
 export interface TopBarProps {
   title: string;
@@ -15,9 +16,16 @@ export function TopBar({ title, subtitle }: TopBarProps) {
 
   return (
     <header className="mb-2 flex items-center justify-between gap-3">
-      <div className="min-w-0">
-        {subtitle && <p className="truncate text-sm text-text-secondary">{subtitle}</p>}
-        <h1 className="truncate text-2xl font-extrabold text-text-primary sm:text-3xl">{title}</h1>
+      <div className="flex min-w-0 items-center gap-3">
+        <BrandMark size={38} />
+        <div className="min-w-0">
+          {subtitle && (
+            <p className="truncate text-xs font-semibold uppercase tracking-[0.18em] text-text-secondary">
+              {subtitle}
+            </p>
+          )}
+          <h1 className="truncate text-xl font-extrabold text-text-primary sm:text-2xl">{title}</h1>
+        </div>
       </div>
       <NavLink
         to="/notifications"

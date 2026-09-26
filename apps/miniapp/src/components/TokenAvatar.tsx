@@ -8,10 +8,10 @@ export interface TokenAvatarProps {
 }
 
 const GRADIENTS = [
-  'from-[#7C5CFF] to-[#00E5FF]',
-  'from-[#FF4D6D] to-[#FFB020]',
-  'from-[#00FFA3] to-[#00E5FF]',
-  'from-[#FFB020] to-[#7C5CFF]',
+  'from-[#22D97A] to-[#0E7C4A]',
+  'from-[#F5433C] to-[#F5B942]',
+  'from-[#A6F7CF] to-[#22D97A]',
+  'from-[#F5B942] to-[#E07B16]',
 ];
 
 /** Deterministic from the mint, not random — the same token always gets the

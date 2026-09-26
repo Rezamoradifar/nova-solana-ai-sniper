@@ -14,8 +14,8 @@ export interface PortfolioChartProps {
 }
 
 const TREND_COLOR: Record<PortfolioChartProps['trend'], string> = {
-  up: '#00FFA3',
-  down: '#FF4D6D',
+  up: '#22D97A',
+  down: '#F5433C',
   flat: '#A2A2B2',
 };
 

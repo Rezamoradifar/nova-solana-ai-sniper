@@ -19,12 +19,12 @@ export default {
           border: 'rgb(var(--nova-surface-border) / <alpha-value>)',
         },
         accent: {
-          from: '#7C5CFF',
-          to: '#00E5FF',
+          from: '#22D97A',
+          to: '#A6F7CF',
         },
-        success: '#00FFA3',
-        danger: '#FF4D6D',
-        warning: '#FFB020',
+        success: '#22D97A',
+        danger: '#F5433C',
+        warning: '#F5B942',
         text: {
           primary: 'rgb(var(--nova-text-primary) / <alpha-value>)',
           secondary: 'rgb(var(--nova-text-secondary) / <alpha-value>)',
@@ -42,8 +42,9 @@ export default {
         glass: '20px',
       },
       fontFamily: {
+        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
         sans: [
-          'Inter',
+          'Vazirmatn',
           '-apple-system',
           'BlinkMacSystemFont',
           'SF Pro Display',
@@ -52,7 +53,7 @@ export default {
         ],
       },
       backgroundImage: {
-        'accent-gradient': 'linear-gradient(135deg, #7C5CFF 0%, #00E5FF 100%)',
+        'accent-gradient': 'linear-gradient(135deg, #A6F7CF 0%, #22D97A 100%)',
       },
       keyframes: {
         // Slow drift for the fixed background glow blobs (GradientBackground) —

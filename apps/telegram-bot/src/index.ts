@@ -85,7 +85,15 @@ async function main() {
     redis,
     process.env.PLATFORM_TREASURY_WALLET_ADDRESS,
   );
+  if (env.MINIAPP_URL) {
+    await bot.api
+      .setChatMenuButton({
+        menu_button: { type: 'web_app', text: 'Open App', web_app: { url: env.MINIAPP_URL } },
+      })
+      .catch((err) => logger.warn({ err }, 'could not set the Mini App menu button'));
+  }
   registerUiRouter(bot, {
+    miniappUrl: env.MINIAPP_URL,
     prisma,
     encryptionKey: env.ENCRYPTION_KEY,
     logger,
