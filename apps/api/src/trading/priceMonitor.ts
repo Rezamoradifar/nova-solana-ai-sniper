@@ -1,3 +1,4 @@
+import { evaluateRealValueStop } from './realValueStop.js';
 import type { PrismaClient, Token, PositionMonitoringState } from '@prisma/client';
 import type { Connection } from '@solana/web3.js';
 import type { Logger } from '@nova/shared';
@@ -39,6 +40,9 @@ export interface PriceMonitorDeps {
    */
   jupiter?: JupiterClient;
   dexRegistry?: DexRegistry;
+  /** Sell on the position's real sellable value (a Jupiter quote) crossing its
+   * stop-loss, ahead of the price-feed path - see realValueStop.ts. Needs `jupiter`. */
+  realValueStopEnabled?: boolean;
   /**
    * 2026-07-21 audit fix: needed for the proactive zero-balance reconciliation
    * check (E1) below — reads the wallet's PUBLIC key balance only, no secret
@@ -251,6 +255,9 @@ export class PriceMonitor {
        * this.volatilityTracker's use below. */
       exitStrategy: string | null;
       isPaperTrade: boolean;
+      amountSolInvested: number;
+      originalAmountToken: number | null;
+      trailingActivatedAt: Date | null;
       wallet: { publicKey: string; encryptedSecret: string };
     },
   ): Promise<void> {
@@ -270,6 +277,7 @@ export class PriceMonitor {
       // secret ever touched. Cheap (one RPC call) at today's scale (~12
       // open positions).
       if (await this.reconcileIfWalletEmpty(position)) return;
+      if (await this.checkRealValueStop(position)) return;
 
       const pair = await this.deps.dexScreener.getBestSolanaPair(position.token.mint);
       let currentPriceUsd = pair?.priceUsd ? Number(pair.priceUsd) : undefined;
@@ -433,6 +441,72 @@ export class PriceMonitor {
    * wallet genuinely still holds tokens and normal price-based processing
    * should continue.
    */
+  /** Returns true when the position was closed on its real sellable value. */
+  private async checkRealValueStop(position: {
+    id: string;
+    walletId: string;
+    amountToken: number;
+    remainingAmountToken: number | null;
+    originalAmountToken: number | null;
+    amountSolInvested: number;
+    entryPriceUsd: number;
+    stopLossPercent: number | null;
+    trailingActivatedAt: Date | null;
+    wallet: { encryptedSecret: string };
+    token: { mint: string };
+  }): Promise<boolean> {
+    if (!this.deps.realValueStopEnabled || !this.deps.jupiter) return false;
+    const remaining = position.remainingAmountToken ?? position.amountToken;
+    if (remaining <= 0) return false;
+    let exitValueSol: number;
+    try {
+      const quote = await this.deps.jupiter.getQuote({
+        inputMint: position.token.mint,
+        outputMint: SOL_MINT,
+        amountLamports: BigInt(Math.floor(remaining)),
+        slippageBps: 300,
+      });
+      exitValueSol = Number(quote.outAmount) / 1e9;
+    } catch {
+      return false; // no route right now - the price-feed path below still runs
+    }
+    if (!Number.isFinite(exitValueSol)) return false;
+    const decision = evaluateRealValueStop({
+      investedSol: position.amountSolInvested,
+      originalAmountToken: position.originalAmountToken ?? position.amountToken,
+      remainingAmountToken: remaining,
+      exitValueSol,
+      stopLossPercent: position.stopLossPercent,
+      takeProfitStageReached: position.trailingActivatedAt != null,
+    });
+    if (!decision.breached) return false;
+
+    this.deps.logger.warn(
+      {
+        positionId: position.id,
+        mint: position.token.mint,
+        exitValueSol,
+        investedSol: position.amountSolInvested,
+        pnlPercent: decision.pnlPercent,
+        stopLossPercent: position.stopLossPercent,
+      },
+      'REAL-VALUE STOP-LOSS: sellable value crossed the stop-loss — selling now',
+    );
+    await this.deps.positionManager.closePosition(
+      position.id,
+      position.walletId,
+      position.wallet.encryptedSecret,
+      this.deps.encryptionKey,
+      {
+        // Recorded exit price implied by the real sellable value.
+        currentPriceUsd: position.entryPriceUsd * (1 + decision.pnlPercent / 100),
+        reason: 'stop_loss',
+      },
+    );
+    this.outlierState.delete(position.id);
+    return true;
+  }
+
   private async reconcileIfWalletEmpty(position: {
     id: string;
     isPaperTrade: boolean;

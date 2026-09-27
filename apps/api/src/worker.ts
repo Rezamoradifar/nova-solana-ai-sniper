@@ -435,6 +435,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     logger: app.log as never,
     encryptionKey: app.config.ENCRYPTION_KEY,
     jupiter,
+    realValueStopEnabled: app.config.REAL_VALUE_STOP_ENABLED,
     dexRegistry,
     connection,
     notifier,

@@ -692,3 +692,46 @@ describe('PriceMonitor — TP1/Breakeven/Trailing volatility sample recording (2
     await expect(monitor.tick()).resolves.toBeUndefined();
   });
 });
+
+describe('PriceMonitor — real-value stop-loss', () => {
+  const jupiterReturning = (outLamports: number) =>
+    ({ getQuote: vi.fn().mockResolvedValue({ outAmount: String(outLamports) }) }) as never;
+
+  it('sells at once when the sellable value is past the stop-loss, even though the price feed still shows no drop', async () => {
+    const position = {
+      ...fakePosition(),
+      amountSolInvested: 0.1,
+      originalAmountToken: null,
+      trailingActivatedAt: null,
+    };
+    const deps = buildDeps({ realValueStopEnabled: true, jupiter: jupiterReturning(0.06e9) }, [
+      position,
+    ]);
+    await new PriceMonitor(deps).tick();
+
+    expect(deps.positionManager.closePosition).toHaveBeenCalledWith(
+      'pos-1',
+      'wallet-1',
+      'secret',
+      'key',
+      expect.objectContaining({ reason: 'stop_loss' }),
+    );
+    expect(deps.positionManager.checkAndMaybeClose).not.toHaveBeenCalled();
+  });
+
+  it('keeps the normal path when the sellable value is within the stop-loss', async () => {
+    const position = {
+      ...fakePosition(),
+      amountSolInvested: 0.1,
+      originalAmountToken: null,
+      trailingActivatedAt: null,
+    };
+    const deps = buildDeps({ realValueStopEnabled: true, jupiter: jupiterReturning(0.095e9) }, [
+      position,
+    ]);
+    await new PriceMonitor(deps).tick();
+
+    expect(deps.positionManager.closePosition).not.toHaveBeenCalled();
+    expect(deps.positionManager.checkAndMaybeClose).toHaveBeenCalled();
+  });
+});

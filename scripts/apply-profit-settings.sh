@@ -22,6 +22,8 @@ set_env ENTRY_CONFIRMATION_MAX_LIQUIDITY_DROP_PERCENT 30
 set_env MAX_BUY_PRICE_IMPACT_PERCENT 5
 set_env TIME_STOP_MINUTES 15
 set_env TIME_STOP_MIN_PROFIT_PERCENT 10
+set_env REAL_VALUE_STOP_ENABLED true
+set_env PRICE_CHECK_INTERVAL_MS 5000
 
 echo "==> Active sniper configs (entry filter + minimum liquidity)"
 docker compose exec -T postgres psql -U nova -d nova_sniper -c "UPDATE snipe_configs SET \"entryFilterEnabled\" = true, \"minBuySellRatio\" = 1.2, \"minHolderCount\" = 15, \"minRecentVolumeUsd\" = 2000, \"maxTop10HolderPercent\" = 30, \"minLiquidityUsd\" = 15000 WHERE \"isActive\";"

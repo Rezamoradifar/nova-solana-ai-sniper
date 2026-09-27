@@ -44,7 +44,7 @@ echo
 echo "=== strategy settings (as seen by the running api container) ==="
 for v in LIVE_TRADING EXIT_STRATEGY_V2_ENABLED ENTRY_FILTER_ENABLED ENTRY_CONFIRMATION_DELAY_MS \
   MAX_BUY_PRICE_IMPACT_PERCENT TIME_STOP_MINUTES TIME_STOP_MIN_PROFIT_PERCENT \
-  SCANNER_AUTO_BUY_AUTO_RESUME_ENABLED MINIAPP_URL; do
+  SCANNER_AUTO_BUY_AUTO_RESUME_ENABLED REAL_VALUE_STOP_ENABLED PRICE_CHECK_INTERVAL_MS MINIAPP_URL; do
   echo "  $v=$(docker compose exec -T api printenv "$v" 2>/dev/null | tr -d '\r')"
 done
 echo "--- sniper config filters ---"
