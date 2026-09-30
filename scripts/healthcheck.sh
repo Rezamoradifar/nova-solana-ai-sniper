@@ -44,6 +44,7 @@ echo
 echo "=== strategy settings (as seen by the running api container) ==="
 for v in LIVE_TRADING EXIT_STRATEGY_V2_ENABLED ENTRY_FILTER_ENABLED ENTRY_CONFIRMATION_DELAY_MS \
   MAX_BUY_PRICE_IMPACT_PERCENT TIME_STOP_MINUTES TIME_STOP_MIN_PROFIT_PERCENT \
+  FAST_SEND_ENABLED SKIP_BUY_SIMULATION BUY_PRIORITY_LEVEL JITO_BLOCK_ENGINE_URL \
   SCANNER_AUTO_BUY_AUTO_RESUME_ENABLED REAL_VALUE_STOP_ENABLED PRICE_CHECK_INTERVAL_MS MINIAPP_URL; do
   echo "  $v=$(docker compose exec -T api printenv "$v" 2>/dev/null | tr -d '\r')"
 done
@@ -58,6 +59,17 @@ echo "confirmation failed:      $(grep -c 'entry_confirmation_failed' <<<"$LOGS2
 echo "entry filter blocked:     $(grep -c 'entry_filter_blocked' <<<"$LOGS2H")"
 echo "price impact too high:    $(grep -c 'price_impact_too_high' <<<"$LOGS2H")"
 echo "time stops:               $(grep -c 'time stop: position' <<<"$LOGS2H")"
+
+echo
+echo "=== execution speed (since last api restart) ==="
+docker compose exec -T api node -e '
+fetch("http://127.0.0.1:" + (process.env.API_PORT || 4000) + "/metrics/latency").then(r => r.json()).then(r => {
+  for (const side of ["buy", "sell"]) {
+    const s = r[side] || {}; const t = s.totalStats || {};
+    console.log(side.toUpperCase() + ": samples=" + (s.sampleSize ?? 0) + " median=" + (t.medianMs ?? "-") + "ms p95=" + (t.p95Ms ?? "-") + "ms fastest=" + (s.fastestMs ?? "-") + "ms success=" + Math.round((s.successRate || 0) * 100) + "%");
+  }
+}).catch(e => console.log("latency report unavailable: " + e.message));' 2>/dev/null
+echo "fast-send endpoints: $(docker compose logs api 2>&1 | grep -o '"endpoints":\[[^]]*\]' | tail -1)"
 
 echo
 echo "=== results (closed positions, 7 days, SOL in vs out) ==="

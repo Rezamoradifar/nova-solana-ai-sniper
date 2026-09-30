@@ -253,6 +253,7 @@ interface SendSwapOptions {
   retryDelayMs?: number;
   timeoutMs?: number;
   priorityLevel?: PriorityLevel;
+  skipSimulation?: boolean;
   /**
    * BUY Engine V2 (2026-07-14): explicit override of which classifySellFailure
    * categories are safe to retry pre-broadcast for this call. Undefined falls
@@ -760,6 +761,7 @@ export class PositionManager {
         const prepared = await this.jupiter.prepareSwap(this.connection, keypair, swapParams, {
           maxPriorityFeeLamports: this.maxPriorityFeeLamports,
           priorityLevel: options?.priorityLevel ?? 'high',
+          skipSimulation: options?.skipSimulation,
           dynamicSlippage: true,
           timeoutMs: options?.timeoutMs,
           traceId: options?.traceId,
@@ -1090,7 +1092,13 @@ export class PositionManager {
             const token = await this.prisma.token.findUnique({ where: { id: params.tokenId } });
             return token ? { dex: token.dex, poolAddress: token.poolAddress } : undefined;
           },
-          { ...PositionManager.BUY_SEND_SWAP_OPTIONS, traceId },
+          {
+            ...PositionManager.BUY_SEND_SWAP_OPTIONS,
+            priorityLevel:
+              this.guards.buyPriorityLevel ?? PositionManager.BUY_SEND_SWAP_OPTIONS.priorityLevel,
+            skipSimulation: this.guards.skipBuySimulation,
+            traceId,
+          },
         );
       } catch (err) {
         // BUY Engine V2 (2026-07-14): pre-fix this branch had no logger call

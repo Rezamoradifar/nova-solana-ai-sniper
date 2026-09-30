@@ -61,6 +61,7 @@ import { PumpSwapExecutor } from './solana/dex/pumpswapExecutor.js';
 import type { DexLaunchEvent } from './solana/dex/types.js';
 import { SourceHealthMonitor } from './detection/sourceHealthMonitor.js';
 import { JitoClient } from './solana/jito.js';
+import { configureFastSend, jitoTransactionSender, rpcSender } from './solana/fastSend.js';
 import { PositionManager } from './trading/positionManager.js';
 import type { Tp1TrailingConfig } from './trading/tp1TrailingStrategy.js';
 import { AutoTrader } from './trading/autoTrader.js';
@@ -198,6 +199,19 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   if (!jito) {
     app.log.warn('JITO_BLOCK_ENGINE_URL not set — sends go direct, no Jito bundle protection');
   }
+  if (app.config.FAST_SEND_ENABLED) {
+    const senders = resolveAllRpcEndpoints(solanaConfig).map((e) => rpcSender(e.label, e.url));
+    if (app.config.JITO_BLOCK_ENGINE_URL)
+      senders.push(jitoTransactionSender(app.config.JITO_BLOCK_ENGINE_URL));
+    configureFastSend({ senders, rebroadcastMs: app.config.FAST_SEND_REBROADCAST_MS });
+    app.log.info(
+      {
+        endpoints: senders.map((s) => s.label),
+        rebroadcastMs: app.config.FAST_SEND_REBROADCAST_MS,
+      },
+      'FAST SEND enabled: swaps go to every RPC + Jito in parallel',
+    );
+  }
   const riskAnalyzer = new RiskAnalyzer(
     connection,
     dexScreener,
@@ -309,6 +323,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     {
       maxBuyPriceImpactPercent: app.config.MAX_BUY_PRICE_IMPACT_PERCENT,
       timeStopMinutes: app.config.TIME_STOP_MINUTES,
+      skipBuySimulation: app.config.SKIP_BUY_SIMULATION,
+      buyPriorityLevel: app.config.BUY_PRIORITY_LEVEL,
       timeStopMinProfitPercent: app.config.TIME_STOP_MIN_PROFIT_PERCENT,
     },
   );

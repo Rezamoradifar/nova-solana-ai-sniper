@@ -3,6 +3,12 @@ import { Connection, Keypair, VersionedTransaction } from '@solana/web3.js';
 import type { Logger } from '@nova/shared';
 import { JitoClient } from './jito.js';
 import { latencyTracker } from '../lib/latencyTracker.js';
+import {
+  getFastSendConfig,
+  sprayTransaction,
+  startRebroadcast,
+  type FastSendConfig,
+} from './fastSend.js';
 
 const JITO_TIP_LAMPORTS = 100_000;
 
@@ -10,6 +16,8 @@ export interface BroadcastDeps {
   connection: Connection;
   logger: Logger;
   jito?: JitoClient;
+  /** Overrides the worker-wide fast-send config (configureFastSend); mainly for tests. */
+  fastSend?: FastSendConfig | null;
 }
 
 /**
@@ -37,6 +45,11 @@ export async function broadcastTransaction(
       : signature;
 
   latencyTracker.mark(traceId, 'broadcast');
+
+  const fast = deps.fastSend === undefined ? getFastSendConfig() : (deps.fastSend ?? undefined);
+  if (fast && fast.senders.length > 0) {
+    return fastBroadcast(deps, fast, transaction, signer, signature, confirmStrategy, traceId);
+  }
 
   if (deps.jito) {
     try {
@@ -71,4 +84,56 @@ export async function broadcastTransaction(
   }
   latencyTracker.mark(traceId, 'rpc_confirmation');
   return signature;
+}
+
+/**
+ * Fast path: the same signed bytes go to every configured RPC and to Jito at
+ * once (no preflight), plus a Jito tip bundle when Jito is configured, and are
+ * re-sent every few seconds until they confirm. Because every copy carries the
+ * same signature, the swap can only ever execute once. The bundle's tip reuses
+ * the swap's own blockhash (no extra RPC round trip) and, bundles being atomic,
+ * is only paid if the bundle itself is what lands.
+ */
+async function fastBroadcast(
+  deps: BroadcastDeps,
+  fast: FastSendConfig,
+  transaction: VersionedTransaction,
+  signer: Keypair,
+  signature: string,
+  confirmStrategy: unknown,
+  traceId?: string,
+): Promise<string> {
+  const raw = transaction.serialize();
+
+  if (deps.jito) {
+    const tipTx = JitoClient.buildTipTransaction(
+      signer,
+      JITO_TIP_LAMPORTS,
+      transaction.message.recentBlockhash,
+    );
+    deps.jito.sendBundle([tipTx, transaction]).catch((err) => {
+      deps.logger.debug?.(
+        { err },
+        'fast send: Jito bundle not accepted (plain sends still in flight)',
+      );
+    });
+  }
+
+  await sprayTransaction(raw, fast.senders, deps.logger);
+  const stop = startRebroadcast(raw, fast.senders, fast.rebroadcastMs);
+  try {
+    const confirmation = await deps.connection.confirmTransaction(
+      confirmStrategy as never,
+      'confirmed',
+    );
+    if (confirmation.value.err) {
+      throw new Error(
+        `Transaction ${signature} landed but reverted on-chain: ${JSON.stringify(confirmation.value.err)}`,
+      );
+    }
+    latencyTracker.mark(traceId, 'rpc_confirmation');
+    return signature;
+  } finally {
+    stop();
+  }
 }

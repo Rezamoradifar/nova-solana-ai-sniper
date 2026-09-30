@@ -103,6 +103,18 @@ export const envSchema = z.object({
   // minutes (and before any take-profit stage has triggered). 0 disables.
   TIME_STOP_MINUTES: z.coerce.number().min(0).max(1440).default(0),
   TIME_STOP_MIN_PROFIT_PERCENT: z.coerce.number().min(-100).max(1000).default(10),
+  // Faster order execution. FAST_SEND broadcasts each signed swap to every
+  // configured RPC and Jito at once (no preflight) and re-broadcasts until it
+  // confirms, instead of one RPC with a preflight simulation.
+  FAST_SEND_ENABLED: booleanFlag(true),
+  FAST_SEND_REBROADCAST_MS: z.coerce.number().min(500).max(10000).default(2000),
+  // Skip the separate simulateTransaction round trip before a BUY. Saves one RPC
+  // round trip; a buy that would have failed simulation now fails on-chain and
+  // costs its network fee instead.
+  SKIP_BUY_SIMULATION: booleanFlag(false),
+  // Jupiter priority-fee tier for buys (sells always use veryHigh). The fee stays
+  // capped by MAX_PRIORITY_FEE_LAMPORTS either way.
+  BUY_PRIORITY_LEVEL: z.enum(['medium', 'high', 'veryHigh']).default('high'),
   DYNAMIC_SIZING_ENABLED: booleanFlag(false),
   PARTIAL_EXITS_ENABLED: booleanFlag(false),
   BEST_ROUTE_EXECUTION_ENABLED: booleanFlag(false),

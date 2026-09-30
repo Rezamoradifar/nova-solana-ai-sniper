@@ -5,6 +5,10 @@ export interface EntryExitGuards {
   /** Close a position still below timeStopMinProfitPercent after this many minutes. 0 disables. */
   timeStopMinutes: number;
   timeStopMinProfitPercent: number;
+  /** Skip the pre-send simulation round trip on buys. */
+  skipBuySimulation?: boolean;
+  /** Jupiter priority-fee tier for buys. */
+  buyPriorityLevel?: 'medium' | 'high' | 'veryHigh';
 }
 
 export const DEFAULT_ENTRY_EXIT_GUARDS: EntryExitGuards = {

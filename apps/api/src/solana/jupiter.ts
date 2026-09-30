@@ -37,6 +37,8 @@ export interface SwapBuildOptions {
    * Jupiter won't exceed, so a caller's configured ceiling is always respected.
    */
   dynamicSlippage?: boolean;
+  /** Skip the simulateTransaction round trip after signing (see SKIP_BUY_SIMULATION). */
+  skipSimulation?: boolean;
   /**
    * Production Bug Fix (2026-07-14): both HTTP calls below were previously
    * unbounded — a hung Jupiter response blocked the caller (and, for the
@@ -176,9 +178,11 @@ export class JupiterClient {
     transaction.sign([signer]);
     latencyTracker.mark(options?.traceId, 'tx_sign');
 
-    const sim = await connection.simulateTransaction(transaction, { sigVerify: false });
-    if (sim.value.err) {
-      throw new Error(`Swap simulation failed: ${JSON.stringify(sim.value.err)}`);
+    if (!options?.skipSimulation) {
+      const sim = await connection.simulateTransaction(transaction, { sigVerify: false });
+      if (sim.value.err) {
+        throw new Error(`Swap simulation failed: ${JSON.stringify(sim.value.err)}`);
+      }
     }
 
     return { quote, transaction, lastValidBlockHeight };
