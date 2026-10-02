@@ -47,11 +47,13 @@ async function main() {
       openrouterModel: env.OPENROUTER_MODEL,
     }),
   );
-  if (!provider) {
+  // Only the daily AI-written posts need a content generator; the real-data
+  // feeds (network trades, showcase, activity) run without one.
+  const dailyPostsEnabled = env.MARKETING_DAILY_POSTS_ENABLED && provider !== undefined;
+  if (env.MARKETING_DAILY_POSTS_ENABLED && !provider) {
     logger.warn(
-      'GEMINI_API_KEY/OPENROUTER_API_KEY not set — marketing-engine is disabled (no content generator available).',
+      'GEMINI_API_KEY/OPENROUTER_API_KEY not set — daily AI marketing posts are off; data feeds still run.',
     );
-    return;
   }
 
   const prisma = new PrismaClient();
@@ -63,10 +65,10 @@ async function main() {
   // cross-import of apps/api's live-trading DexScreener client.
   const marketData = new MarketDataClient(env.DEXSCREENER_API_BASE);
 
-  const stop = env.MARKETING_DAILY_POSTS_ENABLED
+  const stop = dailyPostsEnabled
     ? startDailyScheduler({
         prisma,
-        provider,
+        provider: provider!,
         bot,
         chatId: broadcastChatId,
         buttonContext: {
@@ -80,9 +82,7 @@ async function main() {
       })
     : () => {};
   logger.info(
-    env.MARKETING_DAILY_POSTS_ENABLED
-      ? 'marketing-engine scheduler started'
-      : 'MARKETING_DAILY_POSTS_ENABLED=false — daily marketing posts are off',
+    dailyPostsEnabled ? 'marketing-engine scheduler started' : 'daily marketing posts are off',
   );
 
   // Durable admin-broadcast queue (2026-07-31) — drains one-off announcements
@@ -259,7 +259,12 @@ async function main() {
     logger.info('NETWORK_TRADE_FEED_ENABLED not set — network trade feed is disabled');
   }
 
+  // Every feed timer is unref'd, so without the daily scheduler nothing would
+  // keep the process alive and Docker would restart it in a loop.
+  const keepAlive = setInterval(() => {}, 60_000);
+
   const shutdown = () => {
+    clearInterval(keepAlive);
     logger.info('shutting down marketing-engine');
     stop();
     tradeShowcase?.stop();
