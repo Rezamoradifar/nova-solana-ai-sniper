@@ -9,9 +9,12 @@ async function main() {
     return undefined;
   });
 
+  app.backgroundWorkersReady = Boolean(stopWorkers);
+
   await app.listen({ port: app.config.API_PORT, host: app.config.API_HOST });
 
   const shutdown = async () => {
+    app.backgroundWorkersReady = false;
     app.log.info('shutting down');
     await stopWorkers?.();
     await app.close();

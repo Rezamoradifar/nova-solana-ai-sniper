@@ -21,6 +21,7 @@ export const botEnvSchema = envSchema.pick({
   // secret than a JWT signer.
   JWT_SECRET: true,
   API_PORT: true,
+  INTERNAL_API_URL: true,
   TELEGRAM_TREND_SOURCE_ENABLED: true,
   TELEGRAM_TREND_CHANNELS: true,
   TELEGRAM_TREND_MIN_AI_SCORE: true,

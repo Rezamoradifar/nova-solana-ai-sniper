@@ -41,6 +41,7 @@ export const envSchema = z.object({
   REDIS_URL: z.string().min(1),
   API_PORT: z.coerce.number().default(4000),
   API_HOST: z.string().default('0.0.0.0'),
+  INTERNAL_API_URL: z.string().url().optional(),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
 
   // Trading mode — the one hard safety switch. Real swaps only ever execute
