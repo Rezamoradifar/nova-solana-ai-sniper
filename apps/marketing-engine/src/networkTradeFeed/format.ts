@@ -118,8 +118,9 @@ export function buildNetworkTradeCaptionHtml(
     `📊 Volume (24h): ${compactUsd(enrichment.volume24hUsd)}`,
     `🤖 AI Score: ${c.aiScore !== undefined ? `${Math.round(c.aiScore)}/100` : NOT_AVAILABLE}`,
     `🔀 DEX: ${escapeHtml(c.dex)}`,
-    `👛 Wallet: <code>${escapeHtml(shortKey(c.walletAddress))}</code>`,
-    `🧾 Tx: <code>${escapeHtml(shortKey(c.exitSignature))}</code>`,
+    `👛 Wallet: <a href="https://solscan.io/account/${encodeURIComponent(c.walletAddress)}">${escapeHtml(shortKey(c.walletAddress))}</a>`,
+    `🧾 Buy tx: <a href="https://solscan.io/tx/${encodeURIComponent(c.entrySignature)}">${escapeHtml(shortKey(c.entrySignature))}</a>`,
+    `🧾 Sell tx: <a href="https://solscan.io/tx/${encodeURIComponent(c.exitSignature)}">${escapeHtml(shortKey(c.exitSignature))}</a>`,
     `🕐 ${escapeHtml(fmtDate(now))} UTC`,
   ];
 

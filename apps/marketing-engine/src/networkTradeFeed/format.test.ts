@@ -122,7 +122,7 @@ describe('buildNetworkTradeCaptionHtml', () => {
     expect(naCount).toBeGreaterThanOrEqual(4); // liquidity, market cap, volume, ai score
   });
 
-  it('shows the wallet address and tx signature shortened, never the full values', () => {
+  it('shows the wallet and txs shortened, with the full values only in Solscan links', () => {
     const html = buildNetworkTradeCaptionHtml(
       candidate(),
       { liquidityUsd: 1000, marketCapUsd: 1000, volume24hUsd: 1000 },
@@ -130,9 +130,13 @@ describe('buildNetworkTradeCaptionHtml', () => {
       'NETWORK_PROFIT',
     );
 
-    expect(html).not.toContain(candidate().walletAddress);
-    expect(html).not.toContain(candidate().exitSignature);
-    expect(html).toContain('…');
+    const visible = html.replace(/<a href="[^"]*">/g, '');
+    expect(visible).not.toContain(candidate().walletAddress);
+    expect(visible).not.toContain(candidate().exitSignature);
+    expect(visible).toContain('…');
+    expect(html).toContain(`https://solscan.io/account/${candidate().walletAddress}`);
+    expect(html).toContain(`https://solscan.io/tx/${candidate().entrySignature}`);
+    expect(html).toContain(`https://solscan.io/tx/${candidate().exitSignature}`);
   });
 
   it("never exceeds Telegram's photo caption limit", () => {
