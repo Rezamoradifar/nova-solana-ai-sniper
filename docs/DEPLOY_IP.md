@@ -87,9 +87,24 @@ sudo python3 "$GSP_IP_SOURCE/scripts/deploy_ip.py" --ip 185.172.64.24 --https-po
 
 Resume selects the newest saved attempt matching this IP, port, and project. It requires the original nginx container/image, rendered configuration, Compose file list, and other project container IDs to remain unchanged. Compose contents must match their saved hash baseline; older records use a conservative check against the original manifest timestamp. It verifies and pins the existing built image, then continues certificate issuance **without rebuilding**. A completed or rolled-back attempt, changed baseline, or missing image stops recovery; the installer does not silently select an older attempt.
 
-Before starting Certbot, the installer checks actual `fcntl` locks and waits up to 30 seconds. If a lock remains held, it reports the holder's PID and process name when available. It does not delete lock files or kill processes. Sharing the existing ACME webroot alone does not establish a lock collision or identify its holder: Certbot locks its configuration, work, and log directories. See the official [Certbot lock-file documentation](https://eff-certbot.readthedocs.io/en/stable/using.html#lock-files).
+Before starting Certbot, the installer checks actual `fcntl` locks and waits up to 30 seconds. If a lock remains held, it reports the holder's PID and process name when available. Ordinary resume and automatic renewal never interrupt a process or delete lock files. Sharing the existing ACME webroot alone does not establish a lock collision or identify its holder: Certbot locks its configuration, work, and log directories. See the official [Certbot lock-file documentation](https://eff-certbot.readthedocs.io/en/stable/using.html#lock-files).
 
 On subsequent attempts, a persistent `TMPDIR` preserves early fallback diagnostics under `/var/lib/gsp-bank-sniper-ip/185.172.64.24/certbot_work/certbot-log-*/log`, including failures before normal logging starts. Review the reported lock holder and saved diagnostics before retrying if the lock remains occupied.
+
+#### Explicit recovery for the observed lock holder
+
+The reported diagnostic identified host PID **1404025** (`certbot`) holding all three private IP-store locks. To explicitly request interruption of that verified holder and resume this exact saved attempt, use the already refreshed `GSP_IP_SOURCE` checkout:
+
+```bash
+sudo python3 "$GSP_IP_SOURCE/scripts/deploy_ip.py" --ip 185.172.64.24 --https-port 8443 \
+  --project-dir /root/nova-solana-ai-sniper \
+  --resume /var/lib/gsp-bank-sniper-ip/185.172.64.24/20261002T191312Z-d0087e94/state.json \
+  --interrupt-certbot 1404025
+```
+
+`--interrupt-certbot` is an explicit opt-in available only with `--resume`. Before sending a signal, the installer verifies the current lock ownership, full container ID, main-process PID, pinned Certbot image, and exact private configuration/work/log bind mounts. The container must be running, unpaused, and have no automatic restart policy. A changed PID, changed holder, or failed verification cancels interruption; obtain fresh diagnostics instead of guessing another PID. The original nginx deployment baseline is checked before and after this step.
+
+The installer sends **one SIGINT** to that full container ID, then requires both container exit and released locks within 30 seconds. It stops if either condition fails and never escalates to a forced kill. Do not manually delete lock files. Docker's [`--signal` documentation](https://docs.docker.com/reference/cli/docker/container/kill/) describes this signal selection. Default resume and automatic renewal never take this interruption action.
 
 `READY: https://185.172.64.24:8443` is **installer output**, not a shell command. Treat the website as deployed only after the installer finishes its checks and prints that line.
 

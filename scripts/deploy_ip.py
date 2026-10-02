@@ -271,13 +271,98 @@ def run_certbot(state, initial=False):
         print(
             "Certbot did not finish. Its logs are retained in " + state["certbot_logs"]
             + "; early failures are in " + state["certbot_work"] + "/certbot-log-*/log. "
-            "No lock files were removed. If a lock holder was reported, wait for it to finish; "
+            "No lock files were manually removed. If a lock holder was reported, wait for it to finish; "
             "otherwise inspect the saved log. "
             + ("Retry deployment with --resume after resolving the error." if initial else
                "Retry the renewal service after resolving the error."),
             flush=True,
         )
         raise
+
+
+def interrupt_certbot(state, pid):
+    """Interrupt one explicitly selected, verified holder; never escalate signals."""
+    from certbot_locks import CertbotLockError, inspect_certbot_locks
+
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 1:
+        raise DeployError("--interrupt-certbot requires the reported host PID, greater than 1.")
+    stores = {
+        "/etc/letsencrypt": Path(state["certificates"]).resolve(),
+        "/var/lib/letsencrypt": Path(state["certbot_work"]).resolve(),
+        "/var/log/letsencrypt": Path(state["certbot_logs"]).resolve(),
+    }
+    expected_paths = {path / ".certbot.lock" for path in stores.values()}
+
+    def running_ids():
+        return run(["docker", "ps", "--no-trunc", "--format", "{{.ID}}"], capture=True).splitlines()
+
+    def check_holders(require_all=True):
+        held = inspect_certbot_locks(state)
+        for item in held:
+            if not item.owners or any(owner.pid != pid for owner in item.owners):
+                raise DeployError("Certbot lock ownership changed or is unknown; no other process will be interrupted.")
+        if held and require_all and {item.path.resolve() for item in held} != expected_paths:
+            raise DeployError("The reported PID no longer holds all three expected locks; interruption cancelled.")
+        return held
+
+    def check_container(container):
+        if inspect_value(container, ".State.Pid") != pid:
+            raise DeployError("The Certbot container PID changed; interruption cancelled.")
+        if not inspect_value(container, ".State.Running") or inspect_value(container, ".State.Paused"):
+            raise DeployError("The Certbot container is stopped or paused; interruption cancelled.")
+        if inspect_value(container, ".Config.Image") != CERTBOT_IMAGE:
+            raise DeployError("The lock holder is not the expected Certbot image; interruption cancelled.")
+        if inspect_value(container, ".HostConfig.RestartPolicy.Name") not in ("", "no"):
+            raise DeployError("The Certbot container has an automatic restart policy; interruption cancelled.")
+        mounts = inspect_value(container, ".Mounts")
+        for target, source in stores.items():
+            matched = [mount for mount in mounts if mount.get("Destination") == target]
+            if len(matched) != 1 or matched[0].get("Type") != "bind" or Path(matched[0]["Source"]).resolve() != source:
+                raise DeployError("The lock holder's certificate mounts do not match this deployment; interruption cancelled.")
+
+    def wait_for_exit(container):
+        deadline = time.monotonic() + 30.0
+        while True:
+            held = check_holders(require_all=False)
+            if container not in running_ids() and not held:
+                print("The verified Certbot container exited and its locks are released; resuming installation.", flush=True)
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DeployError("Certbot did not exit and release its locks within 30 seconds; no stronger signal was sent.")
+            time.sleep(min(1.0, remaining))
+
+    try:
+        if not check_holders():
+            print("Certbot locks are already available; no process was interrupted.", flush=True)
+            return
+        candidates = []
+        for container in running_ids():
+            try:
+                if inspect_value(container, ".State.Pid") == pid:
+                    candidates.append(container)
+            except subprocess.CalledProcessError:
+                # A different short-lived container may exit during enumeration.
+                continue
+        if len(candidates) != 1:
+            raise DeployError("The reported PID is not the main process of exactly one running Docker container; interruption cancelled.")
+        container = candidates[0]
+        # The full immutable container ID protects against host-PID reuse.
+        check_container(container)
+        if not check_holders():
+            print("Certbot released its locks before interruption; waiting for its container to exit.", flush=True)
+            wait_for_exit(container)
+            return
+        print(f"Interrupting verified Certbot container {container} (PID {pid}) with SIGINT...", flush=True)
+        try:
+            run(["docker", "kill", "--signal=SIGINT", container])
+        except subprocess.CalledProcessError as error:
+            if container in running_ids() or check_holders(require_all=False):
+                raise DeployError("Could not interrupt the verified Certbot container; no stronger signal was sent.") from error
+            return
+        wait_for_exit(container)
+    except CertbotLockError as error:
+        raise DeployError(str(error)) from error
 
 
 def check_site(state):
@@ -495,10 +580,13 @@ def check_saved_overrides(state, manifest, add_port_mapping):
             raise DeployError("Saved nginx override no longer matches the prepared deployment: " + key)
 
 
-def finish_deployment(state, manifest):
+def finish_deployment(state, manifest, interrupt_pid=None):
     new_override = Path(state["new_override"])
     recovery_manager = manifest.parent / "manager.py"
     check_baseline(state, manifest)
+    if interrupt_pid is not None:
+        interrupt_certbot(state, interrupt_pid)
+        check_baseline(state, manifest)
     print("Requesting trusted HTTPS for " + state["ip"] + ". Answer Certbot's prompts in this terminal.", flush=True)
     run_certbot(state, initial=True)
     save_state(state, manifest, "certificate_ready")
@@ -655,7 +743,7 @@ def resume_manifest(ip, https_port, project_dir, selection):
     return manifest
 
 
-def resume(ip, project_dir, https_port, selection):
+def resume(ip, project_dir, https_port, selection, interrupt_pid=None):
     from ip_nginx import render_ip_config
 
     manifest = resume_manifest(ip, https_port, project_dir, selection)
@@ -703,7 +791,7 @@ def resume(ip, project_dir, https_port, selection):
     pin_built_image(state, manifest)
     copy_manager(release)
     print(f"Resuming: {manifest}\nReusing built image: {state['image_id']} (no rebuild).", flush=True)
-    finish_deployment(state, manifest)
+    finish_deployment(state, manifest, interrupt_pid=interrupt_pid)
 
 
 def main():
@@ -716,9 +804,12 @@ def main():
     parser.add_argument("--project-dir", type=Path, help="Existing running Nova checkout, if detection is ambiguous")
     parser.add_argument("--https-port", type=int, default=443, help="Public HTTPS port, for example 8443 (default: 443)")
     parser.add_argument("--resume", metavar="STATE_OR_LATEST", help="Resume a pre-cutover build for --ip without rebuilding")
+    parser.add_argument("--interrupt-certbot", type=int, metavar="PID", help="With --resume, send SIGINT only to this verified Certbot lock-holder container")
     args = parser.parse_args()
     if args.resume and not args.ip:
         parser.error("--resume requires --ip and the original --https-port")
+    if args.interrupt_certbot is not None and (not args.resume or not args.ip or args.interrupt_certbot <= 1):
+        parser.error("--interrupt-certbot requires --ip --resume and the reported host PID greater than 1")
     if os.geteuid() != 0:
         parser.error("Run with sudo on the VPS; Docker, certificate storage and systemd need root access.")
     os.umask(0o077)
@@ -731,7 +822,7 @@ def main():
     with operation_lock():
         if args.ip:
             if args.resume:
-                resume(str(address), args.project_dir, args.https_port, args.resume)
+                resume(str(address), args.project_dir, args.https_port, args.resume, interrupt_pid=args.interrupt_certbot)
             else:
                 deploy(str(address), args.project_dir, args.https_port)
         else:
