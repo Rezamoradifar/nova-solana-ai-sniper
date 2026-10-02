@@ -12,14 +12,26 @@ import { WalletDetail } from './pages/WalletDetail.js';
 import { Snipes } from './pages/Snipes.js';
 import { Leaderboard } from './pages/Leaderboard.js';
 import { Logs } from './pages/Logs.js';
-import { Landing } from './pages/Landing.js';
+import Landing from './pages/Landing.js';
+import { PublicLayout } from './components/public/PublicLayout.js';
+import PublicMarkets from './pages/PublicMarkets.js';
+import PublicArbitrage from './pages/PublicArbitrage.js';
+import { PublicPlatform, PublicPricing, PublicSecurity } from './pages/PublicPlatform.js';
 
 export function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Landing />} />
+          <Route element={<PublicLayout />}>
+            <Route path="/" element={<Landing />} />
+            <Route path="/arbitrage" element={<PublicArbitrage />} />
+            <Route path="/markets" element={<PublicMarkets />} />
+            <Route path="/platform" element={<PublicPlatform />} />
+            <Route path="/security" element={<PublicSecurity />} />
+            <Route path="/pricing" element={<PublicPricing />} />
+            <Route path="*" element={<Landing />} />
+          </Route>
           <Route path="/login" element={<Login />} />
           <Route
             path="/dashboard"

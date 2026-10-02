@@ -60,8 +60,7 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test:
-        [
+      test: [
           'CMD',
           'node',
           '-e',

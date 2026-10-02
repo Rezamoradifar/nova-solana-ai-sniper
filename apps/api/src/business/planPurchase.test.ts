@@ -35,12 +35,10 @@ function setup(
   };
   const connection = {
     getBalance: vi.fn().mockResolvedValue(balanceLamports),
-    getLatestBlockhash: vi
-      .fn()
-      .mockResolvedValue({
-        blockhash: Keypair.generate().publicKey.toBase58(),
-        lastValidBlockHeight: 100,
-      }),
+    getLatestBlockhash: vi.fn().mockResolvedValue({
+      blockhash: Keypair.generate().publicKey.toBase58(),
+      lastValidBlockHeight: 100,
+    }),
     sendTransaction: vi.fn().mockResolvedValue('sig'),
     confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
   };

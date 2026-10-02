@@ -10,6 +10,7 @@ import redisPlugin from './plugins/redis.js';
 import authPlugin from './plugins/auth.js';
 import healthRoutes from './routes/health.js';
 import metricsRoutes from './routes/metrics.js';
+import publicArbitrageRoutes from './routes/publicArbitrage.js';
 import authRoutes from './routes/auth.js';
 import tokenRoutes from './routes/tokens.js';
 import tradeRoutes from './routes/trades.js';
@@ -54,6 +55,7 @@ export async function buildApp() {
 
   await app.register(healthRoutes);
   await app.register(metricsRoutes);
+  await app.register(publicArbitrageRoutes);
   await app.register(authRoutes);
   await app.register(tokenRoutes);
   await app.register(tradeRoutes);

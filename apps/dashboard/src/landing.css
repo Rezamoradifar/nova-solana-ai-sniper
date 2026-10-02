@@ -1,184 +1,3895 @@
-@font-face { font-family: 'Vazirmatn'; src: url('./assets/fonts/Vazirmatn-Medium.ttf') format('truetype'); font-weight: 400 500; font-display: swap; }
-@font-face { font-family: 'Vazirmatn'; src: url('./assets/fonts/Vazirmatn-Bold.ttf') format('truetype'); font-weight: 600 700; font-display: swap; }
-@font-face { font-family: 'Vazirmatn'; src: url('./assets/fonts/Vazirmatn-Black.ttf') format('truetype'); font-weight: 800 900; font-display: swap; }
-@font-face { font-family: 'JetBrains Mono'; src: url('./assets/fonts/JetBrainsMono-Bold.ttf') format('truetype'); font-weight: 700; font-display: swap; }
-
-.lp {
-  --bg: #07090f; --bg2: #0c1018; --line: rgba(255,255,255,.08); --text: #f2f4fa; --muted: #8a93a8;
-  --green: #22d97a; --green-soft: #a6f7cf; --blue: #4f8cff;
-  position: relative; min-height: 100vh; overflow-x: hidden;
-  background: var(--bg); color: var(--text);
-  font-family: 'Vazirmatn', system-ui, sans-serif; line-height: 1.7;
+/* Public GSP Bank Sniper experience. Styles stay scoped away from account screens. */
+.nova-site {
+  --bg: #090c0b;
+  --panel: #101512;
+  --panel-2: #141b16;
+  --line: #263028;
+  --lime: #c1ff75;
+  --text: #f0f4ed;
+  --muted: #9aa69d;
+  --dim: #738278;
+  --negative: #f098a0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Inter, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
 }
-.lp-en { font-family: 'Vazirmatn', 'Inter', system-ui, sans-serif; }
-.lp *, .lp *::before, .lp *::after { box-sizing: border-box; }
-.lp a { color: inherit; text-decoration: none; }
-.lp h1, .lp h2, .lp h3 { margin: 0; line-height: 1.3; }
-.lp p { margin: 0; }
-.lp-glow {
-  position: absolute; inset: -200px 0 auto 0; height: 900px; pointer-events: none;
+.nova-site * {
+  box-sizing: border-box;
+}
+.nova-site a {
+  color: inherit;
+  text-decoration: none;
+}
+.nova-site button,
+.nova-site input,
+.nova-site select {
+  font: inherit;
+}
+.nova-site button {
+  cursor: pointer;
+}
+.nova-site button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+.nova-site button {
+  color: inherit;
+}
+.nova-site input,
+.nova-site select {
+  min-width: 0;
+}
+.nova-site button,
+.nova-site a,
+.nova-site input,
+.nova-site select,
+.nova-site summary {
+  -webkit-tap-highlight-color: transparent;
+}
+.nova-site :focus-visible {
+  outline: 2px solid var(--lime);
+  outline-offset: 5px;
+}
+.nova-site h1,
+.nova-site h2,
+.nova-site h3,
+.nova-site p {
+  margin: 0;
+}
+.nova-site h1,
+.nova-site h2,
+.nova-site h3 {
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  line-height: 1.08;
+}
+.nova-site h2 {
+  font-size: 52px;
+}
+.nova-site h3 {
+  font-size: 27px;
+}
+.nova-site .site-container {
+  width: calc(100% - 112px);
+  max-width: 1320px;
+  margin-inline: auto;
+}
+.nova-site .site-section {
+  padding-block: 108px;
+}
+.nova-site .muted {
+  color: var(--muted);
+}
+.nova-site .positive {
+  color: var(--lime);
+}
+.nova-site .negative {
+  color: var(--negative);
+}
+.nova-site .number {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+  white-space: nowrap;
+}
+.nova-site .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.nova-site .skip-link {
+  position: fixed;
+  top: -100px;
+  left: 16px;
+  z-index: 100;
+  background: var(--lime);
+  color: #102007;
+  padding: 12px 24px;
+}
+.nova-site .skip-link:focus {
+  top: 10px;
+}
+.nova-site .nova-header {
+  height: 88px;
+  border-bottom: 1px solid #ffffff0c;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: #090c0bf2;
+  backdrop-filter: blur(18px);
+}
+.nova-site .header-inner {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+}
+.nova-site .nova-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 26px;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+.nova-site .nova-brand > svg {
+  color: var(--lime);
+  flex-shrink: 0;
+}
+.nova-site .brand-period {
+  color: var(--lime);
+}
+.nova-site .brand-word {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.nova-site .brand-word > span {
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  font-weight: 500;
+  color: #b9c5bc;
+}
+.nova-site .main-nav {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+.nova-site .main-nav > a {
+  font-size: 13px;
+  font-weight: 500;
+  color: #a7b1a9;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transition: color 0.2s;
+}
+.nova-site .main-nav > a:hover,
+.nova-site .main-nav > a.active {
+  color: #fff;
+}
+.nova-site .nav-new {
+  font-size: 8px;
+  color: var(--lime);
+  border: 1px solid #c1ff7545;
+  padding: 1px 4px;
+  letter-spacing: 0.07em;
+  border-radius: 3px;
+  line-height: 1.6;
+}
+.nova-site .header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.nova-site .menu-toggle {
+  display: none !important;
+}
+.nova-site .nova-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  background: var(--lime);
+  color: #17220e !important;
+  padding: 15px 22px;
+  border: 1px solid var(--lime);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+  border-radius: 7px;
+  transition:
+    background 0.2s,
+    transform 0.2s;
+  white-space: nowrap;
+}
+.nova-site .nova-button:hover {
+  background: #d1ff9b;
+  transform: translateY(-2px);
+}
+.nova-site .button-sm {
+  padding: 11px 20px;
+  font-size: 12px;
+}
+.nova-site .button-ghost {
+  background: transparent;
+  color: var(--text) !important;
+  border-color: transparent;
+}
+.nova-site .button-ghost:hover {
+  background: #ffffff09;
+}
+.nova-site .button-outline {
+  background: transparent;
+  color: var(--text) !important;
+  border-color: #47523f;
+}
+.nova-site .button-outline:hover {
+  background: #c1ff7510;
+  border-color: var(--lime);
+}
+.nova-site .button-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.nova-site .text-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  background: none;
+  border: 0;
+  padding: 0;
+  transition: color 0.2s;
+}
+.nova-site .text-link:hover {
+  color: var(--lime);
+}
+.nova-site .text-link > span:last-child {
+  font-size: 19px;
+}
+.nova-site .icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+}
+.nova-site .icon-button:hover:not(:disabled) {
+  background: #ffffff09;
+  border-color: #5a6b5d;
+}
+.nova-site .eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: #b9c6bb;
+  font-weight: 600;
+  line-height: 1.5;
+  margin-bottom: 23px;
+}
+.nova-site .eyebrow > span:empty {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  background: var(--lime);
+  border-radius: 50%;
+  box-shadow: 0 0 12px #c1ff7530;
+}
+.nova-site .nova-hero {
+  position: relative;
+  min-height: 690px;
+  overflow: hidden;
+  background: #080a09;
+}
+.nova-site .hero-art {
+  max-width: none;
+  position: absolute;
+  right: -10%;
+  top: -13%;
+  width: 107%;
+  height: 119%;
+  object-fit: cover;
+  object-position: center;
+}
+.nova-site .hero-shade {
+  position: absolute;
+  inset: 0;
   background:
-    radial-gradient(600px 400px at 70% 20%, rgba(34,217,122,.18), transparent 70%),
-    radial-gradient(500px 360px at 15% 10%, rgba(79,140,255,.12), transparent 70%);
+    linear-gradient(90deg, #090c0b 0%, #090c0bc9 28%, #090c0b0a 65%),
+    linear-gradient(0deg, #090c0b 0%, transparent 25%);
 }
-.lp-wrap { width: 100%; max-width: 1180px; margin: 0 auto; padding: 0 20px; position: relative; }
-
-/* nav */
-.lp-nav { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px); background: rgba(7,9,15,.72); border-bottom: 1px solid var(--line); }
-.lp-nav-inner { display: flex; align-items: center; gap: 24px; height: 68px; }
-.lp-brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: .3px; white-space: nowrap; }
-.lp-links { display: flex; gap: 22px; margin-inline-start: auto; font-size: 15px; color: var(--muted); }
-.lp-links a:hover { color: var(--text); }
-.lp-nav-actions { display: flex; align-items: center; gap: 10px; }
-.lp-lang { background: transparent; border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 7px 11px; font: inherit; font-size: 13px; cursor: pointer; }
-.lp-burger { display: none; background: transparent; border: 1px solid var(--line); color: var(--text); border-radius: 10px; width: 40px; height: 38px; font-size: 18px; cursor: pointer; }
-
-.lp-btn { display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; padding: 10px 18px; font-weight: 700; font-size: 15px; transition: transform .15s, box-shadow .15s, background .15s; white-space: nowrap; }
-.lp-btn-primary { background: linear-gradient(135deg, var(--green-soft), var(--green)); color: #05140c; box-shadow: 0 8px 30px rgba(34,217,122,.25); }
-.lp-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 12px 36px rgba(34,217,122,.35); }
-.lp-btn-ghost { border: 1px solid var(--line); background: rgba(255,255,255,.03); }
-.lp-btn-ghost:hover { background: rgba(255,255,255,.07); }
-.lp-btn-lg { padding: 14px 26px; font-size: 16px; border-radius: 14px; }
-
-/* hero */
-.lp-hero { display: grid; grid-template-columns: 1.15fr .85fr; gap: 56px; align-items: center; padding-top: 72px; padding-bottom: 56px; }
-.lp-badge { display: inline-block; padding: 6px 14px; border-radius: 999px; font-size: 13px; color: var(--green); background: rgba(34,217,122,.1); border: 1px solid rgba(34,217,122,.3); margin-bottom: 20px; }
-.lp-badge-blue { color: var(--blue); background: rgba(79,140,255,.1); border-color: rgba(79,140,255,.3); }
-.lp-hero h1 { font-size: clamp(32px, 5vw, 54px); font-weight: 900; letter-spacing: -.5px; }
-.lp-hero h1 em { font-style: normal; background: linear-gradient(135deg, var(--green-soft), var(--green)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.lp-hero p { margin-top: 20px; color: var(--muted); font-size: 18px; max-width: 580px; }
-.lp-hero-ctas { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
-.lp-hero small { display: block; margin-top: 16px; color: var(--muted); font-size: 13px; }
-
-/* card preview */
-.lp-card { margin: 0; position: relative; border-radius: 26px; padding: 22px; background: radial-gradient(420px 260px at 50% 30%, rgba(31,191,108,.28), transparent 70%), #07090f; border: 1px solid var(--line); box-shadow: 0 40px 120px rgba(0,0,0,.6), 0 0 0 1px rgba(34,217,122,.08); direction: ltr; font-family: 'Vazirmatn', sans-serif; transform: rotate(-1.5deg); }
-.lp-card::before { content: ''; position: absolute; inset: 0 0 auto 0; height: 4px; border-radius: 26px 26px 0 0; background: linear-gradient(90deg, var(--green-soft), var(--green)); }
-.lp-card-top { display: flex; justify-content: space-between; align-items: center; }
-.lp-card-brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13px; letter-spacing: 2.5px; }
-.lp-pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; letter-spacing: .5px; }
-.lp-pill-green { color: var(--green); background: rgba(34,217,122,.12); border: 1px solid rgba(34,217,122,.35); }
-.lp-pill-muted { color: var(--muted); background: rgba(255,255,255,.05); border: 1px solid var(--line); margin-left: 6px; }
-.lp-card-token { display: flex; gap: 12px; align-items: center; margin-top: 20px; }
-.lp-card-avatar { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: #161c2c; border: 2px solid rgba(34,217,122,.6); font-weight: 800; color: var(--muted); }
-.lp-card-name { font-weight: 800; font-size: 20px; }
-.lp-card-sym { font-family: 'JetBrains Mono', monospace; color: var(--muted); font-size: 13px; }
-.lp-card-label { text-align: center; margin-top: 22px; color: var(--muted); font-size: 11px; letter-spacing: 4px; font-weight: 700; }
-.lp-card-hero { text-align: center; font-family: 'JetBrains Mono', monospace; font-size: clamp(52px, 7vw, 76px); font-weight: 700; line-height: 1.05; background: linear-gradient(180deg, var(--green-soft), var(--green)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.lp-card-sub { text-align: center; font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 15px; }
-.lp-card-sub span { color: var(--green-soft); }
-.lp-card-chart { width: 100%; height: 90px; margin-top: 16px; border-radius: 14px; background: rgba(255,255,255,.03); border: 1px solid var(--line); }
-.lp-card-grid { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 12px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.03); }
-.lp-card-grid div { padding: 10px 12px; font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; }
-.lp-card-grid div + div { border-left: 1px solid var(--line); }
-.lp-card-grid span { display: block; font-family: 'Vazirmatn', sans-serif; color: var(--muted); font-size: 10px; letter-spacing: 1.5px; }
-.lp-card figcaption { margin-top: 12px; text-align: center; color: var(--muted); font-size: 12px; }
-
-/* stats */
-.lp-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 20px; overflow: hidden; }
-.lp-stats div { background: var(--bg2); padding: 24px 20px; text-align: center; }
-.lp-stats strong { display: block; font-size: 30px; font-weight: 900; color: var(--green); }
-.lp-stats span { color: var(--muted); font-size: 14px; }
-
-/* sections */
-.lp-section { padding-top: 100px; }
-.lp-section > h2, .lp-cta h2 { font-size: clamp(26px, 3.4vw, 38px); font-weight: 900; text-align: center; margin-bottom: 40px; }
-.lp-split > div > h2 { font-size: clamp(26px, 3.4vw, 36px); font-weight: 900; margin-bottom: 16px; }
-.lp-lead { color: var(--muted); font-size: 17px; }
-.lp .lp-center { text-align: center; max-width: 640px; margin: -20px auto 36px; }
-.lp-grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-.lp-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.lp-feature { padding: 24px; border-radius: 20px; background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.015)); border: 1px solid var(--line); transition: border-color .2s, transform .2s; }
-.lp-feature:hover { border-color: rgba(34,217,122,.35); transform: translateY(-2px); }
-.lp-icon { display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px; background: rgba(34,217,122,.1); font-size: 22px; margin-bottom: 16px; }
-.lp-feature h3 { font-size: 17px; font-weight: 800; margin-bottom: 8px; }
-.lp-feature p { color: var(--muted); font-size: 14.5px; }
-
-.lp-steps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; counter-reset: s; }
-.lp-steps li { position: relative; padding: 26px 22px; border-radius: 20px; border: 1px solid var(--line); background: var(--bg2); }
-.lp-step-n { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; font-weight: 900; color: #05140c; background: linear-gradient(135deg, var(--green-soft), var(--green)); margin-bottom: 14px; }
-.lp-steps h3 { font-size: 18px; font-weight: 800; margin-bottom: 6px; }
-.lp-steps p { color: var(--muted); font-size: 14.5px; }
-
-.lp-split { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; align-items: center; }
-.lp-checks { list-style: none; padding: 0; margin: 22px 0 0; display: grid; gap: 10px; }
-.lp-checks li { padding-inline-start: 30px; position: relative; }
-.lp-checks li::before { content: '✓'; position: absolute; inset-inline-start: 0; top: 0; width: 20px; height: 20px; margin-top: 4px; border-radius: 6px; display: grid; place-items: center; font-size: 12px; font-weight: 900; color: #05140c; background: var(--green); }
-.lp-panel { border-radius: 24px; border: 1px solid var(--line); background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015)); padding: 24px; direction: ltr; }
-.lp-tx-row { display: flex; justify-content: space-between; align-items: center; padding: 16px 18px; border-radius: 14px; background: rgba(0,0,0,.3); border: 1px solid var(--line); margin-bottom: 10px; }
-.lp-tx-row code { font-family: 'JetBrains Mono', monospace; color: var(--green); font-weight: 700; }
-.lp-tx-foot { color: var(--muted); font-size: 12px; text-align: center; margin-top: 6px; letter-spacing: 1px; }
-.lp-arb-route { display: flex; align-items: center; justify-content: center; gap: 12px; font-family: 'JetBrains Mono', monospace; font-weight: 700; }
-.lp-arb-route span { padding: 12px 16px; border-radius: 14px; background: rgba(79,140,255,.12); border: 1px solid rgba(79,140,255,.35); }
-.lp-arb-route i { font-style: normal; color: var(--muted); }
-.lp-arb-dex { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 22px; }
-.lp-arb-dex span { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 13px; }
-.lp-arb-line { display: grid; grid-template-columns: 1fr 1.4fr .6fr; margin-top: 22px; border-radius: 12px; overflow: hidden; font-size: 12px; text-align: center; font-weight: 700; }
-.lp-arb-line span { padding: 10px 4px; }
-.lp-arb-line span:nth-child(1) { background: rgba(79,140,255,.25); }
-.lp-arb-line span:nth-child(2) { background: rgba(245,67,60,.2); }
-.lp-arb-line span:nth-child(3) { background: rgba(34,217,122,.25); }
-
-.lp-price { padding: 30px 24px; border-radius: 22px; border: 1px solid var(--line); background: var(--bg2); text-align: center; }
-.lp-price-main { border-color: rgba(34,217,122,.45); background: radial-gradient(300px 200px at 50% 0%, rgba(34,217,122,.14), transparent 70%), var(--bg2); }
-.lp-price strong { display: block; font-family: 'JetBrains Mono', monospace; font-size: 48px; color: var(--green); }
-.lp-price h3 { font-size: 17px; font-weight: 800; margin-top: 6px; }
-.lp-price p { color: var(--muted); font-size: 14px; margin-top: 6px; }
-.lp .lp-note { color: var(--muted); font-size: 13px; margin-top: 20px; }
-
-.lp-faq { max-width: 820px; }
-.lp-q { border: 1px solid var(--line); border-radius: 16px; margin-bottom: 10px; background: var(--bg2); }
-.lp-q button { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 20px; background: none; border: 0; color: var(--text); font: inherit; font-weight: 700; font-size: 16px; cursor: pointer; text-align: start; }
-.lp-q b { color: var(--green); font-size: 22px; }
-.lp-q p { padding: 0 20px 18px; color: var(--muted); }
-.lp-q-open { border-color: rgba(34,217,122,.3); }
-
-.lp-cta { margin-top: 100px; padding: 60px 24px; text-align: center; border-radius: 28px; border: 1px solid rgba(34,217,122,.3); background: radial-gradient(500px 260px at 50% 0%, rgba(34,217,122,.18), transparent 70%), var(--bg2); }
-.lp-cta h2 { margin-bottom: 10px; }
-.lp-cta p { color: var(--muted); margin-bottom: 26px; }
-
-.lp-footer { margin-top: 80px; border-top: 1px solid var(--line); padding: 36px 0 44px; }
-.lp-risk { color: var(--muted); font-size: 13px; padding: 16px 18px; border-radius: 14px; border: 1px solid rgba(245,67,60,.25); background: rgba(245,67,60,.06); }
-.lp-foot-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 24px; color: var(--muted); font-size: 13px; }
-
-@media (max-width: 1020px) {
-  .lp-links { display: none; }
-  .lp-links-open { display: flex; flex-direction: column; position: absolute; top: 68px; inset-inline: 0; padding: 16px 20px; gap: 14px; background: rgba(7,9,15,.97); border-bottom: 1px solid var(--line); }
-  .lp-burger { display: block; }
-  .lp-nav-actions { margin-inline-start: auto; }
-  .lp-hero, .lp-split { grid-template-columns: 1fr; gap: 40px; }
-  .lp-split-rev > :first-child { order: 2; }
-  .lp-grid4, .lp-steps { grid-template-columns: repeat(2, 1fr); }
-  .lp-card { max-width: 440px; margin: 0 auto; width: 100%; }
+.nova-site .hero-content {
+  position: relative;
+  padding-top: 106px;
+  z-index: 1;
 }
-@media (max-width: 640px) {
-  .lp-hide-sm { display: none; }
-  .lp-hero { padding-top: 40px; }
-  .lp-hero p { font-size: 16px; }
-  .lp-stats { grid-template-columns: repeat(2, 1fr); }
-  .lp-grid4, .lp-steps, .lp-grid3 { grid-template-columns: 1fr; }
-  .lp-section { padding-top: 72px; }
-  .lp-card { transform: none; }
+.nova-site .hero-content .eyebrow {
+  margin-bottom: 30px;
+  color: #d0dbce;
 }
-@media (max-width: 400px) {
-  .lp-hide-xs { display: none; }
-  .lp-wrap { padding: 0 16px; }
-  .lp-brand span { font-size: 15px; }
+.nova-site .hero-content h1 {
+  font-size: clamp(54px, 6.3vw, 94px);
+  font-weight: 450;
+  letter-spacing: -0.06em;
+  line-height: 1.04;
+  max-width: 780px;
+}
+.nova-site .hero-content h1 > span {
+  color: #b9c8b6;
+}
+.nova-site .hero-content > p {
+  font-size: 16px;
+  line-height: 1.8;
+  color: #a4b0a6;
+  margin: 27px 0 30px;
+  max-width: 405px;
+}
+.nova-site .hero-caption {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 40px;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.nova-site .hero-caption strong {
+  font-weight: 400;
+  color: #b9c5bb;
+}
+.nova-site .orbital-symbol {
+  font-size: 38px;
+  line-height: 1;
+  color: #778f6b;
+}
+.nova-site .hero-bottom {
+  position: absolute;
+  bottom: 30px;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  color: #69786c;
+}
+.nova-site .hero-bottom a {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  color: #a1b09f;
+}
+.nova-site .hero-bottom a > span {
+  font-size: 19px;
+}
+.nova-site .market-ticker {
+  border-block: 1px solid var(--line);
+  display: flex;
+  align-items: stretch;
+  background: #0d120f;
+  padding-inline: max(56px, calc((100vw - 1320px) / 2));
+  min-height: 82px;
+  gap: 30px;
+}
+.nova-site .ticker-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  flex-shrink: 0;
+  padding-right: 24px;
+  border-right: 1px solid var(--line);
+  font-size: 12px;
+  min-width: 156px;
+}
+.nova-site .ticker-network {
+  font-size: 8px;
+  color: var(--dim);
+  position: absolute;
+  bottom: 10px;
+  left: 14px;
+  letter-spacing: 0.15em;
+}
+.nova-site .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lime);
+  display: inline-block;
+  flex-shrink: 0;
+}
+.nova-site .status-dot.offline {
+  background: #ef9b8f;
+}
+.nova-site .status-dot.pending {
+  background: #c4b37f;
+}
+.nova-site .status-dot.pulse {
+  animation: status-pulse 1.5s infinite;
+}
+.nova-site .ticker-items {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: 1;
+  gap: 28px;
+  min-width: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.nova-site .ticker-item {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 1px 11px;
+  white-space: nowrap;
+  font-size: 10px;
+  min-width: 115px;
+}
+.nova-site .ticker-item > span:first-child {
+  font-size: 10px;
+  color: #a9b5ac;
+  letter-spacing: 0.05em;
+}
+.nova-site .ticker-item > strong {
+  font-size: 13px;
+  text-align: right;
+  font-weight: 500;
+  grid-row: 1/3;
+  grid-column: 2;
+  align-self: center;
+}
+.nova-site .ticker-item > span:last-child {
+  font-size: 9px;
+}
+.nova-site .ticker-wait {
+  font-size: 12px;
+}
+.nova-site .venue-strip {
+  height: 130px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  border-bottom: 1px solid var(--line);
+}
+.nova-site .venue-strip > span {
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--dim);
+  min-width: 120px;
+}
+.nova-site .venue-strip > div {
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  color: #a2ada5;
+  opacity: 0.8;
+}
+.nova-site .venue-strip .venue-orca {
+  font-size: 29px;
+  letter-spacing: -0.07em;
+}
+.nova-site .venue-strip .venue-jupiter {
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+.nova-site .venue-strip > div .brand-period {
+  padding-left: 4px;
+  font-size: 19px;
+}
+.nova-site .venue-strip > a {
+  color: var(--dim);
+}
+.nova-site .section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 40px;
+  margin-bottom: 42px;
+}
+.nova-site .section-heading .eyebrow {
+  margin-bottom: 21px;
+}
+.nova-site .section-heading-aside {
+  max-width: 295px;
+  padding-bottom: 3px;
+}
+.nova-site .section-heading-aside > p,
+.nova-site .section-intro {
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.8;
+}
+.nova-site .section-heading-aside .text-link {
+  margin-top: 19px;
+}
+.nova-site .section-intro {
+  max-width: 330px;
+}
+.nova-site .panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.nova-site .panel-label {
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+.nova-site .panel-label > span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.nova-site .panel-label svg {
+  color: #9eaf97;
+}
+.nova-site .subtle-label {
+  font-size: 9px;
+  color: var(--dim);
+  letter-spacing: 0.08em;
+}
+.nova-site .table-scroll {
+  position: relative;
+  overflow-x: auto;
+  scrollbar-color: #3d4e3f #101512;
+  scrollbar-width: thin;
+}
+.nova-site .nova-table {
+  border-collapse: collapse;
+  width: 100%;
+  text-align: left;
+  font-size: 13px;
+}
+.nova-site .nova-table th {
+  padding: 16px 24px;
+  font-size: 10px;
+  font-weight: 400;
+  color: #8c9d8f;
+  white-space: nowrap;
+  background: #0d120f;
+  line-height: 1.5;
+}
+.nova-site .nova-table td {
+  padding: 20px 24px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.nova-site .nova-table tbody tr {
+  transition: background 0.2s;
+}
+.nova-site .nova-table tbody tr:hover {
+  background: #b0e09205;
+}
+.nova-site .nova-table tbody tr.selected-row {
+  background: #c1ff7505;
+}
+.nova-site .nova-table tbody tr.selected-row td:first-child {
+  box-shadow: inset 2px 0 var(--lime);
+}
+.nova-site .asset-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 135px;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.nova-site .asset-cell strong {
+  font-size: 12px;
+  font-weight: 500;
+  display: block;
+  white-space: nowrap;
+}
+.nova-site .asset-cell small {
+  font-size: 10px;
+  color: var(--dim);
+  display: block;
+  line-height: 1.7;
+}
+.nova-site .token-mark {
+  --token-color: var(--lime);
+  width: 35px;
+  height: 35px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--token-color) 9%, #101613);
+  color: var(--token-color);
+  border: 1px solid color-mix(in srgb, var(--token-color) 24%, transparent);
+  font-size: 17px;
+  font-weight: 550;
+  font-family: Arial, sans-serif;
+}
+.nova-site .table-link {
+  font-size: 20px;
+  color: #99ae8f;
+  background: none;
+  border: 0;
+  min-width: 30px;
+  min-height: 30px;
+}
+.nova-site .table-link:hover {
+  color: var(--lime);
+}
+.nova-site .source-note {
+  font-size: 10px;
+  color: var(--dim);
+  margin-top: 17px;
+  line-height: 1.8;
+}
+.nova-site .toolkit-section {
+  background: #0c110e;
+  border-block: 1px solid #ffffff06;
+}
+.nova-site .feature-grid {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  grid-template-rows: 330px 190px;
+  gap: 20px;
+}
+.nova-site .feature-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #111713;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.25s;
+}
+.nova-site .feature-card:hover {
+  border-color: #60794d;
+}
+.nova-site .feature-main {
+  grid-row: 1/3;
+}
+.nova-site .feature-main > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 65% 20%;
+  opacity: 0.86;
+}
+.nova-site .feature-main:after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, #0d120ffc 0%, #0d120f55 52%, transparent);
+}
+.nova-site .feature-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  position: relative;
+  z-index: 2;
+  padding: 27px 30px;
+}
+.nova-site .outline-tag {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #a1b39138;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: #c0cdb5;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.nova-site .round-arrow {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 35px;
+  height: 35px;
+  font-size: 22px;
+  flex-shrink: 0;
+  border: 1px solid #c1d3b02b;
+  border-radius: 50%;
+  color: #d8e6cd;
+}
+.nova-site .feature-copy {
+  position: absolute;
+  bottom: 33px;
+  left: 33px;
+  right: 33px;
+  z-index: 2;
+}
+.nova-site .feature-copy > h3 {
+  font-size: 37px;
+  margin-bottom: 16px;
+}
+.nova-site .feature-copy > p {
+  font-size: 13px;
+  color: #acb8ad;
+  max-width: 350px;
+  line-height: 1.8;
+}
+.nova-site .feature-copy > .text-link {
+  margin-top: 25px;
+  font-size: 12px;
+}
+.nova-site .feature-markets {
+  background: radial-gradient(ellipse at 80% 25%, #1e3022 0%, #101813 70%);
+}
+.nova-site .feature-markets .feature-copy {
+  bottom: 27px;
+}
+.nova-site .feature-markets .feature-copy > h3 {
+  font-size: 30px;
+  margin-bottom: 9px;
+}
+.nova-site .token-orbit {
+  position: absolute;
+  right: 38px;
+  top: 87px;
+  left: 38px;
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  transform: rotate(-10deg);
+}
+.nova-site .token-orbit .token-mark {
+  width: 47px;
+  height: 47px;
+  font-size: 24px;
+  box-shadow: 0 10px 25px #0005;
+}
+.nova-site .token-orbit .token-mark:nth-child(even) {
+  transform: translateY(-13px);
+}
+.nova-site .feature-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 30px;
+  gap: 20px;
+}
+.nova-site .feature-controls > svg {
+  color: #b7d29f;
+  align-self: flex-start;
+  margin-top: 10px;
+  flex-shrink: 0;
+}
+.nova-site .feature-controls .eyebrow {
+  font-size: 8px;
+  margin-bottom: 11px;
+}
+.nova-site .feature-controls h3 {
+  font-size: 25px;
+  line-height: 1.25;
+}
+.nova-site .feature-controls .round-arrow {
+  align-self: flex-end;
+}
+.nova-site .split-section {
+  display: grid;
+  grid-template-columns: 1fr 1.12fr;
+  align-items: center;
+  gap: 80px;
+}
+.nova-site .large-copy {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.9;
+  margin-top: 25px;
+  max-width: 440px;
+}
+.nova-site .check-list {
+  display: grid;
+  gap: 11px;
+  margin: 25px 0 30px;
+  font-size: 11px;
+  color: #b4c2b3;
+}
+.nova-site .check-list > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.nova-site .check-list svg {
+  width: 15px;
+  color: var(--lime);
+}
+.nova-site .route-illustration {
+  background: #101612;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.nova-site .route-flow {
+  display: flex;
+  align-items: center;
+  padding: 45px 24px 35px;
+  gap: 9px;
+  justify-content: space-between;
+}
+.nova-site .route-flow-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.nova-site .route-flow-node > .token-mark {
+  width: 44px;
+  height: 44px;
+  font-size: 23px;
+}
+.nova-site .route-flow-node > strong {
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 500;
+}
+.nova-site .route-flow-node > small {
+  font-size: 8px;
+  color: var(--dim);
+  line-height: 1.2;
+}
+.nova-site .route-connector {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  min-width: 36px;
+  flex: 1;
+  margin-top: -20px;
+}
+.nova-site .route-connector > span {
+  font-size: 7px;
+  letter-spacing: 0.06em;
+  color: #aac596;
+}
+.nova-site .route-connector > small {
+  font-size: 8px;
+  color: var(--dim);
+}
+.nova-site .route-connector > i {
+  width: 100%;
+  height: 1px;
+  background: #648948;
+  position: relative;
+}
+.nova-site .route-connector > i:after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -2px;
+  width: 5px;
+  height: 5px;
+  border-top: 1px solid #648948;
+  border-right: 1px solid #648948;
+  transform: rotate(45deg);
+}
+.nova-site .formula {
+  border-top: 1px solid var(--line);
+  margin: 0 26px;
+  padding-top: 24px;
+  display: grid;
+  gap: 10px;
+  font-size: 12px;
+  color: #9ead9d;
+}
+.nova-site .formula > strong {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--lime);
+  border-top: 1px solid var(--line);
+  padding-top: 15px;
+  margin-top: 5px;
+}
+.nova-site .route-illustration > .source-note {
+  padding: 0 26px 27px;
+}
+.nova-site .security-story {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 60px;
+  align-items: center;
+  border-block: 1px solid var(--line);
+  padding-block: 38px;
+}
+.nova-site .security-art {
+  overflow: hidden;
+  border-radius: 10px;
+  height: 410px;
+}
+.nova-site .security-art > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.nova-site .security-copy > p {
+  font-size: 14px;
+  color: var(--muted);
+  max-width: 350px;
+  line-height: 1.9;
+  margin-top: 25px;
+}
+.nova-site .security-copy > .text-link {
+  margin-top: 28px;
+}
+.nova-site .closing-cta {
+  padding-block: 120px;
+  position: relative;
+  overflow: hidden;
+}
+.nova-site .closing-cta h2 {
+  font-size: 68px;
+}
+.nova-site .closing-cta h2 > span {
+  color: var(--lime);
+}
+.nova-site .closing-cta > p {
+  color: var(--muted);
+  margin: 24px 0 30px;
+  font-size: 14px;
+}
+.nova-site .closing-cta .cta-orbit {
+  position: absolute;
+  right: 20px;
+  top: 45px;
+  font-size: 410px;
+  line-height: 1;
+  color: #b6eb8207;
+  pointer-events: none;
+}
+.nova-site .closing-cta > .button-row {
+  position: relative;
+  z-index: 1;
+}
+.nova-site .nova-footer {
+  border-top: 1px solid var(--line);
+  background: #080b09;
+  padding-block: 60px 28px;
+}
+.nova-site .footer-top {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 40px;
+  padding-bottom: 60px;
+}
+.nova-site .footer-brand p {
+  font-size: 12px;
+  line-height: 1.9;
+  color: var(--muted);
+  margin-top: 21px;
+}
+.nova-site .footer-network {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  margin-top: 21px;
+  color: var(--dim);
+}
+.nova-site .footer-column {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  padding-top: 4px;
+}
+.nova-site .footer-column > h3 {
+  font-size: 11px;
+  letter-spacing: 0;
+  font-weight: 500;
+  margin-bottom: 9px;
+  color: #d4ded3;
+}
+.nova-site .footer-column > a {
+  font-size: 11px;
+  color: #849488;
+  line-height: 1.6;
+}
+.nova-site .footer-column > a:hover {
+  color: var(--lime);
+}
+.nova-site .footer-bottom {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  border-top: 1px solid var(--line);
+  padding-block: 24px;
+  font-size: 10px;
+  color: var(--dim);
+}
+.nova-site .risk-note {
+  font-size: 9px;
+  line-height: 1.9;
+  color: #66776b;
+  max-width: 900px;
+}
+.nova-site .interior-page {
+  padding-top: 65px;
+  padding-bottom: 75px;
+}
+.nova-site .page-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 30px;
+  margin-bottom: 42px;
+}
+.nova-site .page-heading h1 {
+  font-size: 58px;
+  max-width: 920px;
+}
+.nova-site .page-heading p {
+  font-size: 14px;
+  line-height: 1.9;
+  color: var(--muted);
+  max-width: 625px;
+  margin-top: 20px;
+}
+.nova-site .page-heading .eyebrow {
+  margin-bottom: 24px;
+}
+.nova-site .status-pill,
+.nova-site .observation-badge {
+  border: 1px solid var(--line);
+  background: #111713;
+  border-radius: 5px;
+  padding: 9px 11px;
+  white-space: nowrap;
+  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #b9c9af;
+  margin-bottom: 5px;
+}
+.nova-site .status-pill.is-offline {
+  color: #e0b3a8;
+}
+.nova-site .observation-badge svg {
+  color: var(--lime);
+}
+.nova-site .stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 15px;
+  margin-bottom: 30px;
+}
+.nova-site .stat-card {
+  padding: 24px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  min-width: 0;
+}
+.nova-site .stat-card > span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.nova-site .stat-card > strong {
+  font-size: 33px;
+  letter-spacing: -0.04em;
+  font-weight: 450;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.nova-site .stat-card > strong.stat-time {
+  font-size: 25px;
+  line-height: 1.58;
+}
+.nova-site .stat-card > small {
+  font-size: 9px;
+  color: var(--dim);
+}
+.nova-site .table-toolbar {
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.nova-site .table-toolbar h2 {
+  font-size: 17px;
+  letter-spacing: -0.025em;
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.nova-site .table-toolbar p {
+  font-size: 10px;
+  color: var(--dim);
+  margin-top: 5px;
+}
+.nova-site .toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.nova-site .search-field {
+  display: flex;
+  align-items: center;
+  background: #0c110e;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0 12px;
+  gap: 8px;
+  color: var(--dim);
+  height: 38px;
+  max-width: 200px;
+}
+.nova-site .search-field input {
+  background: none;
+  border: 0;
+  color: var(--text);
+  width: 100%;
+  height: 100%;
+  font-size: 11px;
+  outline-offset: 0;
+}
+.nova-site .toolbar-controls select {
+  background: #0c110e;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 9px 26px 9px 11px;
+  font-size: 10px;
+  color: #bcc8bc;
+  height: 38px;
+}
+.nova-site .inline-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 11px;
+  color: #d5c3a2;
+  background: #9c794614;
+  border-block: 1px solid #7b633a40;
+  padding: 13px 24px;
+}
+.nova-site .inline-notice svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.nova-site .empty-state {
+  padding: 60px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+  color: var(--dim);
+}
+.nova-site .empty-state > svg {
+  color: #8ba576;
+}
+.nova-site .empty-state h3 {
+  font-size: 19px;
+  color: #d1dec9;
+  letter-spacing: -0.02em;
+}
+.nova-site .empty-state p {
+  font-size: 12px;
+  line-height: 1.8;
+  max-width: 400px;
+}
+.nova-site .empty-state .text-link {
+  color: var(--lime);
+  font-size: 11px;
+}
+.nova-site .table-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 24px;
+  border-top: 1px solid var(--line);
+  font-size: 9px;
+  color: var(--dim);
+  gap: 15px;
+}
+.nova-site .table-bottom > a:hover {
+  color: var(--lime);
+}
+.nova-site .pool-count {
+  background: #c1ff7509;
+  border: 1px solid #c1ff7521;
+  border-radius: 4px;
+  font-size: 10px;
+  padding: 3px 8px;
+  white-space: nowrap;
+  color: #bcd3ac;
+}
+.nova-site .pool-section {
+  padding-top: 75px;
+}
+.nova-site .section-heading.compact {
+  margin-bottom: 25px;
+}
+.nova-site .section-heading.compact h2 {
+  font-size: 36px;
+}
+.nova-site .selected-asset-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 28px 0 24px;
+}
+.nova-site .selected-asset-label strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+}
+.nova-site .selected-asset-label small {
+  display: block;
+  font-size: 10px;
+  color: var(--dim);
+  margin-top: 3px;
+}
+.nova-site .pool-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+.nova-site .pool-card {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 24px;
+  background: var(--panel);
+  transition: border-color 0.2s;
+}
+.nova-site .pool-card:hover {
+  border-color: #91ab6c;
+}
+.nova-site .pool-card > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--dim);
+}
+.nova-site .pool-venue {
+  font-size: 10px;
+  color: #b9c9b4;
+  border: 1px solid #4d634442;
+  border-radius: 4px;
+  padding: 3px 8px;
+  background: #29382324;
+}
+.nova-site .pool-card h3 {
+  font-size: 21px;
+  letter-spacing: -0.025em;
+  margin-top: 27px;
+}
+.nova-site .pool-card h3 > span {
+  color: var(--dim);
+}
+.nova-site .pool-price {
+  font-size: 28px;
+  font-weight: 450;
+  letter-spacing: -0.035em;
+  display: block;
+  margin-top: 12px;
+}
+.nova-site .pool-card dl {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  margin: 20px 0 0;
+  display: flex;
+  justify-content: space-between;
+}
+.nova-site .pool-card dt {
+  font-size: 9px;
+  color: var(--dim);
+}
+.nova-site .pool-card dd {
+  font-size: 13px;
+  margin: 4px 0 0;
+  color: #c3d0bc;
+}
+.nova-site .pool-address {
+  display: block;
+  font-size: 9px;
+  color: #617568;
+  margin-top: 21px;
+  letter-spacing: 0.05em;
+}
+.nova-site .inline-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 40px;
+  padding: 43px 0;
+  border-block: 1px solid var(--line);
+  margin-top: 80px;
+}
+.nova-site .inline-cta h2 {
+  font-size: 30px;
+}
+.nova-site .inline-cta .eyebrow {
+  font-size: 9px;
+  margin-bottom: 15px;
+}
+.nova-site .platform-banner,
+.nova-site .security-banner {
+  height: 420px;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #101612;
+}
+.nova-site .platform-banner > img,
+.nova-site .security-banner > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 75% 50%;
+  position: absolute;
+  inset: 0;
+}
+.nova-site .platform-banner:after,
+.nova-site .security-banner:after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #0a110dee 0%, #0a110d9c 44%, transparent 80%);
+}
+.nova-site .platform-banner > div,
+.nova-site .security-banner > div {
+  position: relative;
+  z-index: 1;
+  padding: 67px 48px;
+  max-width: 600px;
+}
+.nova-site .platform-banner h2,
+.nova-site .security-banner h2 {
+  font-size: 45px;
+  line-height: 1.14;
+  margin-bottom: 28px;
+}
+.nova-site .workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 22px;
+}
+.nova-site .workflow-card {
+  border-top: 1px solid #56704a;
+  padding-top: 25px;
+  display: flex;
+  flex-direction: column;
+}
+.nova-site .workflow-card > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #92b27a;
+  margin-bottom: 35px;
+}
+.nova-site .workflow-card > div > span {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+.nova-site .workflow-card > h3 {
+  font-size: 28px;
+  margin-bottom: 18px;
+}
+.nova-site .workflow-card > p {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.9;
+  flex: 1;
+}
+.nova-site .workflow-card > .text-link {
+  font-size: 11px;
+  margin-top: 24px;
+}
+.nova-site .faq-section {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 90px;
+  padding-top: 20px;
+  scroll-margin-top: 120px;
+}
+.nova-site .faq-section > div > p {
+  font-size: 13px;
+  color: var(--muted);
+  max-width: 300px;
+  margin-top: 22px;
+}
+.nova-site .faq-section h2 {
+  font-size: 41px;
+}
+.nova-site .faq-list > details {
+  border-top: 1px solid var(--line);
+}
+.nova-site .faq-list > details:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.nova-site summary {
+  list-style: none;
+  cursor: pointer;
+}
+.nova-site summary::-webkit-details-marker {
+  display: none;
+}
+.nova-site .faq-list summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 25px;
+  padding: 25px 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.nova-site summary svg {
+  flex-shrink: 0;
+  color: #9cac93;
+  transition: transform 0.2s;
+}
+.nova-site details[open] > summary svg {
+  transform: rotate(180deg);
+}
+.nova-site .faq-list details > p {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.9;
+  padding: 0 30px 25px 0;
+}
+.nova-site .security-banner > img {
+  object-position: 70% 50%;
+  width: 70%;
+  left: 30%;
+  opacity: 0.85;
+}
+.nova-site .security-banner > div {
+  padding-top: 52px;
+  max-width: 550px;
+}
+.nova-site .security-banner > div > svg {
+  color: var(--lime);
+  margin-bottom: 24px;
+}
+.nova-site .security-banner h2 {
+  font-size: 41px;
+  margin-bottom: 18px;
+}
+.nova-site .security-banner p {
+  font-size: 13px;
+  color: #abb9a6;
+  line-height: 1.8;
+  max-width: 345px;
+}
+.nova-site .security-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  padding: 55px 0 75px;
+}
+.nova-site .security-card {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  padding: 32px;
+}
+.nova-site .card-number {
+  font-size: 10px;
+  color: #8aab74;
+  border: 1px solid #82956b3d;
+  display: inline-flex;
+  padding: 3px 7px;
+  border-radius: 4px;
+  margin-bottom: 28px;
+}
+.nova-site .security-card h3 {
+  font-size: 27px;
+  margin-bottom: 17px;
+}
+.nova-site .security-card p {
+  font-size: 12px;
+  line-height: 1.95;
+  color: var(--muted);
+}
+.nova-site .risk-panel {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 80px;
+  border-top: 1px solid var(--line);
+  padding-top: 60px;
+}
+.nova-site .risk-panel h2 {
+  font-size: 44px;
+}
+.nova-site .risk-guidelines > p {
+  display: flex;
+  gap: 20px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: #bdc9b9;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+.nova-site .risk-guidelines > p:first-child {
+  padding-top: 0;
+}
+.nova-site .risk-guidelines > p > span {
+  color: #789164;
+  font-size: 10px;
+  padding-top: 3px;
+  flex-shrink: 0;
+}
+.nova-site .risk-guidelines > .text-link {
+  margin-top: 24px;
+  font-size: 11px;
+}
+.nova-site .access-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  padding: 23px 27px;
+  border: 1px solid #426035;
+  border-radius: 8px;
+  background: #1828124f;
+  margin-bottom: 30px;
+}
+.nova-site .access-banner > div {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.nova-site .access-banner svg {
+  color: var(--lime);
+  flex-shrink: 0;
+}
+.nova-site .access-banner strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+}
+.nova-site .access-banner small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.nova-site .access-banner .text-link {
+  white-space: nowrap;
+  color: var(--lime);
+}
+.nova-site .pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 22px;
+}
+.nova-site .pricing-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  padding: 32px 28px;
+  border-radius: 10px;
+}
+.nova-site .pricing-card.featured {
+  border-color: #85aa62;
+  background: linear-gradient(150deg, #22371970, #101512 65%);
+}
+.nova-site .plan-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 40px;
+}
+.nova-site .plan-top > span:first-child {
+  font-size: 15px;
+  color: #c8d8c0;
+}
+.nova-site .plan-top .outline-tag {
+  font-size: 7px;
+  color: var(--lime);
+  border-color: #c1ff7547;
+}
+.nova-site .pricing-card > h2 {
+  font-size: 29px;
+  line-height: 1.2;
+  min-height: 70px;
+  max-width: 260px;
+}
+.nova-site .pricing-card > p {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.8;
+  min-height: 65px;
+  margin: 12px 0 28px;
+}
+.nova-site .plan-price {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 28px;
+}
+.nova-site .plan-price strong {
+  font-size: 31px;
+  font-weight: 450;
+  letter-spacing: -0.04em;
+}
+.nova-site .plan-price strong > small {
+  font-size: 14px;
+}
+.nova-site .plan-price > span {
+  font-size: 10px;
+  color: var(--dim);
+}
+.nova-site .pricing-card > .nova-button {
+  width: 100%;
+}
+.nova-site .plan-details {
+  border-top: 1px solid var(--line);
+  padding-top: 25px;
+  margin-top: 27px;
+  display: grid;
+  gap: 13px;
+}
+.nova-site .plan-details > p {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+  color: #afbfaa;
+}
+.nova-site .plan-details svg {
+  color: #8ba56c;
+  flex-shrink: 0;
+}
+.nova-site .pricing-note {
+  font-size: 11px;
+  text-align: center;
+  max-width: 760px;
+  line-height: 1.9;
+  color: var(--dim);
+  margin: 27px auto 0;
+}
+.nova-site .pricing-faq {
+  margin-top: 85px;
+}
+.nova-site .account-sections {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 15px;
+  margin-top: 30px;
+}
+.nova-site .account-section {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 24px;
+  border-radius: 8px;
+}
+.nova-site .account-section h3 {
+  font-size: 19px;
+  margin: 18px 0 10px;
+}
+.nova-site .account-section p {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.8;
+  min-height: 60px;
+}
+.nova-site .account-section > a {
+  margin-top: 18px;
+  font-size: 10px;
+}
+.nova-site .account-section > span {
+  font-size: 23px;
+}
+.nova-site .arbitrage-page .page-heading h1 {
+  font-size: 49px;
+}
+.nova-site .arbitrage-page .page-heading p {
+  max-width: 690px;
+}
+.nova-site .terminal-statusbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 18px 0;
+  border-block: 1px solid var(--line);
+  margin-bottom: 25px;
+  font-size: 10px;
+  color: #9eafa0;
+}
+.nova-site .terminal-statusbar > div {
+  display: flex;
+  gap: 13px;
+  align-items: center;
+}
+.nova-site .terminal-statusbar strong {
+  font-weight: 500;
+  color: #d7e3d1;
+}
+.nova-site .statusbar-divider {
+  width: 1px;
+  height: 11px;
+  background: var(--line);
+}
+.nova-site .terminal-statusbar .text-link {
+  font-size: 10px;
+  color: var(--lime);
+}
+.nova-site .terminal-grid {
+  display: grid;
+  grid-template-columns: 267px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+.nova-site .scan-sidebar {
+  border-radius: 9px;
+}
+.nova-site .scan-sidebar .panel-label {
+  padding: 20px;
+  font-size: 12px;
+}
+.nova-site .scan-sidebar > form {
+  padding: 22px 20px;
+}
+.nova-site .field-label {
+  font-size: 10px;
+  color: #b2c2ad;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+.nova-site .field-label > span {
+  font-size: 7px;
+  letter-spacing: 0.1em;
+  color: var(--dim);
+}
+.nova-site .asset-select {
+  display: flex;
+  align-items: center;
+  border: 1px solid #354331;
+  border-radius: 6px;
+  background: #0b110c;
+  padding: 8px 9px;
+  margin-bottom: 22px;
+  gap: 8px;
+}
+.nova-site .asset-select .token-mark {
+  width: 26px;
+  height: 26px;
+  font-size: 12px;
+}
+.nova-site .asset-select select {
+  font-size: 11px;
+  width: 100%;
+  color: #dae4d6;
+  border: 0;
+  background: none;
+  padding: 2px 0;
+}
+.nova-site .input-unit {
+  display: flex;
+  align-items: center;
+  border: 1px solid #354331;
+  border-radius: 5px;
+  overflow: hidden;
+  background: #0a100c;
+}
+.nova-site .input-unit input {
+  color: #e1eadb;
+  appearance: textfield;
+  min-width: 0;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 12px;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.nova-site .input-unit input::-webkit-inner-spin-button {
+  appearance: none;
+}
+.nova-site .input-unit > span {
+  font-size: 10px;
+  color: var(--dim);
+  padding-right: 12px;
+}
+.nova-site .quick-amounts {
+  display: flex;
+  gap: 5px;
+  margin-top: 8px;
+}
+.nova-site .quick-amounts > button {
+  background: #192019;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 10px;
+  color: #9ead98;
+  flex: 1;
+  padding: 5px;
+}
+.nova-site .quick-amounts > button.selected {
+  background: #c1ff7512;
+  border-color: #89ad5952;
+  color: var(--lime);
+}
+.nova-site .settings-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 25px 0 23px;
+}
+.nova-site .field-help {
+  font-size: 9px;
+  color: var(--dim);
+  line-height: 1.8;
+  margin: 8px 0 19px;
+}
+.nova-site .full-width {
+  width: 100%;
+  font-size: 11px;
+  margin-top: 7px;
+}
+.nova-site .scan-venues {
+  padding: 21px 20px;
+  border-top: 1px solid var(--line);
+  background: #0d140f;
+}
+.nova-site .scan-venues > .field-label {
+  margin-bottom: 17px;
+  color: #81957b;
+  font-size: 9px;
+}
+.nova-site .scan-venues > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 10px;
+  color: #a7b89e;
+  margin-top: 11px;
+}
+.nova-site .scan-venues > div > svg {
+  margin-left: auto;
+  color: #64854e;
+}
+.nova-site .venue-indicator {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  transform: rotate(45deg);
+  background: #718d59;
+  flex-shrink: 0;
+}
+.nova-site .sidebar-note {
+  display: flex;
+  gap: 10px;
+  padding: 20px;
+  color: #829776;
+  border-top: 1px solid var(--line);
+}
+.nova-site .sidebar-note > svg {
+  flex-shrink: 0;
+}
+.nova-site .sidebar-note > p {
+  font-size: 9px;
+  line-height: 1.8;
+}
+.nova-site .terminal-main {
+  min-width: 0;
+}
+.nova-site .terminal-stats {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.nova-site .terminal-stat {
+  display: flex;
+  flex-direction: column;
+  padding: 21px 20px;
+  gap: 13px;
+  min-width: 0;
+  border-left: 1px solid var(--line);
+}
+.nova-site .terminal-stat:first-child {
+  border-left: 0;
+}
+.nova-site .terminal-stat > span {
+  font-size: 10px;
+  color: #93a58b;
+}
+.nova-site .terminal-stat > strong {
+  font-size: 25px;
+  letter-spacing: -0.03em;
+  font-weight: 450;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.nova-site .terminal-stat > strong > small {
+  font-size: 11px;
+  color: #7c9073;
+  letter-spacing: 0;
+}
+.nova-site .terminal-stat > small {
+  font-size: 8px;
+  color: var(--dim);
+}
+.nova-site .terminal-stat > strong.stat-time {
+  font-size: 23px;
+}
+.nova-site .scan-progress {
+  padding: 20px 0;
+}
+.nova-site .scan-progress > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 9px;
+  color: #94a78b;
+  margin-bottom: 9px;
+  min-height: 14px;
+}
+.nova-site .scan-progress > div:first-child > span:last-child {
+  margin-left: auto;
+  color: #657b5c;
+  flex-shrink: 0;
+}
+.nova-site .progress-track {
+  height: 2px;
+  background: #1e2a1d;
+  overflow: hidden;
+}
+.nova-site .progress-track > span {
+  height: 100%;
+  display: block;
+  background: #9aca6c;
+  transition: width 0.5s;
+}
+.nova-site .spinner-dot {
+  width: 7px;
+  height: 7px;
+  border: 1px solid #c1ff7533;
+  border-top-color: var(--lime);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  flex-shrink: 0;
+}
+.nova-site .routes-panel .table-toolbar {
+  padding: 21px 20px;
+}
+.nova-site .routes-panel .table-toolbar h2 {
+  font-size: 15px;
+}
+.nova-site .count-badge {
+  font-size: 9px;
+  font-weight: 400;
+  color: #9eb78e;
+  border: 1px solid #48643757;
+  background: #47632d18;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+.nova-site .filter-chip {
+  font-size: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: none;
+  color: #9dab94;
+  white-space: nowrap;
+}
+.nova-site .filter-chip.selected {
+  color: var(--lime);
+  border-color: #84b35088;
+  background: #8fbd6610;
+}
+.nova-site .routes-panel .icon-button {
+  width: 32px;
+  height: 32px;
+}
+.nova-site .routes-panel .toolbar-controls {
+  gap: 7px;
+}
+.nova-site .route-table th {
+  font-size: 9px;
+  padding: 13px 17px;
+}
+.nova-site .route-table td {
+  padding: 17px;
+  font-size: 11px;
+}
+.nova-site .route-pair {
+  background: none;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+  padding: 0;
+}
+.nova-site .route-pair > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.nova-site .route-pair .venue-indicator {
+  width: 4px;
+  height: 4px;
+  margin: 0 2px;
+}
+.nova-site .route-turn {
+  font-size: 12px;
+  color: #556a49;
+}
+.nova-site .cell-subtext {
+  display: block;
+  font-size: 8px;
+  color: var(--dim);
+  margin-top: 3px;
+}
+.nova-site .quote-age {
+  font-size: 9px;
+  color: #c0d5ad;
+  border: 1px solid #91aa7230;
+  border-radius: 3px;
+  padding: 3px 5px;
+  white-space: nowrap;
+}
+.nova-site .quote-age.stale {
+  color: #c8b890;
+  border-color: #9b835b44;
+  background: #99835f0d;
+}
+.nova-site .route-empty {
+  padding-block: 54px;
+  min-height: 315px;
+}
+.nova-site .route-empty > h3 {
+  font-size: 18px;
+}
+.nova-site .route-empty > p {
+  font-size: 11px;
+  max-width: 345px;
+}
+.nova-site .scanner-visual {
+  width: 66px;
+  height: 66px;
+  border: 1px solid #81a8583b;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8fae73;
+  background: #38532016;
+  position: relative;
+  margin-bottom: 4px;
+}
+.nova-site .scanner-visual:after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border: 1px solid #81a85816;
+  border-radius: 50%;
+}
+.nova-site .scanner-visual.is-scanning {
+  animation: status-pulse 2s infinite;
+}
+.nova-site .route-details {
+  margin-top: 23px;
+}
+.nova-site .breakdown-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 23px 24px;
+}
+.nova-site .breakdown-route {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  font-size: 14px;
+}
+.nova-site .breakdown-route > span > i {
+  font-style: normal;
+  font-size: 13px;
+  color: #6b855b;
+  padding-inline: 6px;
+}
+.nova-site .breakdown-route .token-mark {
+  width: 29px;
+  height: 29px;
+  font-size: 19px;
+}
+.nova-site .breakdown-heading .outline-tag {
+  font-size: 7px;
+}
+.nova-site .tag-stale {
+  color: #cbb98f;
+  border-color: #8e785d55;
+}
+.nova-site .breakdown-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 28px;
+  padding: 0 24px 22px;
+}
+.nova-site .cost-breakdown {
+  font-size: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+.nova-site .cost-breakdown > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.nova-site .cost-breakdown dt {
+  color: #8da081;
+}
+.nova-site .cost-breakdown dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.nova-site .breakdown-total {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+}
+.nova-site .breakdown-total dt {
+  color: #d0dec5;
+}
+.nova-site .quote-context {
+  border-left: 1px solid var(--line);
+  padding-left: 25px;
+  min-width: 0;
+}
+.nova-site .quote-context > .eyebrow {
+  font-size: 8px;
+  margin-bottom: 12px;
+}
+.nova-site .quote-context > p {
+  font-size: 9px;
+  line-height: 1.9;
+  color: var(--dim);
+}
+.nova-site .quote-context dl {
+  font-size: 8px;
+  display: grid;
+  gap: 6px;
+  margin-block: 13px;
+}
+.nova-site .quote-context dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.nova-site .quote-context dt {
+  color: var(--dim);
+}
+.nova-site .quote-context dd {
+  margin: 0;
+  color: #acbea1;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.nova-site .quote-context .text-link {
+  font-size: 9px;
+}
+.nova-site .route-details > .source-note {
+  border-top: 1px solid var(--line);
+  padding: 15px 24px;
+  margin: 0;
+  font-size: 9px;
+}
+.nova-site .empty-details {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 40px;
+  color: #718967;
+  min-height: 140px;
+}
+.nova-site .empty-details svg {
+  flex-shrink: 0;
+}
+.nova-site .empty-details > p {
+  font-size: 11px;
+  max-width: 340px;
+  line-height: 1.9;
+}
+.nova-site .terminal-footnotes {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 35px;
+  margin-top: 30px;
+  font-size: 10px;
+  color: var(--dim);
+}
+.nova-site .terminal-footnotes details {
+  max-width: 760px;
+  flex: 1;
+}
+.nova-site .terminal-footnotes summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 10px;
+  color: #a9b89f;
+}
+.nova-site .terminal-footnotes details > div {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 20px;
+  margin-top: 15px;
+  background: var(--panel);
+}
+.nova-site .terminal-footnotes p {
+  font-size: 10px;
+  line-height: 1.9;
+  margin-bottom: 14px;
+}
+.nova-site .terminal-footnotes strong {
+  font-weight: 500;
+  color: #a8ba9e;
+}
+.nova-site .terminal-footnotes .text-link {
+  font-size: 10px;
+  white-space: nowrap;
+}
+.nova-site .desktop-only {
+  display: inline;
+}
+.nova-site .account-section > a:hover {
+  color: var(--lime);
+}
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.42;
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (min-width: 1650px) {
+  .nova-site .nova-hero {
+    min-height: 760px;
+  }
+  .nova-site .hero-content {
+    padding-top: 135px;
+  }
+  .nova-site .hero-art {
+    right: -4%;
+    width: 103%;
+  }
+}
+@media (max-width: 1150px) {
+  .nova-site .site-container {
+    width: calc(100% - 64px);
+  }
+  .nova-site .main-nav {
+    gap: 19px;
+  }
+  .nova-site .main-nav > a {
+    font-size: 11px;
+  }
+  .nova-site .nova-brand {
+    font-size: 24px;
+  }
+  .nova-site .brand-word > span {
+    font-size: 10px;
+  }
+  .nova-site .hero-content {
+    padding-top: 105px;
+  }
+  .nova-site .hero-art {
+    right: -16%;
+    width: 120%;
+    object-position: 55% center;
+  }
+  .nova-site .hero-content h1 {
+    font-size: 76px;
+  }
+  .nova-site .market-ticker {
+    padding-inline: 32px;
+    gap: 20px;
+  }
+  .nova-site .ticker-items {
+    gap: 28px;
+  }
+  .nova-site h2 {
+    font-size: 44px;
+  }
+  .nova-site .section-heading {
+    gap: 25px;
+  }
+  .nova-site .section-heading-aside {
+    max-width: 250px;
+  }
+  .nova-site .split-section {
+    gap: 40px;
+    grid-template-columns: 1fr 1.1fr;
+  }
+  .nova-site .feature-copy > h3 {
+    font-size: 33px;
+  }
+  .nova-site .feature-controls {
+    padding: 24px;
+    gap: 15px;
+  }
+  .nova-site .feature-controls h3 {
+    font-size: 23px;
+  }
+  .nova-site .feature-controls > .round-arrow {
+    width: 29px;
+    height: 29px;
+  }
+  .nova-site .security-story {
+    gap: 45px;
+  }
+  .nova-site .nova-table th,
+  .nova-site .nova-table td {
+    padding-inline: 18px;
+  }
+  .nova-site .stat-card {
+    padding: 20px;
+  }
+  .nova-site .stat-card > strong {
+    font-size: 30px;
+  }
+  .nova-site .stat-card > strong.stat-time {
+    font-size: 21px;
+  }
+  .nova-site .page-heading h1 {
+    font-size: 50px;
+  }
+  .nova-site .page-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 22px;
+  }
+  .nova-site .status-pill,
+  .nova-site .observation-badge {
+    align-self: flex-start;
+  }
+  .nova-site .workflow-grid {
+    gap: 25px;
+  }
+  .nova-site .faq-section {
+    gap: 50px;
+  }
+  .nova-site .pricing-card {
+    padding: 28px 23px;
+  }
+  .nova-site .pricing-card > h2 {
+    font-size: 26px;
+  }
+  .nova-site .plan-top .outline-tag {
+    font-size: 6px;
+  }
+  .nova-site .terminal-grid {
+    grid-template-columns: 234px minmax(0, 1fr);
+    gap: 18px;
+  }
+  .nova-site .terminal-stat {
+    padding: 18px 14px;
+  }
+  .nova-site .terminal-stat > strong {
+    font-size: 20px;
+  }
+  .nova-site .terminal-stat > span {
+    font-size: 9px;
+  }
+  .nova-site .terminal-stat > small {
+    font-size: 7px;
+  }
+  .nova-site .terminal-stat > strong.stat-time {
+    font-size: 20px;
+  }
+  .nova-site .routes-panel .table-toolbar {
+    flex-wrap: wrap;
+    gap: 15px;
+  }
+  .nova-site .route-table {
+    min-width: 580px;
+  }
+  .nova-site .breakdown-grid {
+    gap: 20px;
+    padding-inline: 20px;
+    grid-template-columns: 1fr;
+  }
+  .nova-site .quote-context {
+    padding-left: 0;
+    padding-top: 20px;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .nova-site .quote-context dl {
+    font-size: 10px;
+  }
+  .nova-site .quote-context > p {
+    font-size: 10px;
+  }
+  .nova-site .quote-context .text-link {
+    font-size: 10px;
+  }
+  .nova-site .cost-breakdown {
+    font-size: 11px;
+  }
+  .nova-site .account-sections {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 850px) {
+  .nova-site .nova-header {
+    height: 77px;
+  }
+  .nova-site .header-inner {
+    gap: 20px;
+  }
+  .nova-site .menu-toggle {
+    display: flex !important;
+  }
+  .nova-site .main-nav {
+    display: none;
+    position: absolute;
+    top: 76px;
+    left: 0;
+    right: 0;
+    padding: 24px 32px;
+    background: #0c130eff;
+    border-bottom: 1px solid #3b5032;
+    box-shadow: 0 25px 40px #0008;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+  .nova-site .main-nav.is-open {
+    display: flex;
+  }
+  .nova-site .main-nav > a {
+    font-size: 15px;
+    padding: 16px 4px;
+    border-bottom: 1px solid #28352288;
+  }
+  .nova-site .main-nav > a:last-child {
+    border: 0;
+  }
+  .nova-site .nova-hero {
+    min-height: 680px;
+  }
+  .nova-site .hero-content h1 {
+    font-size: 70px;
+    max-width: 600px;
+  }
+  .nova-site .hero-art {
+    width: 135%;
+    right: -32%;
+    top: 0;
+    height: 100%;
+    opacity: 0.85;
+  }
+  .nova-site .hero-shade {
+    background:
+      linear-gradient(90deg, #090c0b 0%, #090c0bb3 45%, transparent),
+      linear-gradient(0deg, #090c0b, transparent 30%);
+  }
+  .nova-site .hero-content > p {
+    max-width: 350px;
+  }
+  .nova-site .hero-content {
+    padding-top: 94px;
+  }
+  .nova-site .venue-strip {
+    gap: 20px;
+    height: 110px;
+  }
+  .nova-site .venue-strip > span {
+    min-width: 90px;
+  }
+  .nova-site .venue-strip > div {
+    font-size: 19px;
+  }
+  .nova-site .venue-strip .venue-orca {
+    font-size: 25px;
+  }
+  .nova-site .venue-strip > a {
+    display: none;
+  }
+  .nova-site .site-section {
+    padding-block: 80px;
+  }
+  .nova-site .section-heading-aside {
+    max-width: 230px;
+  }
+  .nova-site .feature-grid {
+    grid-template-columns: 1.15fr 1fr;
+    grid-template-rows: 290px 175px;
+    gap: 15px;
+  }
+  .nova-site .feature-top {
+    padding: 22px;
+  }
+  .nova-site .feature-copy {
+    left: 24px;
+    right: 24px;
+    bottom: 27px;
+  }
+  .nova-site .feature-copy > h3 {
+    font-size: 30px;
+  }
+  .nova-site .feature-copy > p {
+    font-size: 12px;
+  }
+  .nova-site .outline-tag {
+    font-size: 7px;
+  }
+  .nova-site .feature-controls > svg {
+    display: none;
+  }
+  .nova-site .feature-controls h3 {
+    font-size: 23px;
+  }
+  .nova-site .token-orbit {
+    gap: 10px;
+    top: 85px;
+  }
+  .nova-site .token-orbit .token-mark {
+    width: 37px;
+    height: 37px;
+    font-size: 20px;
+  }
+  .nova-site .feature-markets .feature-copy > h3 {
+    font-size: 27px;
+  }
+  .nova-site .split-section {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+  .nova-site .split-section > div:first-child {
+    max-width: 570px;
+  }
+  .nova-site .route-illustration {
+    max-width: 100%;
+    width: 100%;
+  }
+  .nova-site .route-flow {
+    padding: 45px 40px;
+  }
+  .nova-site .route-flow-node > small,
+  .nova-site .route-connector > small {
+    font-size: 10px;
+  }
+  .nova-site .route-connector > span {
+    font-size: 9px;
+  }
+  .nova-site .route-flow-node > strong {
+    font-size: 14px;
+  }
+  .nova-site .route-flow-node > .token-mark {
+    width: 50px;
+    height: 50px;
+  }
+  .nova-site .route-connector {
+    margin-inline: 20px;
+  }
+  .nova-site .security-story {
+    gap: 30px;
+  }
+  .nova-site .security-art {
+    height: 330px;
+  }
+  .nova-site .security-copy h2 {
+    font-size: 34px;
+  }
+  .nova-site .closing-cta {
+    padding-block: 90px;
+  }
+  .nova-site .closing-cta h2 {
+    font-size: 60px;
+  }
+  .nova-site .footer-top {
+    gap: 25px;
+    grid-template-columns: 1.6fr 1fr 1fr;
+  }
+  .nova-site .footer-column:last-child {
+    grid-column: 2/4;
+    flex-direction: row;
+    gap: 25px;
+    flex-wrap: wrap;
+  }
+  .nova-site .footer-column:last-child > h3 {
+    width: 100%;
+    margin: 0;
+  }
+  .nova-site .stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .nova-site .stat-card {
+    padding: 25px;
+  }
+  .nova-site .table-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .nova-site .toolbar-controls {
+    width: 100%;
+  }
+  .nova-site .toolbar-controls .search-field {
+    max-width: none;
+    flex: 1;
+  }
+  .nova-site .pool-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .nova-site .workflow-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 45px 30px;
+  }
+  .nova-site .workflow-card > div {
+    margin-bottom: 25px;
+  }
+  .nova-site .faq-section {
+    grid-template-columns: 1fr;
+    gap: 35px;
+  }
+  .nova-site .faq-section > div > p {
+    max-width: none;
+  }
+  .nova-site .platform-banner > div {
+    padding: 62px 38px;
+  }
+  .nova-site .platform-banner h2 {
+    font-size: 41px;
+  }
+  .nova-site .security-grid {
+    gap: 18px;
+  }
+  .nova-site .security-card {
+    padding: 26px;
+  }
+  .nova-site .security-card h3 {
+    font-size: 24px;
+  }
+  .nova-site .risk-panel {
+    grid-template-columns: 1fr;
+    gap: 35px;
+  }
+  .nova-site .pricing-grid {
+    gap: 14px;
+  }
+  .nova-site .pricing-card {
+    padding: 24px 18px;
+  }
+  .nova-site .pricing-card > h2 {
+    font-size: 23px;
+    min-height: 62px;
+  }
+  .nova-site .pricing-card > p {
+    font-size: 11px;
+    min-height: 75px;
+  }
+  .nova-site .plan-top {
+    margin-bottom: 27px;
+    align-items: flex-start;
+    flex-direction: column;
+    min-height: 55px;
+    gap: 9px;
+  }
+  .nova-site .plan-price strong {
+    font-size: 27px;
+  }
+  .nova-site .pricing-card > .nova-button {
+    font-size: 11px;
+    padding-inline: 10px;
+  }
+  .nova-site .plan-details p {
+    font-size: 10px;
+    align-items: flex-start;
+  }
+  .nova-site .plan-details svg {
+    width: 13px;
+    margin-top: 2px;
+  }
+  .nova-site .terminal-grid {
+    grid-template-columns: 1fr;
+  }
+  .nova-site .scan-sidebar {
+    display: grid;
+    grid-template-columns: 1fr 210px;
+  }
+  .nova-site .scan-sidebar .panel-label {
+    grid-column: 1/3;
+  }
+  .nova-site .scan-sidebar > form {
+    grid-row: 2/4;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 9px 20px;
+    padding: 22px;
+  }
+  .nova-site .scan-sidebar form > .field-label {
+    grid-column: 1/3;
+    margin-top: 5px;
+    margin-bottom: 0;
+  }
+  .nova-site .scan-sidebar .asset-select {
+    grid-column: 1/3;
+    margin-bottom: 8px;
+  }
+  .nova-site .scan-sidebar .input-unit {
+    grid-column: 1/3;
+  }
+  .nova-site .quick-amounts {
+    grid-column: 1/3;
+    margin: 0 0 7px;
+  }
+  .nova-site .scan-sidebar .settings-divider {
+    display: none;
+  }
+  .nova-site .scan-sidebar .field-help {
+    grid-column: 1/3;
+    margin: 0 0 7px;
+  }
+  .nova-site .scan-sidebar .full-width {
+    grid-column: 1/3;
+  }
+  .nova-site .scan-venues {
+    border-left: 1px solid var(--line);
+    border-top: 0;
+    padding-top: 30px;
+  }
+  .nova-site .sidebar-note {
+    border-left: 1px solid var(--line);
+  }
+  .nova-site .terminal-stats {
+    grid-template-columns: 1.2fr 1fr 1fr;
+    margin-top: 6px;
+  }
+  .nova-site .terminal-stat {
+    padding: 22px;
+  }
+  .nova-site .terminal-stat > strong {
+    font-size: 25px;
+  }
+  .nova-site .terminal-stat > span {
+    font-size: 11px;
+  }
+  .nova-site .terminal-stat > small {
+    font-size: 9px;
+  }
+  .nova-site .routes-panel .table-toolbar {
+    flex-direction: row;
+    align-items: center;
+  }
+  .nova-site .routes-panel .toolbar-controls {
+    width: auto;
+  }
+  .nova-site .breakdown-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 25px;
+    padding: 0 24px 24px;
+  }
+  .nova-site .quote-context {
+    padding: 0 0 0 25px;
+    border-top: 0;
+    border-left: 1px solid var(--line);
+  }
+  .nova-site .cost-breakdown {
+    font-size: 10px;
+  }
+  .nova-site .quote-context dl {
+    font-size: 9px;
+  }
+  .nova-site .terminal-footnotes {
+    gap: 25px;
+  }
+  .nova-site .inline-cta {
+    gap: 25px;
+  }
+  .nova-site .inline-cta h2 {
+    font-size: 25px;
+  }
+}
+@media (max-width: 600px) {
+  .nova-site {
+    font-size: 14px;
+  }
+  .nova-site .site-container {
+    width: calc(100% - 40px);
+  }
+  .nova-site .nova-header {
+    height: 74px;
+  }
+  .nova-site .header-inner {
+    gap: 12px;
+  }
+  .nova-site .nova-brand {
+    font-size: 23px;
+    gap: 7px;
+  }
+  .nova-site .nova-brand > svg {
+    width: 27px;
+    height: 27px;
+  }
+  .nova-site .brand-word > span {
+    font-size: 9px;
+    letter-spacing: 0.08em;
+  }
+  .nova-site .header-actions {
+    gap: 9px;
+  }
+  .nova-site .header-actions .button-sm {
+    font-size: 10px;
+    padding: 9px 12px;
+  }
+  .nova-site .menu-toggle {
+    width: 33px;
+    height: 33px;
+  }
+  .nova-site .main-nav {
+    top: 73px;
+    padding-inline: 24px;
+  }
+  .nova-site .nova-hero {
+    min-height: 775px;
+  }
+  .nova-site .hero-content {
+    padding-top: 60px;
+  }
+  .nova-site .hero-content .eyebrow {
+    font-size: 8px;
+    letter-spacing: 0.13em;
+    gap: 7px;
+    margin-bottom: 24px;
+  }
+  .nova-site .hero-content h1 {
+    font-size: clamp(45px, 10.9vw, 64px);
+    letter-spacing: -0.055em;
+    line-height: 1.09;
+  }
+  .nova-site .hero-content h1 > span {
+    color: #c1cdbb;
+  }
+  .nova-site .hero-content > p {
+    font-size: 13px;
+    max-width: 320px;
+    margin-top: 24px;
+    margin-bottom: 26px;
+    line-height: 1.9;
+  }
+  .nova-site .hero-art {
+    width: 155%;
+    right: -26%;
+    top: 300px;
+    height: 480px;
+    object-fit: cover;
+    object-position: center;
+    opacity: 0.95;
+  }
+  .nova-site .hero-shade {
+    background: linear-gradient(
+      180deg,
+      #090c0b 0%,
+      #090c0b 38%,
+      #090c0b22 62%,
+      #090c0b00 82%,
+      #090c0b 99%
+    );
+  }
+  .nova-site .hero-content .button-row {
+    gap: 4px;
+  }
+  .nova-site .hero-content .nova-button {
+    font-size: 11px;
+    padding: 13px 15px;
+    gap: 8px;
+  }
+  .nova-site .hero-content .button-ghost {
+    padding-inline: 12px;
+  }
+  .nova-site .hero-caption {
+    margin-top: 26px;
+    font-size: 9px;
+    position: relative;
+    z-index: 2;
+  }
+  .nova-site .orbital-symbol {
+    font-size: 28px;
+  }
+  .nova-site .hero-bottom {
+    font-size: 7px;
+    bottom: 23px;
+    color: #83927f;
+  }
+  .nova-site .hero-bottom a {
+    font-size: 7px;
+    gap: 8px;
+  }
+  .nova-site .hero-bottom a > span {
+    font-size: 15px;
+  }
+  .nova-site .market-ticker {
+    padding-inline: 20px;
+    gap: 15px;
+    min-height: 75px;
+  }
+  .nova-site .ticker-label {
+    min-width: 105px;
+    font-size: 10px;
+    padding-right: 14px;
+    gap: 6px;
+  }
+  .nova-site .ticker-network {
+    font-size: 7px;
+    bottom: 9px;
+    left: 12px;
+  }
+  .nova-site .ticker-items {
+    gap: 24px;
+  }
+  .nova-site .ticker-item {
+    min-width: 110px;
+  }
+  .nova-site .venue-strip {
+    height: 115px;
+    gap: 15px;
+    display: grid;
+    grid-template-columns: 75px 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    padding-block: 24px;
+    align-items: center;
+  }
+  .nova-site .venue-strip > span {
+    font-size: 9px;
+    grid-row: 1/3;
+    min-width: 0;
+  }
+  .nova-site .venue-strip > div {
+    font-size: 18px;
+    text-align: center;
+  }
+  .nova-site .venue-strip .venue-orca {
+    font-size: 21px;
+  }
+  .nova-site .venue-strip > div .brand-period {
+    font-size: 15px;
+  }
+  .nova-site .site-section {
+    padding-block: 64px;
+  }
+  .nova-site h2 {
+    font-size: 37px;
+    letter-spacing: -0.045em;
+  }
+  .nova-site .section-heading {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 24px;
+    margin-bottom: 30px;
+  }
+  .nova-site .eyebrow {
+    font-size: 8px;
+    letter-spacing: 0.12em;
+    margin-bottom: 20px;
+  }
+  .nova-site .section-heading .eyebrow {
+    margin-bottom: 18px;
+  }
+  .nova-site .section-heading-aside {
+    max-width: 100%;
+    padding: 0;
+  }
+  .nova-site .section-heading-aside > p,
+  .nova-site .section-intro {
+    font-size: 12px;
+    max-width: 360px;
+    line-height: 1.9;
+  }
+  .nova-site .section-heading-aside .text-link {
+    margin-top: 13px;
+    font-size: 11px;
+  }
+  .nova-site .panel-label {
+    padding: 18px;
+    font-size: 11px;
+  }
+  .nova-site .panel-label .subtle-label {
+    font-size: 7px;
+    letter-spacing: 0.04em;
+  }
+  .nova-site .nova-table {
+    min-width: 660px;
+  }
+  .nova-site .nova-table th {
+    font-size: 9px;
+    padding: 14px 18px;
+  }
+  .nova-site .nova-table td {
+    padding: 18px;
+    font-size: 12px;
+  }
+  .nova-site .source-note {
+    font-size: 9px;
+    margin-top: 13px;
+  }
+  .nova-site .feature-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: 460px 300px 165px;
+    gap: 17px;
+  }
+  .nova-site .feature-main {
+    grid-row: auto;
+  }
+  .nova-site .feature-top {
+    padding: 24px;
+  }
+  .nova-site .outline-tag {
+    font-size: 8px;
+  }
+  .nova-site .feature-copy {
+    left: 25px;
+    right: 25px;
+    bottom: 27px;
+  }
+  .nova-site .feature-copy > h3 {
+    font-size: 34px;
+  }
+  .nova-site .feature-copy > p {
+    font-size: 12px;
+    max-width: 285px;
+  }
+  .nova-site .feature-copy > .text-link {
+    font-size: 11px;
+    margin-top: 18px;
+  }
+  .nova-site .feature-markets .feature-copy > h3 {
+    font-size: 29px;
+  }
+  .nova-site .feature-markets .feature-copy > p {
+    max-width: 260px;
+  }
+  .nova-site .token-orbit {
+    top: 95px;
+    gap: 18px;
+  }
+  .nova-site .token-orbit .token-mark {
+    width: 41px;
+    height: 41px;
+  }
+  .nova-site .feature-controls {
+    padding: 25px;
+    gap: 18px;
+  }
+  .nova-site .feature-controls > svg {
+    display: block;
+    width: 25px;
+    height: 25px;
+  }
+  .nova-site .feature-controls h3 {
+    font-size: 24px;
+  }
+  .nova-site .feature-controls .eyebrow {
+    font-size: 7px;
+  }
+  .nova-site .feature-controls > .round-arrow {
+    width: 30px;
+    height: 30px;
+    font-size: 19px;
+  }
+  .nova-site .split-section {
+    gap: 30px;
+  }
+  .nova-site .large-copy {
+    font-size: 12px;
+    line-height: 1.95;
+    margin-top: 22px;
+  }
+  .nova-site .check-list {
+    font-size: 10px;
+  }
+  .nova-site .nova-button {
+    font-size: 12px;
+    padding: 14px 19px;
+  }
+  .nova-site .route-illustration .panel-label {
+    padding: 18px;
+  }
+  .nova-site .route-illustration .outline-tag {
+    font-size: 6px;
+    padding: 4px 6px;
+  }
+  .nova-site .route-flow {
+    padding: 34px 15px 29px;
+    gap: 4px;
+  }
+  .nova-site .route-flow-node {
+    gap: 10px;
+  }
+  .nova-site .route-flow-node > .token-mark {
+    width: 36px;
+    height: 36px;
+    font-size: 20px;
+  }
+  .nova-site .route-flow-node > strong {
+    font-size: 11px;
+  }
+  .nova-site .route-flow-node > small {
+    font-size: 7px;
+  }
+  .nova-site .route-connector {
+    min-width: 22px;
+    margin-inline: 4px;
+    gap: 6px;
+    margin-top: -19px;
+  }
+  .nova-site .route-connector > span,
+  .nova-site .route-connector > small {
+    font-size: 6px;
+  }
+  .nova-site .formula {
+    margin-inline: 20px;
+    padding-top: 20px;
+    font-size: 11px;
+    gap: 9px;
+  }
+  .nova-site .formula > strong {
+    font-size: 13px;
+  }
+  .nova-site .route-illustration > .source-note {
+    padding: 0 20px 22px;
+  }
+  .nova-site .security-story {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+    padding-block: 24px 40px;
+  }
+  .nova-site .security-art {
+    height: auto;
+    aspect-ratio: 1.2;
+    width: 100%;
+  }
+  .nova-site .security-copy {
+    width: 100%;
+    padding-inline: 5px;
+  }
+  .nova-site .security-copy h2 {
+    font-size: 36px;
+  }
+  .nova-site .security-copy > p {
+    font-size: 12px;
+    margin-top: 20px;
+    max-width: 330px;
+  }
+  .nova-site .security-copy > .text-link {
+    font-size: 11px;
+    margin-top: 20px;
+  }
+  .nova-site .closing-cta {
+    padding-block: 70px;
+  }
+  .nova-site .closing-cta h2 {
+    font-size: 48px;
+    line-height: 1.1;
+  }
+  .nova-site .closing-cta > p {
+    font-size: 12px;
+    max-width: 260px;
+    line-height: 1.9;
+  }
+  .nova-site .closing-cta .cta-orbit {
+    font-size: 250px;
+    right: -110px;
+    top: 70px;
+  }
+  .nova-site .closing-cta .button-row {
+    gap: 7px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .nova-site .closing-cta .button-ghost {
+    padding-left: 0;
+  }
+  .nova-site .nova-footer {
+    padding-top: 40px;
+  }
+  .nova-site .footer-top {
+    grid-template-columns: 1fr 1fr;
+    gap: 40px 25px;
+    padding-bottom: 36px;
+  }
+  .nova-site .footer-brand {
+    grid-column: 1/3;
+  }
+  .nova-site .footer-brand p {
+    font-size: 12px;
+    margin-top: 18px;
+  }
+  .nova-site .footer-network {
+    font-size: 10px;
+    margin-top: 17px;
+  }
+  .nova-site .footer-column {
+    gap: 13px;
+    padding-top: 0;
+  }
+  .nova-site .footer-column > a {
+    font-size: 11px;
+  }
+  .nova-site .footer-column > h3 {
+    font-size: 12px;
+    margin-bottom: 3px;
+  }
+  .nova-site .footer-column:last-child {
+    grid-column: 1/3;
+    gap: 18px 25px;
+  }
+  .nova-site .footer-bottom {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 9px;
+    padding-block: 20px;
+  }
+  .nova-site .risk-note {
+    font-size: 9px;
+    line-height: 1.9;
+  }
+  .nova-site .interior-page {
+    padding-top: 45px;
+    padding-bottom: 55px;
+  }
+  .nova-site .page-heading {
+    gap: 22px;
+    margin-bottom: 30px;
+  }
+  .nova-site .page-heading h1 {
+    font-size: 40px;
+    line-height: 1.1;
+  }
+  .nova-site .page-heading p {
+    font-size: 12px;
+    line-height: 1.9;
+    margin-top: 19px;
+  }
+  .nova-site .page-heading .eyebrow {
+    margin-bottom: 21px;
+  }
+  .nova-site .status-pill,
+  .nova-site .observation-badge {
+    font-size: 9px;
+    padding: 8px 10px;
+  }
+  .nova-site .stat-grid {
+    gap: 11px;
+    margin-bottom: 24px;
+  }
+  .nova-site .stat-card {
+    padding: 18px 15px;
+    gap: 13px;
+  }
+  .nova-site .stat-card > span {
+    font-size: 10px;
+  }
+  .nova-site .stat-card > strong {
+    font-size: 29px;
+  }
+  .nova-site .stat-card > strong.stat-time {
+    font-size: 21px;
+    line-height: 1.65;
+  }
+  .nova-site .stat-card > small {
+    font-size: 8px;
+    line-height: 1.7;
+    max-width: 125px;
+  }
+  .nova-site .table-toolbar {
+    padding: 20px 17px;
+    gap: 19px;
+  }
+  .nova-site .table-toolbar h2 {
+    font-size: 16px;
+  }
+  .nova-site .table-toolbar p {
+    font-size: 10px;
+  }
+  .nova-site .toolbar-controls {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .nova-site .search-field {
+    min-width: 135px;
+    max-width: none;
+    flex: 1;
+    padding-inline: 10px;
+  }
+  .nova-site .toolbar-controls select {
+    font-size: 9px;
+    padding-left: 8px;
+    padding-right: 15px;
+    max-width: 120px;
+  }
+  .nova-site .toolbar-controls > .icon-button {
+    width: 34px;
+    height: 38px;
+  }
+  .nova-site .table-bottom {
+    padding: 14px 17px;
+    font-size: 8px;
+    gap: 10px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .nova-site .empty-state {
+    padding: 45px 20px;
+  }
+  .nova-site .empty-state h3 {
+    font-size: 18px;
+  }
+  .nova-site .empty-state p {
+    font-size: 11px;
+  }
+  .nova-site .pool-section {
+    padding-top: 55px;
+  }
+  .nova-site .section-heading.compact {
+    gap: 20px;
+  }
+  .nova-site .section-heading.compact h2 {
+    font-size: 31px;
+  }
+  .nova-site .section-heading.compact > .text-link {
+    font-size: 10px;
+  }
+  .nova-site .pool-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .nova-site .pool-card {
+    padding: 24px;
+  }
+  .nova-site .pool-card h3 {
+    margin-top: 22px;
+  }
+  .nova-site .pool-price {
+    font-size: 30px;
+  }
+  .nova-site .pool-card dl {
+    margin-top: 18px;
+  }
+  .nova-site .pool-card dt {
+    font-size: 10px;
+  }
+  .nova-site .pool-card dd {
+    font-size: 14px;
+  }
+  .nova-site .inline-cta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 24px;
+    padding-block: 35px;
+    margin-top: 55px;
+  }
+  .nova-site .inline-cta h2 {
+    font-size: 28px;
+    max-width: 330px;
+  }
+  .nova-site .inline-cta .eyebrow {
+    font-size: 8px;
+  }
+  .nova-site .platform-banner {
+    height: 470px;
+  }
+  .nova-site .platform-banner > img {
+    width: 155%;
+    max-width: none;
+    left: -25%;
+    height: 100%;
+    object-position: 70% 50%;
+  }
+  .nova-site .platform-banner:after {
+    background: linear-gradient(180deg, #0a110dcc 0%, #0a110d55 40%, #0a110d22);
+  }
+  .nova-site .platform-banner > div {
+    padding: 38px 25px;
+  }
+  .nova-site .platform-banner h2 {
+    font-size: 33px;
+    line-height: 1.15;
+    margin-bottom: 25px;
+  }
+  .nova-site .platform-banner .eyebrow {
+    font-size: 7px;
+  }
+  .nova-site .workflow-grid {
+    gap: 35px 25px;
+  }
+  .nova-site .workflow-card > h3 {
+    font-size: 26px;
+  }
+  .nova-site .workflow-card > p {
+    font-size: 11px;
+  }
+  .nova-site .workflow-card > .text-link {
+    font-size: 10px;
+    align-items: flex-start;
+    gap: 5px;
+    margin-top: 18px;
+    line-height: 1.7;
+  }
+  .nova-site .workflow-card > div {
+    margin-bottom: 25px;
+  }
+  .nova-site .workflow-card > div svg {
+    width: 23px;
+    height: 23px;
+  }
+  .nova-site .faq-section {
+    gap: 30px;
+    padding-top: 0;
+  }
+  .nova-site .faq-section h2 {
+    font-size: 35px;
+  }
+  .nova-site .faq-section > div > p {
+    font-size: 12px;
+  }
+  .nova-site .faq-list summary {
+    font-size: 12px;
+    gap: 18px;
+    padding: 23px 0;
+  }
+  .nova-site .faq-list details > p {
+    font-size: 11px;
+    padding-right: 10px;
+  }
+  .nova-site .security-banner {
+    height: 500px;
+  }
+  .nova-site .security-banner > div {
+    padding: 30px 25px;
+    max-width: none;
+  }
+  .nova-site .security-banner h2 {
+    font-size: 31px;
+  }
+  .nova-site .security-banner p {
+    font-size: 12px;
+    max-width: 285px;
+  }
+  .nova-site .security-banner > img {
+    width: 100%;
+    left: 0;
+    top: 180px;
+    height: 350px;
+    object-fit: cover;
+    opacity: 0.7;
+  }
+  .nova-site .security-banner:after {
+    background: linear-gradient(180deg, #0a110d 0%, #0a110da3 45%, transparent);
+  }
+  .nova-site .security-grid {
+    grid-template-columns: 1fr;
+    padding: 30px 0 50px;
+    gap: 16px;
+  }
+  .nova-site .security-card {
+    padding: 27px;
+  }
+  .nova-site .security-card h3 {
+    font-size: 26px;
+  }
+  .nova-site .security-card p {
+    font-size: 12px;
+  }
+  .nova-site .card-number {
+    margin-bottom: 23px;
+  }
+  .nova-site .risk-panel {
+    padding-top: 40px;
+  }
+  .nova-site .risk-panel h2 {
+    font-size: 36px;
+  }
+  .nova-site .risk-guidelines > p {
+    font-size: 11px;
+    gap: 15px;
+  }
+  .nova-site .risk-guidelines .text-link {
+    font-size: 10px;
+  }
+  .nova-site .access-banner {
+    padding: 20px;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .nova-site .access-banner > div {
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .nova-site .access-banner strong {
+    font-size: 12px;
+  }
+  .nova-site .access-banner small {
+    font-size: 10px;
+    line-height: 1.8;
+  }
+  .nova-site .access-banner .text-link {
+    font-size: 11px;
+  }
+  .nova-site .pricing-grid {
+    grid-template-columns: 1fr;
+    gap: 19px;
+  }
+  .nova-site .pricing-card {
+    padding: 29px;
+  }
+  .nova-site .plan-top {
+    flex-direction: row;
+    align-items: center;
+    min-height: 0;
+    margin-bottom: 28px;
+  }
+  .nova-site .plan-top > span:first-child {
+    font-size: 17px;
+  }
+  .nova-site .plan-top .outline-tag {
+    font-size: 7px;
+  }
+  .nova-site .pricing-card > h2 {
+    font-size: 31px;
+    min-height: 0;
+    max-width: none;
+  }
+  .nova-site .pricing-card > p {
+    font-size: 12px;
+    min-height: 0;
+    max-width: 290px;
+    margin-top: 14px;
+  }
+  .nova-site .plan-price strong {
+    font-size: 33px;
+  }
+  .nova-site .plan-price > span {
+    font-size: 11px;
+  }
+  .nova-site .pricing-card > .nova-button {
+    font-size: 12px;
+  }
+  .nova-site .plan-details > p {
+    font-size: 12px;
+  }
+  .nova-site .plan-details svg {
+    width: 15px;
+  }
+  .nova-site .pricing-note {
+    font-size: 10px;
+    text-align: left;
+  }
+  .nova-site .pricing-faq {
+    margin-top: 60px;
+  }
+  .nova-site .account-sections {
+    gap: 13px;
+  }
+  .nova-site .account-section {
+    padding: 20px 16px;
+  }
+  .nova-site .account-section h3 {
+    font-size: 19px;
+    min-height: 42px;
+    line-height: 1.2;
+  }
+  .nova-site .account-section p {
+    font-size: 10px;
+    min-height: 76px;
+  }
+  .nova-site .account-section > a {
+    font-size: 10px;
+    line-height: 1.8;
+  }
+  .nova-site .arbitrage-page .page-heading h1 {
+    font-size: 39px;
+  }
+  .nova-site .terminal-statusbar {
+    flex-wrap: wrap;
+    gap: 15px;
+    font-size: 9px;
+    padding-block: 17px;
+  }
+  .nova-site .terminal-statusbar > div {
+    gap: 9px;
+  }
+  .nova-site .terminal-statusbar .text-link {
+    font-size: 9px;
+  }
+  .nova-site .terminal-statusbar .desktop-only {
+    display: none;
+  }
+  .nova-site .terminal-statusbar > div:last-child {
+    margin-left: auto;
+  }
+  .nova-site .terminal-grid {
+    gap: 21px;
+  }
+  .nova-site .scan-sidebar {
+    display: block;
+  }
+  .nova-site .scan-sidebar > form {
+    display: block;
+    padding: 22px;
+  }
+  .nova-site .scan-sidebar form > .field-label {
+    font-size: 11px;
+    margin-top: 20px;
+    margin-bottom: 10px;
+  }
+  .nova-site .scan-sidebar form > .field-label:first-child {
+    margin-top: 0;
+  }
+  .nova-site .scan-sidebar .asset-select {
+    margin-bottom: 0;
+  }
+  .nova-site .asset-select select {
+    font-size: 12px;
+  }
+  .nova-site .scan-sidebar .settings-divider {
+    display: block;
+    margin: 23px 0;
+  }
+  .nova-site .quick-amounts {
+    margin-top: 10px;
+  }
+  .nova-site .quick-amounts > button {
+    font-size: 11px;
+    padding-block: 7px;
+  }
+  .nova-site .scan-sidebar .field-help {
+    font-size: 10px;
+    margin-top: 8px;
+    line-height: 1.8;
+  }
+  .nova-site .input-unit input {
+    font-size: 15px;
+  }
+  .nova-site .scan-sidebar .full-width {
+    margin-top: 24px;
+    font-size: 12px;
+  }
+  .nova-site .scan-venues {
+    border: 0;
+    border-top: 1px solid var(--line);
+    padding: 21px 22px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+  }
+  .nova-site .scan-venues > .field-label {
+    width: 100%;
+    margin: 0;
+    font-size: 10px;
+  }
+  .nova-site .scan-venues > div {
+    margin: 0;
+    font-size: 9px;
+    gap: 6px;
+  }
+  .nova-site .scan-venues > div > svg {
+    display: none;
+  }
+  .nova-site .sidebar-note {
+    border-left: 0;
+    padding: 18px 22px;
+  }
+  .nova-site .sidebar-note > p {
+    font-size: 10px;
+  }
+  .nova-site .terminal-stats {
+    grid-template-columns: 1fr 1fr;
+    margin-top: 0;
+  }
+  .nova-site .terminal-stat {
+    padding: 20px 16px;
+    gap: 11px;
+  }
+  .nova-site .terminal-stat:first-child {
+    grid-column: 1/3;
+    border-bottom: 1px solid var(--line);
+  }
+  .nova-site .terminal-stat:nth-child(2) {
+    border-left: 0;
+  }
+  .nova-site .terminal-stat > span {
+    font-size: 10px;
+  }
+  .nova-site .terminal-stat > strong {
+    font-size: 26px;
+  }
+  .nova-site .terminal-stat:first-child > strong {
+    font-size: 31px;
+  }
+  .nova-site .terminal-stat > strong.stat-time {
+    font-size: 23px;
+  }
+  .nova-site .terminal-stat > small {
+    font-size: 8px;
+    line-height: 1.8;
+  }
+  .nova-site .terminal-stat > strong > small {
+    font-size: 11px;
+  }
+  .nova-site .scan-progress > div:first-child {
+    font-size: 8px;
+    line-height: 1.8;
+    gap: 6px;
+    min-height: 29px;
+  }
+  .nova-site .routes-panel .table-toolbar {
+    padding: 20px 16px;
+    gap: 18px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .nova-site .routes-panel .toolbar-controls {
+    width: 100%;
+  }
+  .nova-site .routes-panel .toolbar-controls .filter-chip {
+    margin-right: auto;
+    font-size: 10px;
+  }
+  .nova-site .routes-panel .table-toolbar h2 {
+    font-size: 16px;
+  }
+  .nova-site .route-table {
+    min-width: 590px;
+  }
+  .nova-site .route-table th {
+    font-size: 9px;
+  }
+  .nova-site .route-table td {
+    font-size: 11px;
+  }
+  .nova-site .route-empty {
+    min-height: 300px;
+    padding: 45px 23px;
+  }
+  .nova-site .route-empty > p {
+    font-size: 11px;
+  }
+  .nova-site .inline-notice {
+    padding: 14px 17px;
+    font-size: 10px;
+  }
+  .nova-site .breakdown-heading {
+    padding: 21px 18px;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 17px;
+  }
+  .nova-site .breakdown-route {
+    font-size: 14px;
+  }
+  .nova-site .breakdown-grid {
+    grid-template-columns: 1fr;
+    padding: 0 18px 22px;
+    gap: 23px;
+  }
+  .nova-site .cost-breakdown {
+    font-size: 11px;
+    gap: 13px;
+  }
+  .nova-site .quote-context {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 21px 0 0;
+  }
+  .nova-site .quote-context > .eyebrow {
+    font-size: 9px;
+  }
+  .nova-site .quote-context > p {
+    font-size: 10px;
+  }
+  .nova-site .quote-context dl {
+    font-size: 10px;
+    margin-block: 16px;
+  }
+  .nova-site .quote-context .text-link {
+    font-size: 10px;
+  }
+  .nova-site .route-details > .source-note {
+    padding: 15px 18px;
+    font-size: 9px;
+  }
+  .nova-site .empty-details {
+    padding: 30px 20px;
+    gap: 15px;
+  }
+  .nova-site .empty-details > p {
+    font-size: 10px;
+  }
+  .nova-site .terminal-footnotes {
+    flex-direction: column;
+    gap: 20px;
+  }
+  .nova-site .terminal-footnotes summary {
+    font-size: 10px;
+  }
+  .nova-site .terminal-footnotes .text-link {
+    font-size: 10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nova-site *,
+  .nova-site *:before,
+  .nova-site *:after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
 }
 
-/* pricing */
-.lp-plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; align-items: stretch; padding-top: 24px; }
-.lp-plan { position: relative; display: flex; flex-direction: column; padding: 30px 26px; border-radius: 24px; border: 1px solid var(--line); background: var(--bg2); }
-.lp-plan-featured { border-color: rgba(34,217,122,.55); background: radial-gradient(360px 220px at 50% 0%, rgba(34,217,122,.16), transparent 70%), var(--bg2); box-shadow: 0 30px 80px rgba(34,217,122,.12); transform: translateY(-8px); }
-.lp-plan-tag { position: absolute; top: -13px; left: 50%; transform: translateX(-50%); padding: 4px 14px; border-radius: 999px; font-size: 12px; font-weight: 800; color: #05140c; background: linear-gradient(135deg, var(--green-soft), var(--green)); white-space: nowrap; }
-.lp-plan h3 { font-size: 20px; font-weight: 800; }
-.lp-plan-price { display: flex; align-items: baseline; gap: 8px; margin-top: 14px; }
-.lp-plan-price strong { font-family: 'JetBrains Mono', monospace; font-size: 46px; line-height: 1; }
-.lp-plan-price span { color: var(--muted); font-size: 14px; }
-.lp-plan-fee { margin-top: 12px; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--green); }
-.lp-plan-fee span { font-family: 'Vazirmatn', sans-serif; font-weight: 500; color: var(--muted); font-size: 13px; }
-.lp-plan .lp-checks { flex: 1; margin: 22px 0 26px; font-size: 14.5px; }
-.lp-plan-cta { width: 100%; }
-.lp-ref { margin-top: 26px; grid-template-columns: repeat(2, 1fr); max-width: 760px; margin-left: auto; margin-right: auto; }
-.lp-ref .lp-price strong { font-size: 34px; }
-@media (max-width: 1020px) { .lp-plans { grid-template-columns: 1fr; max-width: 480px; margin: 0 auto; } .lp-plan-featured { transform: none; } }
-@media (max-width: 640px) { .lp-ref { grid-template-columns: 1fr; } }
+.nova-site .trading-sections {
+  margin-bottom: 76px;
+}
+.nova-site .trading-sections .access-banner {
+  margin-bottom: 0;
+}
+.nova-site .trading-sections .account-sections {
+  margin-top: 16px;
+}
+@media (max-width: 600px) {
+  .nova-site .trading-sections {
+    margin-bottom: 55px;
+  }
+}

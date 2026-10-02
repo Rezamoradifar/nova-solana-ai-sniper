@@ -1930,6 +1930,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     shadowModePriceSampler?.stop();
     networkTradeScanner?.stop();
     arbitrageScanner?.stop();
+    setActiveArbitrageScanner(undefined);
     if (app.config.SCANNER_CONCURRENCY_GOVERNOR_ENABLED) {
       scannerConcurrencyGovernor.stop();
     }
