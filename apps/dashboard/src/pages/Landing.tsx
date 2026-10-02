@@ -3,6 +3,85 @@ import { Link } from 'react-router-dom';
 import '../landing.css';
 
 const BOT_URL = import.meta.env.VITE_BOT_URL ?? 'https://t.me/GSPBankSniperBot';
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
+
+interface PublicPlan {
+  key: string;
+  name: string;
+  priceSol: number;
+  durationDays: number;
+  feeBps: number | null;
+  maxBuySol: number | null;
+  maxOpenPositions: number | null;
+  features: string[];
+}
+
+/** Shown until the live list loads (or if the API is unreachable); mirrors the seeded packages. */
+const FALLBACK_PLANS: PublicPlan[] = [
+  {
+    key: 'free',
+    name: 'Free',
+    priceSol: 0,
+    durationDays: 3650,
+    feeBps: null,
+    maxBuySol: null,
+    maxOpenPositions: null,
+    features: [
+      'Auto-buy on new launches',
+      'Security gate and real-value stop-loss',
+      'Trade cards in Telegram',
+    ],
+  },
+  {
+    key: 'pro',
+    name: 'Pro',
+    priceSol: 1.5,
+    durationDays: 30,
+    feeBps: 1500,
+    maxBuySol: 2,
+    maxOpenPositions: 5,
+    features: [
+      'Everything in Free',
+      'Lower fee: 15% of profit',
+      'Up to 2 SOL per buy, 5 open positions',
+      'Network trade feed',
+    ],
+  },
+  {
+    key: 'elite',
+    name: 'Elite',
+    priceSol: 4,
+    durationDays: 30,
+    feeBps: 1000,
+    maxBuySol: 10,
+    maxOpenPositions: 15,
+    features: [
+      'Everything in Pro',
+      'Lowest fee: 10% of profit',
+      'Up to 10 SOL per buy, 15 open positions',
+      'Arbitrage scanner reports',
+    ],
+  },
+];
+
+function usePlans(): { plans: PublicPlan[]; defaultFeeBps: number } {
+  const [plans, setPlans] = useState<PublicPlan[]>(FALLBACK_PLANS);
+  const [defaultFeeBps, setDefaultFeeBps] = useState(2000);
+  useEffect(() => {
+    let alive = true;
+    fetch(`${API_BASE}/public/plans`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((d: { plans: PublicPlan[]; defaultFeeBps?: number }) => {
+        if (alive && Array.isArray(d.plans) && d.plans.length > 0) setPlans(d.plans);
+        if (alive && typeof d.defaultFeeBps === 'number') setDefaultFeeBps(d.defaultFeeBps);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return { plans, defaultFeeBps };
+}
 
 const T = {
   en: {
@@ -11,7 +90,7 @@ const T = {
       how: 'How it works',
       network: 'Network trades',
       arb: 'Arbitrage',
-      fees: 'Fees',
+      fees: 'Pricing',
       faq: 'FAQ',
       dashboard: 'Dashboard',
       start: 'Start on Telegram',
@@ -103,16 +182,15 @@ const T = {
       'Runs in paper mode; live only when net profit is positive',
     ],
     arbBadge: 'Running · paper mode',
-    feesTitle: 'Fees only on profit',
+    feesTitle: 'Choose your package',
     feesSub:
-      'Using the bot is free. Only when a trade closes in profit, a share of the net profit is taken as a fee.',
+      'Start free. Upgrade for a lower profit fee and higher limits. Fees are only ever taken from profitable trades, never from losses.',
     fees: [
-      ['20%', 'of net profit on winning trades', 'Losing trade = no fee'],
       ['10%', 'Level-1 referral reward', 'from your direct referrals’ fees'],
       ['5%', 'Level-2 referral reward', 'from second-level referrals’ fees'],
     ],
     feesNote:
-      'Rates are set from the admin panel; the current values are always shown inside the bot.',
+      'Packages are paid in SOL from your bot wallet, directly on-chain. Prices shown are live from the bot.',
     faqTitle: 'FAQ',
     faq: [
       [
@@ -232,6 +310,8 @@ export function Landing() {
   const [open, setOpen] = useState<number | null>(0);
   const [menu, setMenu] = useState(false);
   const t = T.en;
+  const { plans, defaultFeeBps } = usePlans();
+  const featured = plans.length >= 3 ? plans[1]!.key : plans[plans.length - 1]?.key;
 
   useEffect(() => {
     document.title = 'GSP Bank Sniper';
@@ -406,9 +486,46 @@ export function Landing() {
         <section id="fees" className="lp-wrap lp-section">
           <h2>{t.feesTitle}</h2>
           <p className="lp-lead lp-center">{t.feesSub}</p>
-          <div className="lp-grid3">
-            {t.fees.map(([v, title, note], i) => (
-              <div key={title} className={`lp-price ${i === 0 ? 'lp-price-main' : ''}`}>
+          <div className="lp-plans">
+            {plans.map((p) => (
+              <div
+                key={p.key}
+                className={`lp-plan ${p.key === featured ? 'lp-plan-featured' : ''}`}
+              >
+                {p.key === featured && <span className="lp-plan-tag">Most popular</span>}
+                <h3>{p.name}</h3>
+                <div className="lp-plan-price">
+                  {p.priceSol > 0 ? (
+                    <>
+                      <strong>{p.priceSol}</strong>
+                      <span>SOL / {p.durationDays} days</span>
+                    </>
+                  ) : (
+                    <strong>Free</strong>
+                  )}
+                </div>
+                <div className="lp-plan-fee">
+                  {`${(p.feeBps ?? defaultFeeBps) / 100}%`} <span>fee on profit only</span>
+                </div>
+                <ul className="lp-checks">
+                  {p.features.map((f) => (
+                    <li key={f}>{f}</li>
+                  ))}
+                </ul>
+                <a
+                  href={BOT_URL}
+                  className={`lp-btn ${p.key === featured ? 'lp-btn-primary' : 'lp-btn-ghost'} lp-plan-cta`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {p.priceSol > 0 ? `Get ${p.name}` : 'Start free'}
+                </a>
+              </div>
+            ))}
+          </div>
+          <div className="lp-grid3 lp-ref">
+            {t.fees.map(([v, title, note]) => (
+              <div key={title} className="lp-price">
                 <strong>{v}</strong>
                 <h3>{title}</h3>
                 <p>{note}</p>

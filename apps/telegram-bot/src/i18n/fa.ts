@@ -37,13 +37,14 @@ export const fa = {
       telegramTrends: '📡 ترندهای تلگرام',
       trendSettings: '⚙️ تنظیمات ترند',
       feeDashboard: '💸 کارمزد و درآمد',
+      plans: '💎 پکیج‌ها',
     },
   },
 
   home: {
     title: '👋 *GSP Bank Sniper*',
     openApp: '🚀 باز کردن اپ GSP',
-    freeNote: 'همه امکانات زیر رایگان است — بدون سطح‌بندی، بدون محدودیت.',
+    freeNote: 'رایگان شروع کن — در 💎 پکیج‌ها با ارتقا کارمزد کمتر و سقف بالاتر بگیر.',
     wallets: (n: number) => `👛 کیف پول‌ها: *${n}*`,
     activeSnipes: (n: number) => `🎯 پیکربندی‌های فعال اسنایپ: *${n}*`,
     openPositions: (n: number) => `📈 پوزیشن‌های باز: *${n}*`,
@@ -564,9 +565,32 @@ export const fa = {
     referralLeaderboardBtn: '🏆 جدول برترین دعوت‌کنندگان',
   },
 
+  plans: {
+    title: '💎 *پکیج‌ها*',
+    current: (name: string, until: string) => `پکیج شما: *${name}*${until ? ` (تا ${until})` : ''}`,
+    price: (sol: string, days: number) => `${sol} SOL / ${days} روز`,
+    freePrice: 'رایگان',
+    fee: (pct: string) => `کارمزد: ${pct}٪ از سود`,
+    feeGlobal: 'کارمزد: نرخ استاندارد',
+    maxBuy: (sol: string) => `حداکثر خرید: ${sol} SOL`,
+    maxOpen: (n: number) => `پوزیشن باز: تا ${n}`,
+    unlimited: 'بدون محدودیت حجم',
+    buyBtn: (name: string, sol: string) => `💎 خرید ${name} — ${sol} SOL`,
+    renewBtn: (name: string, sol: string) => `🔄 تمدید ${name} — ${sol} SOL`,
+    confirm: (name: string, sol: string, days: number) =>
+      `پکیج *${name}* به مبلغ *${sol} SOL* (${days} روز) خریداری شود؟\n\nمبلغ از کیف‌پول ربات شما روی زنجیره به خزانه‌ی پلتفرم ارسال می‌شود و قابل برگشت نیست.`,
+    confirmBtn: '✅ تأیید پرداخت',
+    cancelBtn: '✖️ انصراف',
+    processing: '⏳ در حال ارسال پرداخت روی زنجیره…',
+    success: (name: string, until: string, sig: string) =>
+      `✅ پکیج *${name}* تا ${until} فعال است.\n\n[مشاهده‌ی پرداخت در Solscan](https://solscan.io/tx/${sig})`,
+    failed: (reason: string) => `❌ خرید انجام نشد: ${reason}`,
+    unavailable: 'پکیج‌ها الان در دسترس نیستند. بعداً دوباره امتحان کنید.',
+  },
+
   feePolicyConsent: {
     title: '📜 *سیاست کارمزد عملکرد و دعوت*\n\n',
-    freeNote: 'ثبت‌نام رایگان است — بدون اشتراک ماهانه، هرگز.\n\n',
+    freeNote: 'ثبت‌نام رایگان است. پکیج‌های پولی اختیاری کارمزد را کمتر می‌کنند (💎 پکیج‌ها).\n\n',
     feeSectionTitle: '💸 *کارمزد عملکرد*\n',
     feeSectionBody:
       'شما فقط بابت یک معامله *سودآور و تکمیل‌شده* کارمزد می‌پردازید — هرگز روی معامله زیان‌ده یا سربه‌سر، و هرگز پیش از بسته شدن واقعی معامله.\n',

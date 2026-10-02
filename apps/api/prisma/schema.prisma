@@ -27,6 +27,10 @@ model User {
   referralCode     String?          @unique
   referredByCode   String?
   subscriptionTier SubscriptionTier @default(FREE)
+  // Current package (SubscriptionPlan.key). A paid plan past planExpiresAt is
+  // treated as "free" at read time; no background job is needed.
+  planKey          String           @default("free")
+  planExpiresAt    DateTime?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
@@ -66,6 +70,7 @@ model User {
   tradeBroadcastDeliveries TradeBroadcastDelivery[]
   adminBroadcastDeliveries AdminBroadcastDelivery[]
   networkTradeBroadcastDeliveries NetworkTradeBroadcastDelivery[]
+  subscriptions         Subscription[]
 
   @@map("users")
 }
@@ -1668,4 +1673,46 @@ model WithdrawalRequest {
   // partial unique index (added by raw SQL in this migration) — not
   // expressible here, so it won't show up as a diff/drift warning by design.
   @@map("withdrawal_requests")
+}
+
+/// A package users can buy in the bot. Prices and limits are owner-editable
+/// from the admin panel. null limits mean "no package limit".
+model SubscriptionPlan {
+  key                String   @id
+  name               String
+  priceSol           Float    @default(0)
+  durationDays       Int      @default(30)
+  /// Platform fee on net profit for this plan; null = the global BusinessSettings fee.
+  feeBps             Int?
+  maxBuySol          Float?
+  maxOpenPositions   Int?
+  autoBuyEnabled     Boolean  @default(true)
+  /// Short feature lines shown in the bot and on the website, one per line.
+  features           String   @default("")
+  active             Boolean  @default(true)
+  sortOrder          Int      @default(0)
+  updatedAt          DateTime @updatedAt
+
+  subscriptions Subscription[]
+
+  @@map("subscription_plans")
+}
+
+/// One package purchase, paid on-chain from the user's bot wallet to the treasury.
+model Subscription {
+  id          String           @id @default(cuid())
+  userId      String
+  planKey     String
+  amountSol   Float
+  txSignature String           @unique
+  startsAt    DateTime
+  expiresAt   DateTime
+  createdAt   DateTime         @default(now())
+
+  user User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan SubscriptionPlan @relation(fields: [planKey], references: [key])
+
+  @@index([userId, expiresAt])
+  @@index([createdAt])
+  @@map("subscriptions")
 }

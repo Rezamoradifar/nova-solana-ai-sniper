@@ -110,3 +110,23 @@ export async function closeAllPositionsApi(
 ): Promise<CloseAllResult> {
   return request<CloseAllResult>(api, user, '/positions/close-all', { method: 'POST' });
 }
+
+export interface PlanPurchaseApiResult {
+  ok: true;
+  planKey: string;
+  expiresAt: string;
+  txSignature: string;
+  amountSol: number;
+}
+
+/** POST /plans/purchase — pays a package from the user's bot wallet to the treasury. */
+export async function purchasePlanApi(
+  api: ApiConfig,
+  user: Pick<User, 'id' | 'role'>,
+  planKey: string,
+): Promise<PlanPurchaseApiResult> {
+  return request<PlanPurchaseApiResult>(api, user, '/plans/purchase', {
+    method: 'POST',
+    body: JSON.stringify({ planKey }),
+  });
+}

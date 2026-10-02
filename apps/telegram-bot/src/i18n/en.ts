@@ -33,13 +33,14 @@ export const en = {
       telegramTrends: '📡 Telegram Trends',
       trendSettings: '⚙️ Trend Settings',
       feeDashboard: '💸 Fees & Earnings',
+      plans: '💎 Packages',
     },
   },
 
   home: {
     title: '👋 *GSP Bank Sniper*',
     openApp: '🚀 Open GSP App',
-    freeNote: 'Every feature below is free — no tiers, no limits.',
+    freeNote: 'Start free — upgrade in 💎 Packages for a lower fee and higher limits.',
     wallets: (n: number) => `👛 Wallets: *${n}*`,
     activeSnipes: (n: number) => `🎯 Active snipe configs: *${n}*`,
     openPositions: (n: number) => `📈 Open positions: *${n}*`,
@@ -569,9 +570,33 @@ export const en = {
     referralLeaderboardBtn: '🏆 Referral Leaderboard',
   },
 
+  plans: {
+    title: '💎 *Packages*',
+    current: (name: string, until: string) =>
+      `Your package: *${name}*${until ? ` (until ${until})` : ''}`,
+    price: (sol: string, days: number) => `${sol} SOL / ${days} days`,
+    freePrice: 'Free',
+    fee: (pct: string) => `Fee: ${pct}% of profit`,
+    feeGlobal: 'Fee: standard rate',
+    maxBuy: (sol: string) => `Max buy: ${sol} SOL`,
+    maxOpen: (n: number) => `Open positions: up to ${n}`,
+    unlimited: 'No size limits',
+    buyBtn: (name: string, sol: string) => `💎 Buy ${name} — ${sol} SOL`,
+    renewBtn: (name: string, sol: string) => `🔄 Renew ${name} — ${sol} SOL`,
+    confirm: (name: string, sol: string, days: number) =>
+      `Buy *${name}* for *${sol} SOL* (${days} days)?\n\nThe amount is sent from your bot wallet to the platform treasury on-chain. This cannot be undone.`,
+    confirmBtn: '✅ Confirm payment',
+    cancelBtn: '✖️ Cancel',
+    processing: '⏳ Sending payment on-chain…',
+    success: (name: string, until: string, sig: string) =>
+      `✅ *${name}* is active until ${until}.\n\n[View payment on Solscan](https://solscan.io/tx/${sig})`,
+    failed: (reason: string) => `❌ Purchase failed: ${reason}`,
+    unavailable: 'Packages are not available right now. Try again later.',
+  },
+
   feePolicyConsent: {
     title: '📜 *Performance Fee & Referral Policy*\n\n',
-    freeNote: 'Registration is free — no monthly subscription, ever.\n\n',
+    freeNote: 'Registration is free. Optional paid packages lower the fee (see 💎 Packages).\n\n',
     feeSectionTitle: '💸 *Performance Fee*\n',
     feeSectionBody:
       'You only pay a fee on a *profitable, completed* trade — never on a losing or break-even trade, and never before a trade actually closes.\n',

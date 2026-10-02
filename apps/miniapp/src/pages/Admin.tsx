@@ -9,6 +9,7 @@ import { sol, usd } from '../lib/format.js';
 import type { AdminOverview } from '../lib/types.js';
 import { TopBar } from '../components/TopBar.js';
 import { AdminPerformance } from '../components/AdminPerformance.js';
+import { AdminPackages } from '../components/AdminPackages.js';
 import { Button, Card, CardSkeleton, Input, Modal } from '../components/ui/index.js';
 
 type EditField = 'treasury' | 'fee' | 'level1' | 'level2';
@@ -349,6 +350,7 @@ export function Admin() {
             </div>
           </section>
 
+          <AdminPackages />
           <AdminPerformance />
 
           <section className="flex flex-col gap-3">

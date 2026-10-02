@@ -10,11 +10,19 @@ import {
   type BusinessSettingsWithLevels,
   type Logger,
 } from '@nova/shared';
+import {
+  applyPlanEdit,
+  PLAN_FIELD_PROMPTS,
+  renderPlanEditor,
+  renderPlansPanel,
+  type PlanField,
+} from './plansPanel.js';
 
 export type PanelField = 'treasury' | 'fee' | 'level1' | 'level2';
 
 const EDIT_TTL_MS = 5 * 60_000;
 const pendingEdits = new Map<number, { field: PanelField; expiresAt: number }>();
+const pendingPlanEdits = new Map<number, { key: string; field: PlanField; expiresAt: number }>();
 
 function pct(bps: number): string {
   return `${Number((bps / 100).toFixed(2))}%`;
@@ -56,7 +64,9 @@ export function renderPanel(
       settings.referralProgramEnabled ? '⏸ Turn referrals OFF' : '▶️ Turn referrals ON',
       'adm:toggle',
     )
-    .text('🔄 Refresh', 'adm:refresh');
+    .text('🔄 Refresh', 'adm:refresh')
+    .row()
+    .text('💎 Packages & revenue', 'admp:list');
   return { text, keyboard };
 }
 
@@ -90,6 +100,70 @@ export function registerSettingsPanel(
   bot.command('admin', admin, async (ctx) => {
     pendingEdits.delete(ctx.chat.id);
     await showPanel(ctx, false);
+  });
+
+  const show = async (ctx: Context, view: { text: string; keyboard: InlineKeyboard }) => {
+    await ctx
+      .editMessageText(view.text, { parse_mode: 'Markdown', reply_markup: view.keyboard })
+      .catch(() => ctx.reply(view.text, { parse_mode: 'Markdown', reply_markup: view.keyboard }));
+  };
+
+  bot.callbackQuery(/^admp:/, admin, async (ctx) => {
+    const [, action, key, field] = ctx.callbackQuery.data.split(':');
+    const chatId = ctx.chat?.id;
+    await ctx.answerCallbackQuery();
+    if (chatId === undefined) return;
+    pendingPlanEdits.delete(chatId);
+    if (action === 'list') return show(ctx, await renderPlansPanel(prisma));
+    if (!key) return;
+    if (action === 'toggle') {
+      const plan = await prisma.subscriptionPlan.findUnique({ where: { key } });
+      if (plan) {
+        await prisma.subscriptionPlan.update({ where: { key }, data: { active: !plan.active } });
+        logger.warn(
+          { adminId: ctx.from?.id, key, active: !plan.active },
+          'admin toggled a package',
+        );
+      }
+    }
+    if (action === 'edit' && field && field in PLAN_FIELD_PROMPTS) {
+      pendingEdits.delete(chatId);
+      pendingPlanEdits.set(chatId, {
+        key,
+        field: field as PlanField,
+        expiresAt: Date.now() + EDIT_TTL_MS,
+      });
+      await ctx.reply(`${PLAN_FIELD_PROMPTS[field as PlanField]}\n\nSend /cancel to stop.`);
+      return;
+    }
+    const editor = await renderPlanEditor(prisma, key);
+    if (editor) await show(ctx, editor);
+  });
+
+  bot.on('message:text', async (ctx, next) => {
+    const pending = pendingPlanEdits.get(ctx.chat.id);
+    if (!pending) return next();
+    if (pending.expiresAt < Date.now() || ctx.message.text.trim().startsWith('/')) {
+      pendingPlanEdits.delete(ctx.chat.id);
+      if (ctx.message.text.trim() === '/cancel') return void (await ctx.reply('Cancelled.'));
+      return next();
+    }
+    return admin(ctx, async () => {
+      const error = await applyPlanEdit(prisma, pending.key, pending.field, ctx.message!.text!);
+      if (error) {
+        await ctx.reply(`❌ ${error}\n\nTry again, or send /cancel.`);
+        return;
+      }
+      pendingPlanEdits.delete(ctx.chat!.id);
+      logger.warn(
+        { adminId: ctx.from?.id, key: pending.key, field: pending.field },
+        'admin edited a package',
+      );
+      await ctx.reply('✅ Saved.');
+      const editor = await renderPlanEditor(prisma, pending.key);
+      if (editor)
+        await ctx.reply(editor.text, { parse_mode: 'Markdown', reply_markup: editor.keyboard });
+    });
   });
 
   bot.callbackQuery(/^adm:/, admin, async (ctx) => {

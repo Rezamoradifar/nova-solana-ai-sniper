@@ -24,6 +24,7 @@ const SCREEN_BY_MENU_KEY = {
   telegramTrends: 'telegram_trends',
   trendSettings: 'trend_settings',
   feeDashboard: 'fee_dashboard',
+  plans: 'plans',
 } as const satisfies Record<string, ScreenId>;
 
 type MenuKey = keyof typeof SCREEN_BY_MENU_KEY;
@@ -75,6 +76,8 @@ export function mainMenuKeyboard(lang: Locale): Keyboard {
     .row()
     .text(m.trendSettings)
     .text(m.feeDashboard)
+    .row()
+    .text(m.plans)
     .resized();
 }
 
@@ -124,5 +127,7 @@ export function homeGrid(lang: Locale): InlineKeyboard {
     .text(m.telegramTrends, 's:telegram_trends')
     .row()
     .text(m.trendSettings, 's:trend_settings')
-    .text(m.feeDashboard, 's:fee_dashboard');
+    .text(m.feeDashboard, 's:fee_dashboard')
+    .row()
+    .text(m.plans, 's:plans');
 }

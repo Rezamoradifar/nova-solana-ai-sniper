@@ -1,3 +1,5 @@
+import { planFeeBps } from '@nova/shared';
+import { getUserPlanLimits } from '../lib/plans.js';
 import type { Connection } from '@solana/web3.js';
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
@@ -219,10 +221,16 @@ export async function processProfitableClose(
     }
   }
 
+  // The user's package may carry its own (lower) fee; otherwise the global one.
+  const userPlan = await getUserPlanLimits(deps.prisma, position.wallet.userId).catch(
+    () => undefined,
+  );
+  const feeBps = planFeeBps(userPlan, settings.performanceFeeBps);
+
   const feeResult = calculatePerformanceFee({
     grossProfitUsd,
     actualNetProfitUsd,
-    feeBps: settings.performanceFeeBps,
+    feeBps,
   });
   if (!feeResult) return; // net profit <= 0 once real costs are counted — no fee
 
@@ -233,11 +241,11 @@ export async function processProfitableClose(
   // BusinessSettings. calculatePerformanceFee above is still what reconciles
   // netProfitUsd against the real on-chain SOL delta and skips losing closes.
   const distribution = calculateProfitDistribution(feeResult.netProfitUsd, chain, {
-    platformFeeBps: settings.performanceFeeBps,
+    platformFeeBps: feeBps,
     levels: settings.referralLevels,
   });
   const poolUsd = feeResult.netProfitUsd - distribution.userShareUsd;
-  const poolBps = Math.min(10_000, Math.max(0, settings.performanceFeeBps));
+  const poolBps = Math.min(10_000, Math.max(0, feeBps));
 
   // Real on-chain payout (2026-07-23): a paper-trade position never had real
   // money to move in the first place — Trade.isPaperTrade (set once, at

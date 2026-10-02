@@ -29,7 +29,8 @@ export type ScreenId =
   | 'referral_earnings'
   | 'referral_leaderboard'
   | 'fee_policy_consent'
-  | 'language';
+  | 'language'
+  | 'plans';
 
 /** Static config for the Telegram trend source (t.me/trendingssol, t.me/trending)
  * — built once in index.ts from env, same global-not-per-user values the

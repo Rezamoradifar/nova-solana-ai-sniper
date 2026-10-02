@@ -1,3 +1,5 @@
+import { capBuyAmountForPlan, planBlocksAutoBuy } from '@nova/shared';
+import { getUserPlanLimits } from '../lib/plans.js';
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
 import type { RiskFlags } from '@nova/shared';
@@ -323,6 +325,29 @@ export class AutoTrader {
         continue;
       }
 
+      // Package limits (auto-buy allowed, max open positions, max buy size).
+      // A lookup failure never blocks a buy: it falls back to no package limits.
+      const plan = await getUserPlanLimits(this.deps.prisma, config.userId).catch(() => undefined);
+      if (plan) {
+        const openPositions =
+          plan.maxOpenPositions !== null
+            ? await this.deps.prisma.position.count({
+                where: { status: 'OPEN', wallet: { userId: config.userId } },
+              })
+            : 0;
+        const planBlock = planBlocksAutoBuy(plan, openPositions);
+        if (planBlock) {
+          logBuyCancelled(this.deps.logger, {
+            mint,
+            userId: config.userId,
+            reason: `${planBlock} (package: ${plan.key})`,
+            location: 'apps/api/src/trading/autoTrader.ts:evaluateAndMaybeBuy (package limits)',
+          });
+          results.push({ userId: config.userId, bought: false, reason: 'plan_limit' });
+          continue;
+        }
+      }
+
       // TP1 / Breakeven / Trailing exit strategy (2026-07-28/29) — checked
       // BEFORE the preset/manual branch below, double opt-in (this config's
       // own exitStrategy AND the global EXIT_STRATEGY_V2_ENABLED flag).
@@ -365,7 +390,7 @@ export class AutoTrader {
       // config, ESTABLISHED is an exact 1.0x no-op, so a config that never
       // buys anything younger than 15min sees no behavior change at all.
       const tieredBuyAmountSol = applyRiskTierSizing(
-        config.buyAmountSol,
+        plan ? capBuyAmountForPlan(config.buyAmountSol, plan) : config.buyAmountSol,
         riskTier,
         this.deps.riskTierSizeConfig ?? DEFAULT_RISK_TIER_SIZE_CONFIG,
       );

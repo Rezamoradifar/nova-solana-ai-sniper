@@ -73,6 +73,7 @@ import { renderReferralEarnings } from './screens/referralEarnings.js';
 import { renderReferralLeaderboard } from './screens/referralLeaderboard.js';
 import { handleAcceptFeePolicy, renderFeePolicyConsent } from './screens/feePolicyConsent.js';
 import { applyLanguage, renderLanguage } from './screens/language.js';
+import { handlePlanPurchase, renderPlanConfirm, renderPlans } from './screens/plans.js';
 
 async function renderScreen(
   screen: ScreenId,
@@ -129,6 +130,8 @@ async function renderScreen(
       return renderFeePolicyConsent(deps, user);
     case 'language':
       return renderLanguage(deps, user);
+    case 'plans':
+      return renderPlans(deps, user);
   }
 }
 
@@ -143,6 +146,11 @@ async function handleAction(
   const [screen, action, ...rest] = data.slice(2).split(':');
 
   switch (`${screen}:${action}`) {
+    case 'plans:ask':
+      return renderPlanConfirm(deps, user, rest[0]!);
+    case 'plans:buy':
+      return handlePlanPurchase(deps, user, rest[0]!);
+
     case 'sniper:quickstart':
       return handleQuickStart(deps, user);
     case 'sniper:resumeall':
