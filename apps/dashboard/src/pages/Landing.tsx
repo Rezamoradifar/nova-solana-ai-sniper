@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Icon, MarketTicker, TokenMark, useMarkets } from '../components/public/PublicLayout.js';
-import { BOT_URL, money, pct } from '../lib/publicMarket.js';
-import { TradingSections } from '../components/public/TradingSections.js';
+import { money, pct } from '../lib/publicMarket.js';
+import { WebsiteTools } from '../components/public/WebsiteTools.js';
 
 export default function Landing() {
   const { tokens, loading, error } = useMarkets();
@@ -35,8 +35,8 @@ export default function Landing() {
             <Link className="nova-button" to="/arbitrage">
               Open arbitrage terminal <Icon name="external" size={17} />
             </Link>
-            <Link className="nova-button button-ghost" to="/platform">
-              Explore GSP <span aria-hidden="true">↗</span>
+            <Link className="nova-button button-ghost" to="/tools">
+              Explore website tools
             </Link>
           </div>
           <div className="hero-caption">
@@ -70,12 +70,21 @@ export default function Landing() {
           Meteora<span className="brand-period">✳</span>
         </div>
         <div className="venue-jupiter">Jupiter</div>
-        <a href="/platform#questions" aria-label="Read about data sources">
+        <a href="/tools#questions" aria-label="Read about data sources">
           <Icon name="external" size={18} />
         </a>
       </div>
       <section className="site-section site-container" id="market-watch">
-        <TradingSections />
+        <div className="workspace-intro">
+          <div>
+            <span className="eyebrow">ON THE WEBSITE</span>
+            <h2>Your tools. Ready to open.</h2>
+          </div>
+          <Link className="text-link" to="/tools">
+            All website tools
+          </Link>
+        </div>
+        <WebsiteTools />
         <div className="section-heading">
           <div>
             <div className="eyebrow">
@@ -355,13 +364,26 @@ export default function Landing() {
           <Link className="nova-button" to="/arbitrage">
             Open the terminal <Icon name="external" size={17} />
           </Link>
-          <a className="nova-button button-ghost" href={BOT_URL} target="_blank" rel="noreferrer">
-            Launch Telegram app ↗
-          </a>
+          <Link className="nova-button button-ghost" to="/wallet">
+            Connect wallet
+          </Link>
         </div>
         <span className="cta-orbit" aria-hidden="true">
           ◎
         </span>
+      </section>
+      <section className="site-container telegram-entry">
+        <div className="telegram-entry-title">
+          <Icon name="telegram" size={32} />
+          <div>
+            <span className="eyebrow">IN TELEGRAM</span>
+            <h2>GSP Bank Sniper bot</h2>
+            <p>Wallets, snipe configs, open positions, and packages — in your Telegram account.</p>
+          </div>
+        </div>
+        <Link className="nova-button button-outline" to="/telegram">
+          Explore Telegram bot
+        </Link>
       </section>
     </>
   );

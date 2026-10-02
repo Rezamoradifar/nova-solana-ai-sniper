@@ -9,7 +9,9 @@ import {
 } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { BOT_URL, fetchMarkets, money, pct, type MarketToken } from '../../lib/publicMarket.js';
+import { useWalletConnection } from '../../lib/WalletContext.js';
 import '../../landing.css';
+import '../../workspace.css';
 
 export function Icon({
   name,
@@ -31,10 +33,33 @@ export function Icon({
     | 'play'
     | 'pause'
     | 'globe'
-    | 'sliders';
+    | 'sliders'
+    | 'wallet'
+    | 'telegram'
+    | 'copy'
+    | 'disconnect';
   size?: number;
 }) {
   const paths: Record<string, ReactNode> = {
+    wallet: (
+      <>
+        <path d="M20 8V5H5a2 2 0 0 0 0 4h16v11H5a2 2 0 0 1-2-2V7" />
+        <path d="M21 12h-6v5h6" />
+        <path d="M17 14.5h.01" />
+      </>
+    ),
+    telegram: <path d="m21 3-4 18-6-5-4 4v-7L21 3 3 10l4 3m4 3 6-8" />,
+    copy: (
+      <>
+        <rect x="8" y="8" width="12" height="12" rx="2" />
+        <path d="M15 8V4H4v11h4" />
+      </>
+    ),
+    disconnect: (
+      <>
+        <path d="M10 4H4v16h6m4-12 4 4-4 4m-5-4h12" />
+      </>
+    ),
     menu: <path d="M4 7h16M4 12h16M4 17h16" />,
     close: <path d="m6 6 12 12M18 6 6 18" />,
     activity: <path d="M3 12h4l3-8 4 16 3-8h4" />,
@@ -267,6 +292,7 @@ export function PageHeading({
 
 export function PublicLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const { state: wallet } = useWalletConnection();
   const location = useLocation();
   useEffect(() => {
     setMenuOpen(false);
@@ -275,7 +301,10 @@ export function PublicLayout() {
       '/': 'A clearer edge on Solana',
       '/arbitrage': 'Live arbitrage terminal',
       '/markets': 'Solana markets',
-      '/platform': 'The GSP Bank Sniper app',
+      '/platform': 'Website tools',
+      '/tools': 'Website tools',
+      '/telegram': 'Telegram bot',
+      '/wallet': 'Connect your Solana wallet',
       '/security': 'Risk & security',
       '/pricing': 'Packages',
     };
@@ -304,18 +333,24 @@ export function PublicLayout() {
               id="public-nav"
               aria-label="Main navigation"
             >
-              <NavLink to="/platform">Trading app</NavLink>
+              <NavLink to="/tools">Website tools</NavLink>
               <NavLink to="/arbitrage">
                 Arbitrage <span className="nav-new">LIVE</span>
               </NavLink>
               <NavLink to="/markets">Markets</NavLink>
-              <NavLink to="/security">Security</NavLink>
-              <NavLink to="/pricing">Packages</NavLink>
+              <span className="nav-divider" aria-hidden="true" />
+              <NavLink to="/telegram">
+                <Icon name="telegram" size={17} /> Telegram bot
+              </NavLink>
+              <NavLink to="/pricing">Bot packages</NavLink>
             </nav>
             <div className="header-actions">
-              <a href={BOT_URL} className="nova-button button-sm" target="_blank" rel="noreferrer">
-                Launch app
-              </a>
+              <Link to="/wallet" className="nova-button button-sm wallet-header-link">
+                <Icon name="wallet" size={17} />
+                {wallet.account
+                  ? `${wallet.account.address.slice(0, 4)}…${wallet.account.address.slice(-4)}`
+                  : 'Connect wallet'}
+              </Link>
               <button
                 className="icon-button menu-toggle"
                 aria-label={menuOpen ? 'Close navigation' : 'Open navigation'}
@@ -347,16 +382,18 @@ export function PublicLayout() {
                 </span>
               </div>
               <div className="footer-column">
-                <h3>Explore</h3>
+                <h3>Website tools</h3>
+                <Link to="/tools">All tools</Link>
                 <Link to="/arbitrage">Arbitrage terminal</Link>
                 <Link to="/markets">Live markets</Link>
-                <Link to="/platform">Trading app</Link>
+                <Link to="/wallet">Connect wallet</Link>
               </div>
               <div className="footer-column">
-                <h3>Get started</h3>
-                <Link to="/pricing">Packages & access</Link>
+                <h3>Telegram bot</h3>
+                <Link to="/telegram">Bot overview</Link>
+                <Link to="/pricing">Bot packages</Link>
                 <a href={BOT_URL} target="_blank" rel="noreferrer">
-                  Telegram app
+                  Open Telegram bot
                 </a>
                 <Link to="/security">Risk & security</Link>
               </div>
@@ -372,7 +409,7 @@ export function PublicLayout() {
                 <a href="https://solscan.io" target="_blank" rel="noreferrer">
                   Solana explorer
                 </a>
-                <Link to="/platform#questions">Common questions</Link>
+                <Link to="/tools#questions">Common questions</Link>
               </div>
             </div>
             <div className="footer-bottom">

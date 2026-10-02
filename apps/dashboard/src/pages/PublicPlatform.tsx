@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon, PageHeading } from '../components/public/PublicLayout.js';
 import { BOT_URL, PUBLIC_API_BASE } from '../lib/publicMarket.js';
-import { TradingSections } from '../components/public/TradingSections.js';
+import { WebsiteTools } from '../components/public/WebsiteTools.js';
 
 const QUESTIONS = [
   [
     'Does the public terminal execute trades?',
-    'No. The public terminal requests market quotes, calculates estimated returns, and lets you inspect and export observations. It never connects a wallet, signs a transaction, or submits a trade.',
+    'No. The public terminal requests market quotes, calculates estimated returns, and lets you inspect and export observations. Wallet connection is optional and handled in its own section. The terminal does not sign transactions or submit trades.',
   ],
   [
     'Does a positive estimate guarantee a profit?',
@@ -35,11 +35,11 @@ export function PublicPlatform() {
   return (
     <div className="site-container interior-page">
       <PageHeading
-        eyebrow="THE GSP BANK SNIPER PLATFORM"
-        title="Your trading. Connected."
-        text="Wallets, active snipe configs, open positions, and packages — the familiar GSP Bank Sniper structure, with live market discovery and route intelligence."
+        eyebrow="WEBSITE TOOLS"
+        title="Your Solana workspace."
+        text="Explore live markets, compare cross-DEX routes, and connect your own wallet. Choose a tool to get started."
       />
-      <TradingSections />
+      <WebsiteTools />
       <div className="platform-banner">
         <img
           src="/images/nova-execution.webp"
@@ -88,11 +88,11 @@ export function PublicPlatform() {
             },
             {
               n: '03',
-              icon: 'sliders' as const,
-              title: 'Configure',
-              text: 'Review the available account plans and trading controls in the Telegram app. Confirm service settings before committing funds.',
-              link: '/pricing',
-              action: 'View access options',
+              icon: 'wallet' as const,
+              title: 'Connect',
+              text: 'Choose a detected Solana wallet and approve access to your public address. View your connection and disconnect at any time.',
+              link: '/wallet',
+              action: 'Open wallet connection',
             },
             {
               n: '04',
@@ -186,7 +186,7 @@ export function PublicSecurity() {
           [
             '01',
             'Custody, made explicit',
-            'The public market pages do not request wallet access. The separate GSP Bank Sniper bot supports server-managed wallets with encrypted key storage. That is a custodial model: you depend on the operator and its infrastructure to safeguard those keys.',
+            'Markets and quote analysis work without a wallet. The optional website wallet connection reads your approved public address; keys stay in your wallet. The separate GSP Bank Sniper bot supports server-managed wallets with encrypted key storage. That is a custodial model: you depend on the operator and its infrastructure to safeguard those keys.',
           ],
           [
             '02',
@@ -331,8 +331,8 @@ export function PublicPricing() {
   return (
     <div className="site-container interior-page">
       <PageHeading
-        eyebrow="PACKAGES & ACCESS"
-        title="Start free. Go further."
+        eyebrow="TELEGRAM BOT PACKAGES"
+        title="Your bot. Your package."
         text="Start free — upgrade in Packages for a lower fee and higher limits. Explore current options in the GSP Bank Sniper Telegram app."
       />
       <div className="access-banner">
