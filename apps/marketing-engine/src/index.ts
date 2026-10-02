@@ -24,7 +24,10 @@ const logger = createLogger('marketing-engine');
 async function main() {
   const env = loadMarketingEnv();
 
-  const broadcastChatId = env.MARKETING_TELEGRAM_CHANNEL_ID ?? env.TELEGRAM_CHAT_ID;
+  // TELEGRAM_CHAT_ID may list several admin ids (comma-separated); without a
+  // dedicated channel, posts go to the first one.
+  const broadcastChatId =
+    env.MARKETING_TELEGRAM_CHANNEL_ID ?? env.TELEGRAM_CHAT_ID?.split(',')[0]?.trim() ?? undefined;
   if (!env.TELEGRAM_BOT_TOKEN || !broadcastChatId) {
     logger.warn(
       'TELEGRAM_BOT_TOKEN/MARKETING_TELEGRAM_CHANNEL_ID (or TELEGRAM_CHAT_ID) not set — marketing-engine is disabled.',
@@ -60,22 +63,27 @@ async function main() {
   // cross-import of apps/api's live-trading DexScreener client.
   const marketData = new MarketDataClient(env.DEXSCREENER_API_BASE);
 
-  const stop = startDailyScheduler({
-    prisma,
-    provider,
-    bot,
-    chatId: broadcastChatId,
-    buttonContext: {
-      dashboardUrl: env.DASHBOARD_URL,
-      communityUrl: env.COMMUNITY_URL,
-      referralUrl: env.REFERRAL_BASE_URL,
-    },
-    logger,
-    aiImageEnabled: env.MARKETING_AI_IMAGE_ENABLED,
-    imageProvider,
-  });
-
-  logger.info('marketing-engine scheduler started');
+  const stop = env.MARKETING_DAILY_POSTS_ENABLED
+    ? startDailyScheduler({
+        prisma,
+        provider,
+        bot,
+        chatId: broadcastChatId,
+        buttonContext: {
+          dashboardUrl: env.DASHBOARD_URL,
+          communityUrl: env.COMMUNITY_URL,
+          referralUrl: env.REFERRAL_BASE_URL,
+        },
+        logger,
+        aiImageEnabled: env.MARKETING_AI_IMAGE_ENABLED,
+        imageProvider,
+      })
+    : () => {};
+  logger.info(
+    env.MARKETING_DAILY_POSTS_ENABLED
+      ? 'marketing-engine scheduler started'
+      : 'MARKETING_DAILY_POSTS_ENABLED=false — daily marketing posts are off',
+  );
 
   // Durable admin-broadcast queue (2026-07-31) — drains one-off announcements
   // enqueued via `npm run durable-broadcast --workspace apps/api -- <file>`

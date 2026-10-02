@@ -1,12 +1,11 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
 import type { Bot } from '@nova/telegram-bot';
+import { renderNetworkTradeCardPng } from '@nova/telegram-bot';
 import type { MarketDataClient, DexScreenerEnrichment } from '../marketData.js';
 import { sendBrandedPhotoHtml } from '../telegramSend.js';
 import { buildTokenButtonRows } from '../tokenButtons.js';
 import { randomIntervalMs, utcDayKey, isDailyCapReached } from '../activityFeed/scheduler.js';
-import { renderNetworkTradeCard } from '../visuals/networkTradeCard.js';
-import { fetchNetworkTradeLogo } from '../visuals/fetchNetworkTradeLogo.js';
 import {
   fetchNetworkTradeCandidates,
   markNetworkTradePosted,
@@ -15,7 +14,7 @@ import {
   compareNetworkTradeCandidatesByPriority,
   type NetworkTradeCandidate,
 } from './data.js';
-import { buildNetworkTradeCaptionHtml, buildNetworkTradeCardBrief } from './format.js';
+import { buildNetworkTradeCaptionHtml, CATEGORY_TAG_PLAIN } from './format.js';
 import { enqueueNetworkTradeBroadcast } from './broadcastQueue.js';
 
 /**
@@ -299,9 +298,33 @@ export class NetworkTradeFeedMonitor {
     // must never be visually confusable with a "Real Bot Trade" chart photo.
     // Logo fetch is best-effort — a missing/undecodable logo just omits the
     // circle (see fetchNetworkTradeLogo.ts's own doc comment).
-    const logoBuffer = await fetchNetworkTradeLogo(enrichment?.logoUrl);
-    const brief = buildNetworkTradeCardBrief(c, cardEnrichment, category);
-    const photo = await renderNetworkTradeCard(brief, logoBuffer);
+    // Same card design as the bot's own PnL cards (apps/telegram-bot
+    // cards/render.ts), labelled NETWORK TRADE with the wallet shown.
+    const photo = await renderNetworkTradeCardPng({
+      token: {
+        mint: c.mint,
+        name: c.tokenName,
+        symbol: c.tokenSymbol,
+        dex: c.dex,
+        imageUrl: enrichment?.logoUrl,
+        marketCapUsd: enrichment?.marketCapUsd,
+        liquidityUsd: enrichment?.liquidityUsd,
+        aiScore: c.aiScore,
+      },
+      categoryTag: CATEGORY_TAG_PLAIN[category],
+      walletAddress: c.walletAddress,
+      entryPriceUsd: c.entryPriceUsd,
+      exitPriceUsd: c.exitPriceUsd,
+      entryAmountSol: c.entryAmountSol,
+      exitAmountSol: c.exitAmountSol,
+      realizedPnlSol: c.realizedPnlSol,
+      realizedPnlUsd: c.realizedPnlUsd,
+      realizedRoiPercent: c.realizedRoiPercent,
+      holdingTimeMs: c.exitAt.getTime() - c.entryAt.getTime(),
+      volume24hUsd: enrichment?.volume24hUsd,
+      entrySignature: c.entrySignature,
+      exitSignature: c.exitSignature,
+    });
 
     const caption = buildNetworkTradeCaptionHtml(c, cardEnrichment, now, category);
     const buttons = buildTokenButtonRows({

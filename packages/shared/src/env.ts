@@ -247,6 +247,9 @@ export const envSchema = z.object({
   // The branded template renderer (visuals/statCard.ts, headlineCard.ts) is
   // unaffected by this flag — it always runs, free and local, regardless.
   MARKETING_AI_IMAGE_ENABLED: booleanFlag(false),
+  // The daily AI-written marketing posts. Turn off to run marketing-engine only
+  // for the opt-in feeds (e.g. the Network Trade Feed).
+  MARKETING_DAILY_POSTS_ENABLED: booleanFlag(true),
 
   // Daily Trade Showcase (2026-07-27) — publishes every real (non-paper),
   // non-honeypot-flagged closed trade to MARKETING_TELEGRAM_CHANNEL_ID as it

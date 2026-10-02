@@ -128,7 +128,7 @@ export function buildNetworkTradeCaptionHtml(
 
 /** Plain-text (no emoji — the generated image has no emoji font loaded)
  * counterpart to CATEGORY_LABEL above, for the image's category tag line. */
-const CATEGORY_TAG_PLAIN: Record<NetworkTradeCategory, string> = {
+export const CATEGORY_TAG_PLAIN: Record<NetworkTradeCategory, string> = {
   TRENDING_TOKEN: 'TRENDING TOKEN',
   SMART_MONEY: 'SMART MONEY',
   WHALE_WALLET: 'WHALE WALLET',

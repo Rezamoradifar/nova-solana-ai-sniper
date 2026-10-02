@@ -23,7 +23,10 @@ RUN npm prune --omit=dev
 
 # ---- runtime ----
 FROM node:20-alpine AS runtime
-RUN apk add --no-cache openssl dumb-init
+RUN apk add --no-cache openssl dumb-init fontconfig font-dejavu
+# Card fonts (Vazirmatn, JetBrains Mono) so trade cards render real glyphs.
+COPY apps/marketing-engine/assets/fonts/ /usr/share/fonts/gsp/
+RUN fc-cache -f
 WORKDIR /repo
 ENV NODE_ENV=production
 

@@ -554,3 +554,79 @@ export async function renderSellCardPng(data: SellCardData): Promise<Buffer> {
 }
 
 export { NEUTRAL_THEME };
+
+// --- Network trade card ------------------------------------------------------
+
+/**
+ * A completed trade by ANOTHER wallet, verified on-chain. Same visual language as
+ * the sell card, but labelled "NETWORK TRADE" with the wallet shown, so it can
+ * never be read as one of this bot's own trades.
+ */
+export interface NetworkTradeCardData {
+  token: TradeCardTokenInfo;
+  /** e.g. "SMART MONEY", "TRENDING TOKEN", "NETWORK TRADE". */
+  categoryTag: string;
+  walletAddress: string;
+  entryPriceUsd?: number;
+  exitPriceUsd?: number;
+  entryAmountSol: number;
+  exitAmountSol: number;
+  realizedPnlSol: number;
+  realizedPnlUsd: number;
+  realizedRoiPercent: number;
+  holdingTimeMs: number;
+  volume24hUsd?: number;
+  entrySignature: string;
+  exitSignature: string;
+}
+
+export function buildNetworkTradeCardSvg(
+  data: NetworkTradeCardData,
+  logoDataUri: string | undefined,
+): string {
+  const isProfit = data.realizedRoiPercent >= 0;
+  const theme = isProfit ? PROFIT_THEME : LOSS_THEME;
+  const t = data.token;
+  const roiText = signed(data.realizedRoiPercent, 1, '%');
+  const heroSize = fitFontSize(roiText, 920, 184);
+
+  let body = tokenRow(t, logoDataUri, theme);
+  body += `
+    <text x="${CARD_WIDTH / 2}" y="378" text-anchor="middle" font-family="${SANS}" font-size="22" font-weight="600" letter-spacing="6" fill="${MUTED}">REALIZED PROFIT / LOSS</text>
+    <text x="${CARD_WIDTH / 2}" y="${372 + heroSize * 0.98}" text-anchor="middle" font-family="${MONO}" font-size="${heroSize}" font-weight="700" fill="url(#accentText)">${escapeXml(roiText)}</text>
+    <text x="${CARD_WIDTH / 2}" y="${436 + heroSize * 0.98}" text-anchor="middle" font-family="${MONO}" font-size="36" font-weight="600" fill="${TEXT}" xml:space="preserve">${escapeXml(signed(data.realizedPnlSol, 4, ' SOL'))}<tspan fill="${FAINT}"> · </tspan><tspan fill="${theme.accentSoft}">${escapeXml(signedUsd(data.realizedPnlUsd))}</tspan></text>`;
+  body += pillRow(CARD_WIDTH / 2, 690, [
+    { label: data.categoryTag, color: NEUTRAL_THEME.accent },
+    { label: `Held ${formatHoldingTime(data.holdingTimeMs)}`, color: MUTED },
+    { label: 'On-chain verified', color: theme.accent },
+  ]);
+
+  body += glassPanel(64, 740, CARD_WIDTH - 128, 230);
+  body += tradePath(740, 230, data.realizedRoiPercent, undefined);
+  body += `
+    <text x="100" y="1000" font-family="${SANS}" font-size="16" font-weight="600" letter-spacing="1.5" fill="${MUTED}">ENTRY <tspan font-family="${MONO}" fill="${TEXT}">${escapeXml(fmtPrice(data.entryPriceUsd))}</tspan></text>
+    <text x="${CARD_WIDTH - 100}" y="1000" text-anchor="end" font-family="${SANS}" font-size="16" font-weight="600" letter-spacing="1.5" fill="${MUTED}">EXIT <tspan font-family="${MONO}" fill="${TEXT}">${escapeXml(fmtPrice(data.exitPriceUsd))}</tspan></text>`;
+
+  body += statPanel(1030, 4, [
+    ['Invested', `${data.entryAmountSol.toFixed(4)} SOL`],
+    ['Returned', `${data.exitAmountSol.toFixed(4)} SOL`],
+    ['Market Cap', fmtUsd(t.marketCapUsd)],
+    ['Liquidity', fmtUsd(t.liquidityUsd)],
+  ]);
+  body += `
+    <text x="100" y="1178" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">WALLET <tspan font-family="${MONO}" font-size="22" fill="${TEXT}">${escapeXml(shortAddr(data.walletAddress))}</tspan></text>
+    <text x="${CARD_WIDTH / 2}" y="1178" text-anchor="middle" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">AI SCORE <tspan font-family="${MONO}" font-size="22" fill="${TEXT}">${t.aiScore !== undefined ? `${t.aiScore.toFixed(0)}/100` : '—'}</tspan></text>
+    <text x="${CARD_WIDTH - 100}" y="1178" text-anchor="end" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">VOL 24H <tspan font-family="${MONO}" font-size="22" fill="${TEXT}">${escapeXml(fmtUsd(data.volume24hUsd))}</tspan></text>`;
+
+  return cardShell(theme, 'NETWORK TRADE', body, [
+    `Buy ${shortAddr(data.entrySignature)}  ·  Sell ${shortAddr(data.exitSignature)}`,
+    'Another wallet · not a bot trade',
+  ]);
+}
+
+export async function renderNetworkTradeCardPng(data: NetworkTradeCardData): Promise<Buffer> {
+  const logoDataUri = await fetchLogoDataUri(data.token.imageUrl);
+  return sharp(Buffer.from(buildNetworkTradeCardSvg(data, logoDataUri)))
+    .png()
+    .toBuffer();
+}
