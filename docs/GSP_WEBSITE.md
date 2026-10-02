@@ -20,7 +20,7 @@ Existing `/login` and protected `/dashboard/*` routes remain available for deplo
 
 ## Running and building
 
-For the current server without a domain, see [deployment on 185.172.64.24](DEPLOY_IP.md). The IP installer updates nginx only and provisions trusted HTTPS with automatic certificate renewal.
+For the current server without a domain, see [deployment on 185.172.64.24:8443](DEPLOY_IP.md). The IP installer updates nginx only and provisions trusted HTTPS with automatic certificate renewal. Pass `--https-port 8443` for the selected website port.
 
 From the repository root, install the locked dependencies with `npm ci`, then run:
 

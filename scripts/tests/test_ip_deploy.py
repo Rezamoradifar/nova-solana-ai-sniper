@@ -42,6 +42,12 @@ class DeploymentTestCase(unittest.TestCase):
         )
         guard.start()
         self.addCleanup(guard.stop)
+        socket_guard = mock.patch.object(
+            deploy_ip.socket, "socket",
+            side_effect=AssertionError("Native socket was not mocked by this test"),
+        )
+        socket_guard.start()
+        self.addCleanup(socket_guard.stop)
         self.state = {
             "ip": IP,
             "docker_host": SOCKET,
@@ -140,8 +146,114 @@ class CertificateCommandTests(DeploymentTestCase):
             self.assertEqual(options["env"]["GSP_TEST_MARKER"], "preserved")
 
 
+class WebsitePortTests(DeploymentTestCase):
+    def test_origins_and_curl_use_selected_https_port_but_http_stays_on_80(self):
+        for port, expected in ((None, "https://" + IP), (443, "https://" + IP),
+                               (8443, "https://" + IP + ":8443")):
+            with self.subTest(origin_port=port):
+                state = dict(self.state)
+                if port is not None:
+                    state["https_port"] = port
+                self.assertEqual(deploy_ip.website_origin(state), expected)
+        cases = [
+            ({}, 443, "https://" + IP + "/wallet"),
+            ({"https_port": 8443}, 8443, "https://" + IP + ":8443/wallet"),
+            ({"https": False, "https_port": 8443}, 80, "http://" + IP + "/wallet"),
+        ]
+        for options, port, url in cases:
+            with self.subTest(request=options), mock.patch.object(deploy_ip, "run", return_value="ok") as run:
+                self.assertEqual(deploy_ip.local_get(IP, "/wallet", **options), "ok")
+                args, kwargs = run.call_args
+                command = args[0]
+                self.assertEqual(command[command.index("--resolve") + 1], f"{IP}:{port}:127.0.0.1")
+                self.assertEqual(command[-1], url)
+                self.assertTrue(kwargs["capture"])
+
+    def test_site_routes_assets_and_api_use_selected_port_without_custom_port_http_redirect_check(self):
+        paths = ["/", "/wallet", "/telegram", "/tools", "/app/", "/assets/site.js", "/api/health"]
+        for port in (443, 8443):
+            with self.subTest(https_port=port):
+                self.state.update(https_port=port, core_containers=["api api-one", "db db-one"])
+                origin = "https://" + IP + (":8443" if port == 8443 else "")
+                urls = []
+
+                def run(command, *, capture=False, cwd=None):
+                    url = command[-1]
+                    urls.append(url)
+                    if url.startswith("http://"):
+                        self.assertEqual(port, 443, "Custom HTTPS must not validate the legacy HTTP redirect")
+                        return "301 https://" + IP + "/wallet"
+                    self.assertTrue(url.startswith(origin + "/"))
+                    self.assertEqual(command[command.index("--resolve") + 1], f"{IP}:{port}:127.0.0.1")
+                    path = url[len(origin):]
+                    self.assertIn(path, paths)
+                    if path == "/api/health":
+                        return '{"status":"ok"}'
+                    if path == "/assets/site.js":
+                        return "window.siteReady = true;"
+                    return '<html><script src="/assets/site.js"></script></html>'
+
+                with mock.patch.object(deploy_ip, "run", side_effect=run), mock.patch.object(
+                    deploy_ip, "service_ids", return_value=self.state["core_containers"],
+                ):
+                    deploy_ip.check_site(self.state)
+                expected = [origin + path for path in paths]
+                if port == 443:
+                    expected.append("http://" + IP + "/wallet")
+                self.assertCountEqual(urls, expected)
+
+
+class PortAvailabilityTests(DeploymentTestCase):
+    def test_conflicting_docker_host_ports_are_rejected_even_when_target_port_differs(self):
+        self.state["https_port"] = 8443
+        cases = [
+            ("another-container", "8443/tcp"),
+            ("another-container", "443/tcp"),
+            (self.state["old_container"], "443/tcp"),
+        ]
+        for container, target in cases:
+            with self.subTest(container=container, target=target), \
+                    mock.patch.object(deploy_ip, "run", return_value=container), \
+                    mock.patch.object(deploy_ip, "inspect_value", return_value={
+                        target: [{"HostIp": "0.0.0.0", "HostPort": "8443"}],
+                    }):
+                with self.assertRaisesRegex(deploy_ip.DeployError, "already published"):
+                    deploy_ip.check_https_port(self.state)
+
+    def test_existing_own_mapping_requires_wildcard_ipv4_for_local_checks(self):
+        self.state["https_port"] = 8443
+        for address in ("0.0.0.0", "", IP, "127.0.0.1", "::"):
+            with self.subTest(host_ip=address), \
+                    mock.patch.object(deploy_ip, "run", return_value=self.state["old_container"]), \
+                    mock.patch.object(deploy_ip, "inspect_value", return_value={
+                        "8443/tcp": [{"HostIp": address, "HostPort": "8443"}],
+                    }):
+                if address in ("0.0.0.0", ""):
+                    self.assertFalse(deploy_ip.check_https_port(self.state))
+                else:
+                    with self.assertRaisesRegex(deploy_ip.DeployError, "wildcard IPv4"):
+                        deploy_ip.check_https_port(self.state)
+
+    def test_new_mapping_requires_a_free_native_tcp_port(self):
+        self.state["https_port"] = 8443
+        for error in (None, OSError("address already in use")):
+            with self.subTest(native_port_free=error is None), \
+                    mock.patch.object(deploy_ip, "run", return_value=""), \
+                    mock.patch.object(deploy_ip.socket, "socket") as socket_factory:
+                probe = socket_factory.return_value.__enter__.return_value
+                probe.bind.side_effect = error
+                if error is None:
+                    self.assertTrue(deploy_ip.check_https_port(self.state))
+                else:
+                    with self.assertRaisesRegex(deploy_ip.DeployError, "already in use or unavailable"):
+                        deploy_ip.check_https_port(self.state)
+                socket_factory.assert_called_once_with(deploy_ip.socket.AF_INET, deploy_ip.socket.SOCK_STREAM)
+                probe.bind.assert_called_once_with(("0.0.0.0", 8443))
+
+
 class ChallengeTests(DeploymentTestCase):
     def test_new_challenge_directories_are_publicly_readable_despite_private_umask(self):
+        self.state["https_port"] = 8443
         directory = Path(self.state["webroot"]) / ".well-known" / "acme-challenge"
 
         def read_marker(ip, url, *, https):
@@ -246,6 +358,13 @@ class RenewalTests(DeploymentTestCase):
 
 class DeploymentRecoveryTests(DeploymentTestCase):
     def test_failed_cutover_restores_actual_previous_image_and_saved_configuration(self):
+        for https_port in (443, 8443):
+            with self.subTest(https_port=https_port), mock.patch.object(
+                deploy_ip, "STATE_ROOT", self.root / ("private-" + str(https_port)),
+            ):
+                self.assert_failed_cutover_restores_previous_deployment(https_port)
+
+    def assert_failed_cutover_restores_previous_deployment(self, https_port):
         commands = []
 
         def run(command, *, capture=False, cwd=None):
@@ -267,24 +386,33 @@ class DeploymentRecoveryTests(DeploymentTestCase):
                 mock.patch.object(deploy_ip, "run", side_effect=run), \
                 mock.patch.object(deploy_ip, "discover", return_value=dict(self.state)), \
                 mock.patch.object(deploy_ip, "service_ids", return_value=["api api-one", "db db-one"]), \
+                mock.patch.object(deploy_ip, "check_https_port", return_value=https_port != 443), \
                 mock.patch.object(deploy_ip, "check_challenge"), \
                 mock.patch.object(deploy_ip, "check_site", side_effect=deploy_ip.DeployError("bad health")), \
                 mock.patch.object(deploy_ip, "current_nginx", return_value="nginx-restored"), \
                 mock.patch.object(deploy_ip, "install_renewal") as install_renewal, \
                 mock.patch.object(deploy_ip.time, "sleep"):
             with self.assertRaisesRegex(deploy_ip.DeployError, "Previous nginx restored"):
-                deploy_ip.deploy(IP, None)
+                deploy_ip.deploy(IP, None, https_port=https_port)
         install_renewal.assert_not_called()
 
         manifests = list(deploy_ip.STATE_ROOT.glob("*/*/state.json"))
         self.assertEqual(len(manifests), 1)
         state = json.loads(manifests[0].read_text())
         self.assertEqual(state["docker_host"], SOCKET)
+        self.assertEqual(state["https_port"], https_port)
+        self.assertEqual(state["compose_files"], self.state["compose_files"])
+        new_override = json.loads(Path(state["new_override"]).read_text())
+        expected_ports = [{"target": 8443, "published": "8443", "host_ip": "0.0.0.0", "protocol": "tcp"}]
+        if https_port == 443:
+            expected_ports = []
+        self.assertEqual(new_override["services"]["nginx"].get("ports", []), expected_ports)
         old_override = json.loads(Path(state["rollback_override"]).read_text())
         self.assertEqual(set(old_override["services"]), {"nginx"})
         previous = old_override["services"]["nginx"]
         self.assertEqual(previous["image"], OLD_IMAGE)
         self.assertNotIn("build", previous)
+        self.assertNotIn("ports", previous)
         template = next(mount for mount in previous["volumes"]
                         if mount["target"] == "/etc/nginx/templates/default.conf.template")
         self.assertTrue(template["read_only"])

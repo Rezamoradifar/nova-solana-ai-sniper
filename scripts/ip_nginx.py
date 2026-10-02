@@ -114,30 +114,34 @@ def _listen_port(statement: _Statement) -> Optional[int]:
     return 80  # An address without a port uses nginx's HTTP default port.
 
 
-def _check_listen(statement: _Statement) -> None:
+def _check_listen(statement: _Statement, https_port: int) -> None:
     port = _listen_port(statement)
-    if port not in (80, 443):
+    target_ports = (80, 443) if https_port == 443 else (https_port,)
+    if port not in target_ports:
         return
     words = [token.value for token in statement.head[1:]]
     endpoint, options = words[0], words[1:]
     if endpoint != str(port):
         raise ValueError("Unsupported address-specific listen on port %s: %s" % (port, endpoint))
-    if port == 443 and any(option in ("default", "default_server") for option in options):
-        raise ValueError("A preserved server already declares a port 443 default_server")
-    allowed = {"ssl", "http2"} if port == 443 else {"default", "default_server"}
+    if port == https_port and any(option in ("default", "default_server") for option in options):
+        raise ValueError("A preserved server already declares a port %s default_server" % port)
+    allowed = {"ssl", "http2"} if port == https_port else {"default", "default_server"}
     unsupported = set(options) - allowed
     if unsupported:
         raise ValueError("Unsupported listen %s option: %s" % (port, sorted(unsupported)[0]))
 
 
-def render_ip_config(existing: str, ip: str) -> str:
+def render_ip_config(existing: str, ip: str, https_port: int = 443) -> str:
     """Render a public-IP site first; reject ambiguous or conflicting socket layouts.
 
     Input is a conf.d-style configuration containing top-level server blocks.
-    Preserved servers may use ordinary ``listen 80`` and ``listen 443 ssl``
-    sockets. Address-specific sockets and other socket options on these ports
-    require operator review because they can override or alter the new listeners.
+    Port 443 mode manages HTTP 80 and HTTPS 443. A custom HTTPS port manages only
+    that port, retaining existing HTTP and HTTPS sites. Address-specific sockets
+    and other socket options on managed ports require operator review because
+    they can override or alter the new listeners.
     """
+    if type(https_port) is not int or not 1 <= https_port <= 65535 or https_port == 80:
+        raise ValueError("HTTPS port must be an integer from 1 to 65535 other than 80")
     try:
         address = ipaddress.IPv4Address(ip)
     except (ipaddress.AddressValueError, TypeError) as error:
@@ -147,6 +151,7 @@ def render_ip_config(existing: str, ip: str) -> str:
         raise ValueError("A public IPv4 address is required")
 
     statements, _ = _statements(_tokens(existing))
+    target_ports = (80, 443) if https_port == 443 else (https_port,)
     removed = []
     for statement in statements:
         if not statement.block or [token.value for token in statement.head] != ["server"]:
@@ -157,16 +162,18 @@ def render_ip_config(existing: str, ip: str) -> str:
         listeners = [child for child in statement.children
                      if not child.block and child.head[0].value == "listen"]
         if ip in names:
-            if any(name != ip for name in names):
-                raise ValueError("A server_name mixes the target IP with other names")
             ports = [_listen_port(listener) for listener in listeners] or [80]
-            if any(port in (80, 443) for port in ports):
-                if any(port not in (80, 443) for port in ports):
-                    raise ValueError("Target IP server mixes website ports 80/443 with other listeners")
+            manages_server = any(port in target_ports for port in ports)
+            if (https_port == 443 or manages_server) and any(name != ip for name in names):
+                raise ValueError("A server_name mixes the target IP with other names")
+            if manages_server:
+                if any(port not in target_ports for port in ports):
+                    raise ValueError("Target IP server mixes website ports %s with other listeners"
+                                     % "/".join(str(port) for port in target_ports))
                 removed.append((statement.head[0].start, statement.end))
                 continue
         for listener in listeners:
-            _check_listen(listener)
+            _check_listen(listener, https_port)
 
     chunks = []
     cursor = 0
@@ -174,10 +181,18 @@ def render_ip_config(existing: str, ip: str) -> str:
         chunks.append(existing[cursor:start])
         cursor = end
     chunks.append(existing[cursor:])
-    return _IP_SERVERS.replace("@IP@", ip) + "".join(chunks)
+    if https_port == 443:
+        new_servers = _IP_HTTP_SERVER + _IP_HTTPS_SERVER
+    else:
+        new_servers = _IP_HTTPS_SERVER.replace("listen 443 ssl default_server;",
+                                              "listen %s ssl default_server;" % https_port)
+        new_servers = new_servers.replace("proxy_set_header Host $host;",
+                                         "proxy_set_header Host $http_host;\n"
+                                         "        proxy_set_header X-Forwarded-Port %s;" % https_port)
+    return new_servers.replace("@IP@", ip) + "".join(chunks)
 
 
-_IP_SERVERS = """server {
+_IP_HTTP_SERVER = """server {
     listen 80;
     server_name @IP@;
 
@@ -190,7 +205,9 @@ _IP_SERVERS = """server {
     }
 }
 
-server {
+"""
+
+_IP_HTTPS_SERVER = """server {
     listen 443 ssl default_server;
     http2 on;
     server_name @IP@;

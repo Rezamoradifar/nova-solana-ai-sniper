@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -157,12 +158,46 @@ def compose_up(state, override):
     return compose(state, override) + ["up", "-d", "--no-deps", "--no-build", "--pull", "never", "nginx"]
 
 
-def local_get(ip, path, *, https=True):
-    port, scheme = (443, "https") if https else (80, "http")
+def website_origin(state):
+    port = state.get("https_port", 443)
+    return "https://" + state["ip"] + (f":{port}" if port != 443 else "")
+
+
+def check_https_port(state):
+    """Return whether an additional mapping is needed; fail before any cutover."""
+    port = state.get("https_port", 443)
+    if port == 443:
+        return False  # Existing default-port installation behavior.
+    own_bindings = []
+    for container in run(["docker", "ps", "--format", "{{.ID}}"], capture=True).splitlines():
+        for target, bindings in (inspect_value(container, ".NetworkSettings.Ports") or {}).items():
+            if not target.endswith("/tcp"):
+                continue
+            for binding in bindings or []:
+                if binding.get("HostPort") != str(port):
+                    continue
+                if container != state["old_container"] or target != f"{port}/tcp":
+                    raise DeployError(f"TCP port {port} is already published for another listener. Choose a free --https-port.")
+                own_bindings.append(binding)
+    if own_bindings:
+        if not any(binding.get("HostIp") in ("", "0.0.0.0") for binding in own_bindings):
+            raise DeployError(f"The existing port {port} needs a wildcard IPv4 mapping for local validation. Review its mapping first.")
+        return False
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("0.0.0.0", port))
+    except OSError as error:
+        raise DeployError(f"TCP port {port} is already in use or unavailable. Choose a free --https-port.") from error
+    return True
+
+
+def local_get(ip, path, *, https=True, https_port=443):
+    port, scheme = (https_port, "https") if https else (80, "http")
+    authority = ip + (f":{port}" if https and port != 443 else "")
     return run([
         "curl", "--fail", "--silent", "--show-error", "--noproxy", "*",
         "--connect-timeout", "5", "--max-time", "15",
-        "--resolve", f"{ip}:{port}:127.0.0.1", f"{scheme}://{ip}{path}",
+        "--resolve", f"{ip}:{port}:127.0.0.1", f"{scheme}://{authority}{path}",
     ], capture=True)
 
 
@@ -206,24 +241,28 @@ def certbot_command(state, initial=False):
 
 
 def check_site(state):
-    index = local_get(state["ip"], "/")
+    port = state.get("https_port", 443)
+    def fetch(path):
+        return local_get(state["ip"], path, https_port=port)
+    index = fetch("/")
     if "<html" not in index.lower():
         raise DeployError("The homepage did not return HTML.")
     for path in ("/wallet", "/telegram", "/tools", "/app/"):
-        if "<html" not in local_get(state["ip"], path).lower():
+        if "<html" not in fetch(path).lower():
             raise DeployError("A required website route failed: " + path)
     asset = re.search(r'<script\b[^>]*\bsrc=[\'"](/assets/[^\'"<>]+\.js)[\'"]', index)
-    if not asset or not local_get(state["ip"], asset.group(1)):
+    if not asset or not fetch(asset.group(1)):
         raise DeployError("The homepage JavaScript bundle is unavailable.")
-    if json.loads(local_get(state["ip"], "/api/health")).get("status") != "ok":
+    if json.loads(fetch("/api/health")).get("status") != "ok":
         raise DeployError("The API liveness check did not return status ok.")
-    redirect = run([
-        "curl", "--silent", "--show-error", "--noproxy", "*", "--max-time", "15",
-        "--resolve", f"{state['ip']}:80:127.0.0.1", "--output", "/dev/null",
-        "--write-out", "%{http_code} %{redirect_url}", f"http://{state['ip']}/wallet",
-    ], capture=True)
-    if redirect != f"301 https://{state['ip']}/wallet":
-        raise DeployError("The HTTP-to-HTTPS redirect did not match the intended IP.")
+    if port == 443:
+        redirect = run([
+            "curl", "--silent", "--show-error", "--noproxy", "*", "--max-time", "15",
+            "--resolve", f"{state['ip']}:80:127.0.0.1", "--output", "/dev/null",
+            "--write-out", "%{http_code} %{redirect_url}", f"http://{state['ip']}/wallet",
+        ], capture=True)
+        if redirect != f"301 https://{state['ip']}/wallet":
+            raise DeployError("The HTTP-to-HTTPS redirect did not match the intended IP.")
     if service_ids(state["project"]) != state["core_containers"]:
         raise DeployError("Other project containers changed during deployment; review concurrent activity.")
 
@@ -300,7 +339,7 @@ def rollback(state):
     run(["docker", "exec", current_nginx(state["project"]), "nginx", "-t"])
 
 
-def deploy(ip, project_dir):
+def deploy(ip, project_dir, https_port=443):
     from ip_nginx import render_ip_config
     global DOCKER_ENDPOINT
 
@@ -325,11 +364,13 @@ def deploy(ip, project_dir):
     state = discover(project_dir)
     state["docker_host"] = docker_host
     state["ip"] = ip
+    state["https_port"] = https_port
     old_config = run([
         "docker", "exec", state["old_container"], "cat", "/etc/nginx/conf.d/default.conf",
     ], capture=True) + "\n"
     run(["docker", "exec", state["old_container"], "nginx", "-t"])
-    candidate = render_ip_config(old_config, ip)
+    candidate = render_ip_config(old_config, ip, https_port=https_port)
+    add_port_mapping = check_https_port(state)
     upstream = run([
         "docker", "exec", state["old_container"], "wget", "-q", "-O-", "http://api:4000/health",
     ], capture=True)
@@ -365,6 +406,9 @@ def deploy(ip, project_dir):
             "image": image,
             "build": {"context": str(build_context), "dockerfile": "apps/dashboard/Dockerfile"},
             "environment": {"NGINX_ENVSUBST_FILTER": "^DOMAIN$"},
+            # Compose appends this port; existing 80/443 mappings are retained.
+            "ports": [{"target": https_port, "published": str(https_port), "host_ip": "0.0.0.0", "protocol": "tcp"}]
+                     if add_port_mapping else [],
             "volumes": [
                 {"type": "bind", "source": str(new_template), "target": template_target, "read_only": True},
                 {"type": "bind", "source": state["certificates"], "target": "/etc/letsencrypt-ip", "read_only": True},
@@ -393,6 +437,7 @@ def deploy(ip, project_dir):
     run(compose(state, new_override) + ["run", "--rm", "--no-deps", "-T", "nginx", "nginx", "-t"])
     if service_ids(state["project"]) != state["core_containers"]:
         raise DeployError("Other project containers changed during preparation; cutover cancelled.")
+    check_https_port(state)
     try:
         print("Replacing only the nginx website container...", flush=True)
         run(compose_up(state, new_override))
@@ -416,7 +461,8 @@ def deploy(ip, project_dir):
         except (Exception, KeyboardInterrupt):
             raise DeployError(f"Automatic rollback failed. Recovery state: {manifest}") from error
         raise DeployError(f"Previous nginx restored. Deployment error: {error}. Recovery state: {manifest}") from error
-    print(f"\nREADY: https://{ip}\nWallets: https://{ip}/wallet\nTelegram: https://{ip}/telegram")
+    origin = website_origin(state)
+    print(f"\nREADY: {origin}\nWallets: {origin}/wallet\nTelegram: {origin}/telegram")
     print("Trusted HTTPS, website routes, JavaScript, API liveness, and renewal-command checks passed.")
     print("API/bot/database container IDs are unchanged. No trading settings were changed.")
     print(f"Deployment record: {manifest}\nCompose override for future nginx updates: {new_override}")
@@ -431,6 +477,7 @@ def main():
     modes.add_argument("--renew", type=Path, help=argparse.SUPPRESS)
     modes.add_argument("--rollback", type=Path, help="Deployment state.json to restore")
     parser.add_argument("--project-dir", type=Path, help="Existing running Nova checkout, if detection is ambiguous")
+    parser.add_argument("--https-port", type=int, default=443, help="Public HTTPS port, for example 8443 (default: 443)")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("Run with sudo on the VPS; Docker, certificate storage and systemd need root access.")
@@ -439,9 +486,11 @@ def main():
         address = ipaddress.ip_address(args.ip)
         if address.version != 4 or not address.is_global:
             parser.error("--ip must be the VPS's public IPv4 address")
+        if not 1 <= args.https_port <= 65535 or args.https_port == 80:
+            parser.error("--https-port must be 1–65535 and cannot be the HTTP challenge port 80")
     with operation_lock():
         if args.ip:
-            deploy(str(address), args.project_dir)
+            deploy(str(address), args.project_dir, args.https_port)
         else:
             state = json.loads((args.renew or args.rollback).read_text())
             DOCKER_ENDPOINT = state["docker_host"]

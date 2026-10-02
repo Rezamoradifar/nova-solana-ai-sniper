@@ -135,6 +135,73 @@ server {
         existing = (root / "docker/nginx/default.conf.template").read_text()
         self.assertTrue(render_ip_config(existing, IP).endswith(existing))
 
+    def test_custom_port_preserves_existing_http_https_and_unrelated_defaults_verbatim(self):
+        existing = ("# Existing IP and domain services\n"
+                    "server { listen 80 default_server; server_name " + IP + "; }\n"
+                    "server { listen 443 ssl default_server; server_name " + IP + "; }\n"
+                    "server { listen " + IP + ":443 ssl; server_name example.com " + IP + "; }\n"
+                    "server { listen [::]:443 ssl default_server; server_name ipv6.example.com; }\n"
+                    "server { listen 9443 ssl default_server; server_name " + IP + "; }\n"
+                    "server { server_name " + IP + "; return 200 implicit_http; }\n")
+        result = render_ip_config(existing, IP, https_port=8443)
+        self.assertTrue(result.endswith(existing))
+        added = result[:-len(existing)]
+        self.assertEqual(added.count("server {"), 1)
+        self.assertIn("listen 8443 ssl default_server;", added)
+        self.assertNotIn("listen 80;", added)
+        self.assertNotIn("return 301", added)
+
+    def test_custom_port_replaces_only_target_ip_target_port_and_does_not_duplicate(self):
+        retained = ("server { listen 443 ssl default_server; server_name " + IP + "; }\n"
+                    "server { listen 8443 ssl; server_name example.com; return 200 retained; }\n")
+        obsolete = "server { listen 8443 ssl default_server; server_name " + IP + "; return 200 obsolete; }"
+        result = render_ip_config(retained + obsolete, IP, 8443)
+        self.assertIn(retained, result)
+        self.assertNotIn("obsolete", result)
+        repeated = render_ip_config(result, IP, 8443)
+        self.assertIn(retained, repeated)
+        self.assertEqual(repeated.count("listen 8443 ssl default_server;"), 1)
+        self.assertEqual(repeated.count("server_name " + IP + ";"), 2)
+
+    def test_custom_port_rejects_shared_names_or_shared_listener_ports(self):
+        configs = ("server { listen 8443 ssl; server_name " + IP + " example.com; }",
+                   "server { listen 8443 ssl; listen 443 ssl; server_name " + IP + "; }",
+                   "server { listen 8443 ssl; listen 80; server_name " + IP + "; }",
+                   "server { listen 8443 ssl; listen 9443 ssl; server_name " + IP + "; }")
+        for existing in configs:
+            with self.subTest(existing=existing), self.assertRaisesRegex(ValueError, "mixes"):
+                render_ip_config(existing, IP, 8443)
+
+    def test_custom_port_rejects_conflicting_preserved_sockets_only_on_its_port(self):
+        listeners = ("8443 ssl default_server", "8443 default", "[::]:8443 ssl",
+                     IP + ":8443 ssl", "0.0.0.0:8443 ssl", "8443 ssl proxy_protocol")
+        for listen in listeners:
+            with self.subTest(listen=listen), self.assertRaises(ValueError):
+                render_ip_config("server { listen " + listen + "; server_name example.com; }", IP, 8443)
+
+    def test_custom_port_preserves_routes_certificates_and_forwarded_origin(self):
+        result = render_ip_config("", IP, 8443)
+        self.assertIn("/etc/letsencrypt-ip/live/" + IP + "/fullchain.pem;", result)
+        self.assertIn("/etc/letsencrypt-ip/live/" + IP + "/privkey.pem;", result)
+        self.assertIn("proxy_pass http://api:4000/;", result)
+        self.assertIn("proxy_set_header Host $http_host;", result)
+        self.assertIn("proxy_set_header X-Forwarded-Port 8443;", result)
+        self.assertIn("try_files $uri /app/index.html;", result)
+        self.assertIn("frame-ancestors 'self' https://web.telegram.org https://*.telegram.org", result)
+        self.assertIn("try_files $uri $uri/ /index.html;", result)
+        default = render_ip_config("", IP)
+        self.assertEqual(default, render_ip_config("", IP, 443))
+        self.assertIn("proxy_set_header Host $host;", default)
+        self.assertNotIn("X-Forwarded-Port", default)
+
+    def test_https_port_requires_strict_integer_in_range_and_excludes_http_port(self):
+        for port in (True, False, "8443", 8443.0, None, 0, -1, 65536, 80):
+            with self.subTest(port=port), self.assertRaisesRegex(ValueError, "HTTPS port"):
+                render_ip_config("", IP, port)
+        for port in (1, 65535):
+            with self.subTest(port=port):
+                self.assertIn("listen %s ssl default_server;" % port, render_ip_config("", IP, port))
+
 
 if __name__ == "__main__":
     unittest.main()
