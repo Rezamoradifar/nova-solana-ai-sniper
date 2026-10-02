@@ -12,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check IP deployment scripts
+        run: python3 -m unittest discover -s scripts/tests -p 'test_ip_*.py' -v
+
       - uses: actions/setup-node@v4
         with:
           node-version: '20'

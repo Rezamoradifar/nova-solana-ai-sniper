@@ -7,7 +7,10 @@ The public website uses the current **GSP Bank Sniper** product name and the bot
 | Route        | Purpose                                                                        |
 | ------------ | ------------------------------------------------------------------------------ |
 | `/`          | Product home, original visual assets, bot sections, and current market preview |
-| `/platform`  | Bot sections, product workflows, and common questions                          |
+| `/tools`     | Website tools and product workflows                                            |
+| `/platform`  | Compatibility alias for the website tools                                      |
+| `/telegram`  | Separate Telegram bot section: wallets, snipe configs, positions, and packages |
+| `/wallet`    | User-initiated connection to a supported Solana wallet                         |
 | `/markets`   | Searchable asset table, sorting, refresh, and observed liquidity pools         |
 | `/arbitrage` | Automatically refreshed, read-only cross-venue quote observations              |
 | `/security`  | Custody model, quote limitations, and risk information                         |
@@ -16,6 +19,8 @@ The public website uses the current **GSP Bank Sniper** product name and the bot
 Existing `/login` and protected `/dashboard/*` routes remain available for deployments with the Nova API. The public website's primary account link is `https://t.me/GSPBankSniperBot`, configurable with `VITE_BOT_URL`.
 
 ## Running and building
+
+For the current server without a domain, see [deployment on 185.172.64.24](DEPLOY_IP.md). The IP installer updates nginx only and provisions trusted HTTPS with automatic certificate renewal.
 
 From the repository root, install the locked dependencies with `npm ci`, then run:
 
