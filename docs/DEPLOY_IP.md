@@ -71,6 +71,30 @@ Official references: [IP certificate availability and lifetime](https://letsencr
 
 Each installation has a private directory under `/var/lib/gsp-bank-sniper-ip/185.172.64.24/` containing its clean source, old/new nginx templates, Compose overrides, and `state.json`. Keep these files while that release or its rollback is needed. The terminal prints the exact command to restore the prior website. Restoring the old configuration may also restore its previous HTTPS behavior.
 
+### Resume after the Certbot lock error
+
+In the reported `fae9de7` attempt, the website Docker image built successfully, then certificate issuance stopped with `Another instance of Certbot is already running`. The nginx cutover had not started.
+
+On the VPS, obtain the updated, reviewed installer in a fresh checkout and resume the saved build for the existing project:
+
+```bash
+GSP_IP_SOURCE="$(mktemp -d /tmp/gsp-ip.XXXXXX)" &&
+git clone --depth 1 --single-branch --branch codex/gsp-bank-sniper-website \
+  https://github.com/Rezamoradifar/nova-solana-ai-sniper.git "$GSP_IP_SOURCE" &&
+sudo python3 "$GSP_IP_SOURCE/scripts/deploy_ip.py" --ip 185.172.64.24 --https-port 8443 \
+  --project-dir /root/nova-solana-ai-sniper --resume latest
+```
+
+Resume selects the newest saved attempt matching this IP, port, and project. It requires the original nginx container/image, rendered configuration, Compose file list, and other project container IDs to remain unchanged. Compose contents must match their saved hash baseline; older records use a conservative check against the original manifest timestamp. It verifies and pins the existing built image, then continues certificate issuance **without rebuilding**. A completed or rolled-back attempt, changed baseline, or missing image stops recovery; the installer does not silently select an older attempt.
+
+Before starting Certbot, the installer checks actual `fcntl` locks and waits up to 30 seconds. If a lock remains held, it reports the holder's PID and process name when available. It does not delete lock files or kill processes. Sharing the existing ACME webroot alone does not establish a lock collision or identify its holder: Certbot locks its configuration, work, and log directories. See the official [Certbot lock-file documentation](https://eff-certbot.readthedocs.io/en/stable/using.html#lock-files).
+
+On subsequent attempts, a persistent `TMPDIR` preserves early fallback diagnostics under `/var/lib/gsp-bank-sniper-ip/185.172.64.24/certbot_work/certbot-log-*/log`, including failures before normal logging starts. Review the reported lock holder and saved diagnostics before retrying if the lock remains occupied.
+
+`READY: https://185.172.64.24:8443` is **installer output**, not a shell command. Treat the website as deployed only after the installer finishes its checks and prints that line.
+
+### Later updates
+
 The running nginx's Compose labels record the added override. Use the full Compose file list, including that override, for later nginx changes; a plain `docker compose up -d` from the old source checkout can replace the new nginx configuration. Re-running this installer from an updated, reviewed checkout also discovers the active file list and creates a new recovery record. The IP certificate timer remains useful after a rollback and does not recreate containers.
 
 For a customized nginx deployment (additional `.conf` files, conflicting explicit TLS defaults, mixed IP/domain names, or custom static/config mounts), the installer stops for configuration review. It does not overwrite those customizations, alter the firewall, delete certificates, or fall back to untrusted TLS. The original `scripts/init-letsencrypt.sh` is a separate domain bootstrap script and must not be used for this IP deployment.

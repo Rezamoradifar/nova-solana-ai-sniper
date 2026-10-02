@@ -26,6 +26,7 @@ SPEC.loader.exec_module(deploy_ip)
 IP = "203.0.113.45"
 SOCKET = "unix:///run/user/1001/docker.sock"
 OLD_IMAGE = "sha256:" + "a" * 64
+BUILT_IMAGE = "sha256:" + "c" * 64
 OLD_CONFIG = "server { listen 80; location / { return 301 https://$host$request_uri; } }\n"
 
 
@@ -48,6 +49,12 @@ class DeploymentTestCase(unittest.TestCase):
         )
         socket_guard.start()
         self.addCleanup(socket_guard.stop)
+        self.certbot_locks = types.ModuleType("certbot_locks")
+        self.certbot_locks.CertbotLockError = type("CertbotLockError", (RuntimeError,), {})
+        self.certbot_locks.wait_for_certbot_locks = mock.Mock()
+        lock_helper = mock.patch.dict(sys.modules, {"certbot_locks": self.certbot_locks})
+        lock_helper.start()
+        self.addCleanup(lock_helper.stop)
         self.state = {
             "ip": IP,
             "docker_host": SOCKET,
@@ -58,6 +65,13 @@ class DeploymentTestCase(unittest.TestCase):
             "old_image": OLD_IMAGE,
             "webroot": str(self.root / "existing-acme"),
         }
+        Path(self.state["directory"]).mkdir()
+        Path(self.state["compose_files"][0]).write_text(
+            "services:\n  nginx:\n    image: nginx:alpine\n"
+            "    ports:\n      - '80:80'\n      - '443:443'\n"
+            "  api:\n    image: existing-api:stable\n",
+            encoding="utf-8",
+        )
         Path(self.state["webroot"]).mkdir()
         for name in ("certificates", "certbot_work", "certbot_logs"):
             self.state[name] = str(deploy_ip.STATE_ROOT / IP / name)
@@ -92,7 +106,8 @@ class DeploymentTestCase(unittest.TestCase):
         with mock.patch.object(sys, "argv", [str(SCRIPT), "--renew", str(manifest)]), \
                 mock.patch.object(deploy_ip.os, "geteuid", return_value=0), \
                 mock.patch.object(deploy_ip.os, "umask"), \
-                mock.patch.object(deploy_ip.subprocess, "run", side_effect=process):
+                mock.patch.object(deploy_ip.subprocess, "run", side_effect=process), \
+                contextlib.redirect_stdout(io.StringIO()):
             deploy_ip.main()
 
 
@@ -295,6 +310,7 @@ class ChallengeTests(DeploymentTestCase):
 class RenewalTests(DeploymentTestCase):
     def test_completed_renewal_precedes_host_nginx_validation_and_reload(self):
         events = []
+        self.certbot_locks.wait_for_certbot_locks.side_effect = lambda *args, **kwargs: events.append("locks available")
 
         def process(command, **options):
             self.assertEqual(command[:3], ["docker", "--host", SOCKET])
@@ -323,9 +339,16 @@ class RenewalTests(DeploymentTestCase):
 
         self.renew_from_manifest(process)
         self.assertEqual(events, [
-            "certbot returned successfully", "find current nginx",
+            "locks available", "certbot returned successfully", "find current nginx",
             "nginx configuration passed", "reload nginx from host",
         ])
+
+    def test_lock_contention_prevents_certbot_process_and_nginx_reload(self):
+        self.certbot_locks.wait_for_certbot_locks.side_effect = self.certbot_locks.CertbotLockError("lock still held")
+        process = mock.Mock()
+        with self.assertRaisesRegex(deploy_ip.DeployError, "lock still held"):
+            self.renew_from_manifest(process)
+        process.assert_not_called()
 
     def test_failed_certbot_process_does_not_inspect_or_reload_nginx(self):
         commands = []
@@ -372,6 +395,8 @@ class DeploymentRecoveryTests(DeploymentTestCase):
             commands.append(command)
             if command[:3] == ["docker", "context", "inspect"]:
                 return json.dumps(SOCKET)
+            if command[:3] == ["docker", "image", "inspect"]:
+                return json.dumps(BUILT_IMAGE)
             if command[0] == "git" and "rev-parse" in command:
                 return "b" * 40
             if command[0] == "git" and "archive" in command:
@@ -400,9 +425,12 @@ class DeploymentRecoveryTests(DeploymentTestCase):
         self.assertEqual(len(manifests), 1)
         state = json.loads(manifests[0].read_text())
         self.assertEqual(state["docker_host"], SOCKET)
+        self.assertEqual(state["phase"], "rolled_back")
+        self.assertEqual(state["image_id"], BUILT_IMAGE)
         self.assertEqual(state["https_port"], https_port)
         self.assertEqual(state["compose_files"], self.state["compose_files"])
         new_override = json.loads(Path(state["new_override"]).read_text())
+        self.assertEqual(new_override["services"]["nginx"]["image"], BUILT_IMAGE)
         expected_ports = [{"target": 8443, "published": "8443", "host_ip": "0.0.0.0", "protocol": "tcp"}]
         if https_port == 443:
             expected_ports = []
@@ -430,6 +458,8 @@ class DeploymentRecoveryTests(DeploymentTestCase):
         self.assertEqual(commands[-1], ["docker", "exec", "nginx-restored", "nginx", "-t"])
         for name in ("certificates", "certbot_work", "certbot_logs"):
             self.assertEqual(Path(state[name]).parent, deploy_ip.STATE_ROOT / IP)
+        for name in ("manager.py", "certbot_locks.py", "ip_nginx.py"):
+            self.assertTrue((manifests[0].parent / name).is_file())
 
     def test_ambiguous_deployments_stop_before_writes_or_mutating_commands(self):
         labels = {}
