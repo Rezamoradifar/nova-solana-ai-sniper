@@ -326,7 +326,7 @@ export function Wallets() {
             {(wallets ?? []).map((wallet) => (
               <tr
                 key={wallet.id}
-                onClick={() => navigate(`/wallets/${wallet.id}`)}
+                onClick={() => navigate(`/dashboard/wallets/${wallet.id}`)}
                 className="cursor-pointer hover:bg-surface-hover"
               >
                 <td>{wallet.label}</td>

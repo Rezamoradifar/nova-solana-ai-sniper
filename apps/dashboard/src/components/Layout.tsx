@@ -3,14 +3,14 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext.js';
 
 const NAV_ITEMS = [
-  { to: '/', label: 'Overview', end: true },
-  { to: '/tokens', label: 'Live Tokens' },
-  { to: '/positions', label: 'Positions' },
-  { to: '/portfolio', label: 'Portfolio' },
-  { to: '/wallets', label: 'Wallets' },
-  { to: '/snipes', label: 'Snipe Settings' },
-  { to: '/leaderboard', label: 'Leaderboard' },
-  { to: '/logs', label: 'Logs' },
+  { to: '/dashboard', label: 'Overview', end: true },
+  { to: '/dashboard/tokens', label: 'Live Tokens' },
+  { to: '/dashboard/positions', label: 'Positions' },
+  { to: '/dashboard/portfolio', label: 'Portfolio' },
+  { to: '/dashboard/wallets', label: 'Wallets' },
+  { to: '/dashboard/snipes', label: 'Snipe Settings' },
+  { to: '/dashboard/leaderboard', label: 'Leaderboard' },
+  { to: '/dashboard/logs', label: 'Logs' },
 ];
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {

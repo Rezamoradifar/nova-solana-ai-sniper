@@ -69,6 +69,10 @@ fetch("http://127.0.0.1:" + (process.env.API_PORT || 4000) + "/metrics/latency")
     console.log(side.toUpperCase() + ": samples=" + (s.sampleSize ?? 0) + " median=" + (t.medianMs ?? "-") + "ms p95=" + (t.p95Ms ?? "-") + "ms fastest=" + (s.fastestMs ?? "-") + "ms success=" + Math.round((s.successRate || 0) * 100) + "%");
   }
 }).catch(e => console.log("latency report unavailable: " + e.message));' 2>/dev/null
+docker compose exec -T api node -e '
+fetch("http://127.0.0.1:" + (process.env.API_PORT || 4000) + "/metrics/arbitrage").then(r => r.json()).then(r => {
+  console.log(r.enabled ? "ARBITRAGE (paper): scans=" + r.scans + " opportunities=" + r.opportunities + " paper net=" + r.paperNetSol.toFixed(6) + " SOL" : "ARBITRAGE: off");
+}).catch(() => {});' 2>/dev/null
 echo "fast-send endpoints: $(docker compose logs api 2>&1 | grep -o '"endpoints":\[[^]]*\]' | tail -1)"
 
 echo

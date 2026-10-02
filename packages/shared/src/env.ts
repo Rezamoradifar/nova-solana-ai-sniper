@@ -115,6 +115,25 @@ export const envSchema = z.object({
   // Jupiter priority-fee tier for buys (sells always use veryHigh). The fee stays
   // capped by MAX_PRIORITY_FEE_LAMPORTS either way.
   BUY_PRIORITY_LEVEL: z.enum(['medium', 'high', 'veryHigh']).default('high'),
+  // DEX-to-DEX arbitrage scanner. Paper only: it quotes round trips
+  // (SOL -> token on one DEX, token -> SOL on another) and records the ones that
+  // would net a profit after fees; it never sends a transaction.
+  ARBITRAGE_SCANNER_ENABLED: booleanFlag(false),
+  ARBITRAGE_INTERVAL_MS: z.coerce.number().int().min(15_000).default(90_000),
+  // Comma-separated token mints. Default: USDC, USDT, JUP, BONK, WIF, JTO, RAY.
+  ARBITRAGE_MINTS: z
+    .string()
+    .default(
+      'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v,Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB,JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN,DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263,EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm,jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL,4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R',
+    ),
+  // Comma-separated Jupiter DEX labels to compare.
+  ARBITRAGE_DEXES: z.string().default('Raydium,Raydium CLMM,Whirlpool,Meteora DLMM'),
+  ARBITRAGE_AMOUNT_SOL: z.coerce.number().positive().max(100).default(0.5),
+  // Base fee + priority fee + Jito tip for one atomic round trip, in lamports.
+  ARBITRAGE_COST_LAMPORTS: z.coerce.number().int().nonnegative().default(205_000),
+  ARBITRAGE_SLIPPAGE_BUFFER_BPS: z.coerce.number().int().min(0).max(500).default(10),
+  ARBITRAGE_MIN_NET_SOL: z.coerce.number().min(0).default(0.0005),
+  ARBITRAGE_QUOTE_GAP_MS: z.coerce.number().int().min(0).default(300),
   DYNAMIC_SIZING_ENABLED: booleanFlag(false),
   PARTIAL_EXITS_ENABLED: booleanFlag(false),
   BEST_ROUTE_EXECUTION_ENABLED: booleanFlag(false),

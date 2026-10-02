@@ -14,6 +14,8 @@ export interface QuoteParams {
   outputMint: string;
   amountLamports: bigint;
   slippageBps: number;
+  /** Restrict routing to these Jupiter DEX labels, direct routes only (arbitrage scanner). */
+  dexes?: string[];
 }
 
 export interface QuoteResponse {
@@ -101,6 +103,10 @@ export class JupiterClient {
     url.searchParams.set('outputMint', params.outputMint);
     url.searchParams.set('amount', params.amountLamports.toString());
     url.searchParams.set('slippageBps', params.slippageBps.toString());
+    if (params.dexes && params.dexes.length > 0) {
+      url.searchParams.set('dexes', params.dexes.join(','));
+      url.searchParams.set('onlyDirectRoutes', 'true');
+    }
 
     latencyTracker.mark(options?.traceId, 'quote_request');
     const res = await fetch(url, { method: 'GET', signal: withTimeoutSignal(options?.timeoutMs) });

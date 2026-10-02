@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { metrics } from '../lib/metrics.js';
 import { computeLatencyReport } from '../lib/latencyTracker.js';
+import { getActiveArbitrageScanner } from '../trading/arbitrageScanner.js';
 import {
   rpcRequestCounters,
   rpcLatencyRegistry,
@@ -16,6 +17,12 @@ export default async function metricsRoutes(fastify: FastifyInstance) {
   // internal-stats routes already have; carries no user/wallet-identifying
   // data (mint/walletId/positionId are internal IDs, not secrets).
   fastify.get('/metrics/latency', async () => computeLatencyReport());
+
+  // DEX-to-DEX arbitrage scanner (paper only) — see arbitrageScanner.ts.
+  fastify.get(
+    '/metrics/arbitrage',
+    async () => getActiveArbitrageScanner()?.report() ?? { enabled: false },
+  );
 
   // 2026-07-15 Helius credit audit — per-provider RPC request/retry/rate-limit
   // visibility that previously only existed as unlabeled warn-level log lines

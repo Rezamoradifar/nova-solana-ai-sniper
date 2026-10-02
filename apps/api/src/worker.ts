@@ -62,6 +62,7 @@ import type { DexLaunchEvent } from './solana/dex/types.js';
 import { SourceHealthMonitor } from './detection/sourceHealthMonitor.js';
 import { JitoClient } from './solana/jito.js';
 import { configureFastSend, jitoTransactionSender, rpcSender } from './solana/fastSend.js';
+import { ArbitrageScanner, setActiveArbitrageScanner } from './trading/arbitrageScanner.js';
 import { PositionManager } from './trading/positionManager.js';
 import type { Tp1TrailingConfig } from './trading/tp1TrailingStrategy.js';
 import { AutoTrader } from './trading/autoTrader.js';
@@ -440,6 +441,33 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       tokenLookbackHours: app.config.NETWORK_TRADE_SCANNER_LOOKBACK_HOURS,
     });
     networkTradeScanner.start(app.config.NETWORK_TRADE_SCANNER_INTERVAL_MS);
+  }
+
+  let arbitrageScanner: ArbitrageScanner | undefined;
+  if (app.config.ARBITRAGE_SCANNER_ENABLED) {
+    const list = (v: string) =>
+      v
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+    arbitrageScanner = new ArbitrageScanner(
+      {
+        quote: (params) => jupiter.getQuote(params, { timeoutMs: 8_000 }),
+        logger: app.log as never,
+      },
+      {
+        mints: list(app.config.ARBITRAGE_MINTS),
+        dexes: list(app.config.ARBITRAGE_DEXES),
+        amountLamports: BigInt(Math.round(app.config.ARBITRAGE_AMOUNT_SOL * 1e9)),
+        costLamports: BigInt(app.config.ARBITRAGE_COST_LAMPORTS),
+        slippageBufferBps: app.config.ARBITRAGE_SLIPPAGE_BUFFER_BPS,
+        minNetLamports: BigInt(Math.round(app.config.ARBITRAGE_MIN_NET_SOL * 1e9)),
+        quoteGapMs: app.config.ARBITRAGE_QUOTE_GAP_MS,
+      },
+    );
+    setActiveArbitrageScanner(arbitrageScanner);
+    arbitrageScanner.start(app.config.ARBITRAGE_INTERVAL_MS);
+    app.log.info('ARBITRAGE scanner started (paper mode, never executes)');
   }
 
   // Drives TP/SL/trailing-stop: without this loop those fields are just stored
@@ -1901,6 +1929,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     sourceHealthMonitor.stop();
     shadowModePriceSampler?.stop();
     networkTradeScanner?.stop();
+    arbitrageScanner?.stop();
     if (app.config.SCANNER_CONCURRENCY_GOVERNOR_ENABLED) {
       scannerConcurrencyGovernor.stop();
     }

@@ -178,7 +178,7 @@ export function WalletDetail() {
   if (walletError) {
     return (
       <div className="space-y-4">
-        <Link to="/wallets" className="text-sm text-accent hover:underline">
+        <Link to="/dashboard/wallets" className="text-sm text-accent hover:underline">
           ← Back to Wallets
         </Link>
         <div className="text-sm text-loss">{walletError.message}</div>
@@ -207,7 +207,7 @@ export function WalletDetail() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <Link to="/wallets" className="text-xs text-accent hover:underline">
+          <Link to="/dashboard/wallets" className="text-xs text-accent hover:underline">
             ← Back to Wallets
           </Link>
           <h1 className="mt-1 text-2xl font-semibold text-white">{wallet.label}</h1>

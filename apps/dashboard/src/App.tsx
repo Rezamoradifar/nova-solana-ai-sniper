@@ -12,15 +12,17 @@ import { WalletDetail } from './pages/WalletDetail.js';
 import { Snipes } from './pages/Snipes.js';
 import { Leaderboard } from './pages/Leaderboard.js';
 import { Logs } from './pages/Logs.js';
+import { Landing } from './pages/Landing.js';
 
 export function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <Routes>
+          <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route
-            path="/"
+            path="/dashboard"
             element={
               <ProtectedRoute>
                 <Layout />
