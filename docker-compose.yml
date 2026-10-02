@@ -65,12 +65,15 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://localhost:4000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+          # Liveness only (process up and serving). Worker/RPC readiness stays
+          # visible at /health/ready, but an RPC hiccup must never block the
+          # Telegram bot from starting.
+          "fetch('http://localhost:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
         ]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 60s
     networks: [nova]
 
   telegram-bot:

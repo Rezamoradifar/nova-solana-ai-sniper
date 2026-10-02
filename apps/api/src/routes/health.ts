@@ -11,7 +11,12 @@ export default async function healthRoutes(fastify: FastifyInstance) {
 
   fastify.get('/health/ready', async (_req, reply) => {
     if (!fastify.backgroundWorkersReady || !fastify.solanaConnection) {
-      return reply.code(503).send({ status: 'not_ready' });
+      return reply.code(503).send({
+        status: 'not_ready',
+        reason: !fastify.backgroundWorkersReady
+          ? 'background workers did not start'
+          : 'no RPC connection',
+      });
     }
     try {
       await fastify.prisma.$queryRaw`SELECT 1`;
