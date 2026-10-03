@@ -337,7 +337,8 @@ export function PublicLayout() {
               <NavLink to="/arbitrage">
                 Arbitrage <span className="nav-new">LIVE</span>
               </NavLink>
-              <NavLink to="/markets">Markets</NavLink>\n              <NavLink to="/flash-arbitrage">Flash Loan</NavLink>
+              <NavLink to="/markets">Markets</NavLink>
+              <NavLink to="/flash-arbitrage">Flash Loan</NavLink>
               <span className="nav-divider" aria-hidden="true" />
               <NavLink to="/telegram">
                 <Icon name="telegram" size={17} /> Telegram bot
@@ -385,7 +386,8 @@ export function PublicLayout() {
                 <h3>Website tools</h3>
                 <Link to="/tools">All tools</Link>
                 <Link to="/arbitrage">Arbitrage terminal</Link>
-                <Link to="/markets">Live markets</Link>\n                <Link to="/flash-arbitrage">Flash Loan Lab</Link>
+                <Link to="/markets">Live markets</Link>
+                <Link to="/flash-arbitrage">Flash Loan Lab</Link>
                 <Link to="/wallet">Connect wallet</Link>
               </div>
               <div className="footer-column">
