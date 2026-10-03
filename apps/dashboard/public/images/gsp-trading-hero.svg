@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1536 1024" role="img" aria-labelledby="t d">
+<title id="t">GSP TRADEING Solana execution terminal</title><desc id="d">Dark institutional trading scene with Solana market grid, route lines, candlesticks and smart wallet nodes.</desc>
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#050806"/><stop offset=".55" stop-color="#0b120d"/><stop offset="1" stop-color="#101912"/></linearGradient>
+<radialGradient id="g1"><stop stop-color="#bdfb72" stop-opacity=".24"/><stop offset="1" stop-color="#bdfb72" stop-opacity="0"/></radialGradient>
+<linearGradient id="line" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#6d8f55"/><stop offset=".5" stop-color="#bdfb72"/><stop offset="1" stop-color="#7da55f"/></linearGradient>
+<filter id="soft"><feGaussianBlur stdDeviation="18"/></filter>
+</defs>
+<rect width="1536" height="1024" fill="url(#bg)"/>
+<ellipse cx="1120" cy="390" rx="430" ry="360" fill="url(#g1)"/>
+<g stroke="#bdfb72" stroke-opacity=".055">
+<path d="M0 128h1536M0 256h1536M0 384h1536M0 512h1536M0 640h1536M0 768h1536M0 896h1536"/>
+<path d="M128 0v1024M256 0v1024M384 0v1024M512 0v1024M640 0v1024M768 0v1024M896 0v1024M1024 0v1024M1152 0v1024M1280 0v1024M1408 0v1024"/>
+</g>
+<g transform="translate(770 170)">
+<rect x="0" y="0" width="650" height="560" rx="26" fill="#0a100c" fill-opacity=".72" stroke="#dfffc31b"/>
+<path d="M40 462 C140 420 190 310 278 342 S410 458 505 292 600 175 625 202" fill="none" stroke="url(#line)" stroke-width="5"/>
+<path d="M40 462 C140 420 190 310 278 342 S410 458 505 292 600 175 625 202" fill="none" stroke="#bdfb72" stroke-width="18" stroke-opacity=".08" filter="url(#soft)"/>
+<g stroke="#dbe8d7" stroke-width="3" opacity=".82">
+<path d="M76 386v-96"/><rect x="64" y="315" width="24" height="46" fill="#101812"/>
+<path d="M130 350v-128"/><rect x="118" y="246" width="24" height="78" fill="#bdfb72" fill-opacity=".16"/>
+<path d="M184 376v-104"/><rect x="172" y="294" width="24" height="52" fill="#101812"/>
+<path d="M238 320v-142"/><rect x="226" y="210" width="24" height="84" fill="#bdfb72" fill-opacity=".16"/>
+<path d="M292 348v-94"/><rect x="280" y="270" width="24" height="51" fill="#101812"/>
+<path d="M346 306v-118"/><rect x="334" y="214" width="24" height="66" fill="#bdfb72" fill-opacity=".16"/>
+</g>
+<g fill="#111b14" stroke="#bdfb72" stroke-width="2">
+<circle cx="480" cy="150" r="42"/><circle cx="565" cy="250" r="33"/><circle cx="438" cy="365" r="28"/>
+</g>
+<g fill="#bdfb72"><circle cx="480" cy="150" r="6"/><circle cx="565" cy="250" r="5"/><circle cx="438" cy="365" r="4"/></g>
+<g fill="#dce6dc" font-family="Arial,sans-serif"><text x="42" y="60" font-size="17" letter-spacing="5" opacity=".7">SOLANA EXECUTION MATRIX</text><text x="42" y="92" font-size="12" opacity=".45">ROUTES · SMART MONEY · ARBITRAGE · COPY</text></g>
+</g>
+<g fill="#dce6dc" font-family="Arial,sans-serif">
+<text x="90" y="740" font-size="18" letter-spacing="7" opacity=".55">GSP TRADEING</text>
+<text x="90" y="785" font-size="13" letter-spacing="4" opacity=".34">INSTITUTIONAL SOLANA TRADING INFRASTRUCTURE</text>
+</g>
+</svg>
