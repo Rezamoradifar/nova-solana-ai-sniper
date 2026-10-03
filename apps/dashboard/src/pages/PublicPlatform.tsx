@@ -42,8 +42,8 @@ export function PublicPlatform() {
       <WebsiteTools />
       <div className="platform-banner">
         <img
-          src="/images/nova-execution.webp"
-          alt="Two flowing metallic arcs connected by green light"
+          src="/images/gsp-trading-hero.svg"
+          alt="GSP TRADEING Solana execution matrix with smart-wallet and route telemetry"
           width="1536"
           height="1024"
         />
