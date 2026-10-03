@@ -154,7 +154,7 @@ export function NovaMark({ small = false }: { small?: boolean }) {
         />
       </svg>
       <span className="brand-word">
-        GSP<span>BANK SNIPER</span>
+        GSP<span>TRADING</span>
       </span>
     </span>
   );
@@ -308,7 +308,7 @@ export function PublicLayout() {
       '/security': 'Risk & security',
       '/pricing': 'Packages',
     };
-    document.title = `GSP Bank Sniper — ${titles[location.pathname] ?? 'Solana trading'}`;
+    document.title = `GSP TRADING — ${titles[location.pathname] ?? 'Solana trading'}`;
   }, [location.pathname]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -325,7 +325,7 @@ export function PublicLayout() {
         </a>
         <header className="nova-header">
           <div className="site-container header-inner">
-            <Link to="/" aria-label="GSP Bank Sniper home">
+            <Link to="/" aria-label="GSP TRADING home">
               <NovaMark />
             </Link>
             <nav
@@ -337,7 +337,7 @@ export function PublicLayout() {
               <NavLink to="/arbitrage">
                 Arbitrage <span className="nav-new">LIVE</span>
               </NavLink>
-              <NavLink to="/markets">Markets</NavLink>
+              <NavLink to="/markets">Markets</NavLink>\n              <NavLink to="/flash-arbitrage">Flash Loan</NavLink>
               <span className="nav-divider" aria-hidden="true" />
               <NavLink to="/telegram">
                 <Icon name="telegram" size={17} /> Telegram bot
@@ -385,7 +385,7 @@ export function PublicLayout() {
                 <h3>Website tools</h3>
                 <Link to="/tools">All tools</Link>
                 <Link to="/arbitrage">Arbitrage terminal</Link>
-                <Link to="/markets">Live markets</Link>
+                <Link to="/markets">Live markets</Link>\n                <Link to="/flash-arbitrage">Flash Loan Lab</Link>
                 <Link to="/wallet">Connect wallet</Link>
               </div>
               <div className="footer-column">
@@ -413,7 +413,7 @@ export function PublicLayout() {
               </div>
             </div>
             <div className="footer-bottom">
-              <span>© {new Date().getFullYear()} GSP Bank Sniper. All rights reserved.</span>
+              <span>© {new Date().getFullYear()} GSP TRADING. All rights reserved.</span>
               <span>Clarity before execution.</span>
             </div>
             <p className="risk-note">
