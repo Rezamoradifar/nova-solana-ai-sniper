@@ -4599,3 +4599,43 @@
     margin-top: 32px;
   }
 }
+
+.nova-site .live-price {
+  display: table-cell;
+}
+.nova-site .live-price > span {
+  display: block;
+  transition:
+    color 0.18s ease,
+    text-shadow 0.18s ease;
+}
+.nova-site .live-price > small {
+  display: block;
+  margin-top: 4px;
+  font-size: 9px;
+  color: var(--dim);
+}
+.nova-site .tick-up {
+  color: var(--lime) !important;
+  text-shadow: 0 0 18px #bdfb7224;
+}
+.nova-site .tick-down {
+  color: var(--negative) !important;
+  text-shadow: 0 0 18px #f098a024;
+}
+.nova-site .market-live-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.nova-site .market-live-note .status-dot {
+  width: 5px;
+  height: 5px;
+}
+.nova-site .ticker-item > strong {
+  transition:
+    color 0.18s ease,
+    text-shadow 0.18s ease;
+}
