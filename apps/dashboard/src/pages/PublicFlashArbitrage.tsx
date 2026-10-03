@@ -52,8 +52,7 @@ export default function PublicFlashArbitrage() {
     };
   }, [edgeInput, notionalInput]);
 
-  const scenarioPasses =
-    scenario.valid && scenario.withinBorrowLimit && scenario.clearsEdgeGate;
+  const scenarioPasses = scenario.valid && scenario.withinBorrowLimit && scenario.clearsEdgeGate;
 
   return (
     <div className="site-container interior-page flash-arb-page">
@@ -235,8 +234,8 @@ export default function PublicFlashArbitrage() {
           <span className="eyebrow">NEXT INTEGRATION</span>
           <h2>Project 0 + Jupiter V2</h2>
           <p>
-            The concrete atomic transaction adapter still needs the operator margin account,
-            signer, bank discovery, lookup tables, and current Jupiter V2 build integration.
+            The concrete atomic transaction adapter still needs the operator margin account, signer,
+            bank discovery, lookup tables, and current Jupiter V2 build integration.
           </p>
         </article>
         <article className="panel">
