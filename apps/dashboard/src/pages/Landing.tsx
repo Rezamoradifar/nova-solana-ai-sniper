@@ -20,7 +20,7 @@ export default function Landing() {
         <div className="site-container hero-content">
           <div className="hero-brand-lockup" aria-label="GSP TRADEING platform">
             <span>GSP</span>
-            <strong>TRADING</strong>
+            <strong>TRADEING</strong>
             <i>GLOBAL SOLANA EXECUTION PLATFORM</i>
           </div>
           <div className="eyebrow">
