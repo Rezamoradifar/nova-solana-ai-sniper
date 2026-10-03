@@ -3894,7 +3894,6 @@
   }
 }
 
-
 /* GSP TRADING — institutional visual refinement */
 .nova-site {
   --bg: #070908;
@@ -4022,9 +4021,7 @@
 .nova-site .pool-card,
 .nova-site .security-card,
 .nova-site .pricing-card {
-  background:
-    linear-gradient(180deg, #ffffff05, transparent 32%),
-    rgba(15, 20, 17, 0.9);
+  background: linear-gradient(180deg, #ffffff05, transparent 32%), rgba(15, 20, 17, 0.9);
   border-color: #ffffff10;
   box-shadow:
     inset 0 1px 0 #ffffff08,
@@ -4065,9 +4062,7 @@
   background: linear-gradient(0deg, #070a08 0%, #070a08cf 38%, #070a0848 70%, transparent);
 }
 .nova-site .route-illustration {
-  background:
-    linear-gradient(180deg, #ffffff04, transparent 30%),
-    #0d120f;
+  background: linear-gradient(180deg, #ffffff04, transparent 30%), #0d120f;
   border-color: #ffffff12;
 }
 .nova-site .page-heading h1 {
@@ -4085,9 +4080,7 @@
 }
 .nova-site .terminal-stat,
 .nova-site .flash-status-grid article {
-  background:
-    linear-gradient(180deg, #ffffff05, transparent 40%),
-    #0e1310;
+  background: linear-gradient(180deg, #ffffff05, transparent 40%), #0e1310;
   border-color: #ffffff10;
 }
 .nova-site .flash-scenario-panel,
@@ -4106,8 +4099,7 @@
   box-shadow: inset 0 0 16px #c8ff7808;
 }
 .nova-site .nova-footer {
-  background:
-    linear-gradient(180deg, #090c0a 0%, #050706 100%);
+  background: linear-gradient(180deg, #090c0a 0%, #050706 100%);
   border-top-color: #ffffff0d;
 }
 .nova-site .footer-brand p {
