@@ -59,7 +59,7 @@ export default function PublicFlashArbitrage() {
       <PageHeading
         eyebrow="FLASH LOAN ARBITRAGE"
         title="Borrow. Route. Repay. Atomically."
-        text="Explore the execution model being built for GSP Bank Sniper: borrow USDC, route two swaps, repay inside the same transaction, and only submit after profitability and simulation gates pass."
+        text="Explore the execution model being built for GSP TRADING: borrow USDC, route two swaps, repay inside the same transaction, and only submit after profitability and simulation gates pass."
       >
         <span className="observation-badge">
           <Icon name="shield" size={17} /> Simulation first · Live locked
