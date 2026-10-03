@@ -1,0 +1,1275 @@
+/* Website tools, Telegram account and browser wallet each have a distinct entry. */
+.nova-site .main-nav {
+  gap: 22px;
+}
+.nova-site .main-nav > a {
+  font-size: 14px;
+}
+.nova-site .nav-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+}
+.nova-site .wallet-header-link {
+  font-size: 14px;
+  min-height: 42px;
+}
+.nova-site .workspace-intro {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+.nova-site .workspace-intro h2 {
+  font-size: 36px;
+  margin-top: 15px;
+}
+.nova-site .website-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(235px, 1fr));
+  gap: 16px;
+  margin-bottom: 72px;
+}
+.nova-site .website-tool {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 30px 26px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
+}
+.nova-site .website-tool:hover {
+  background: #172017;
+  border-color: #68864f;
+}
+.nova-site .website-tool-top {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 34px;
+  color: var(--lime);
+}
+.nova-site .website-tool-top > span {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+.nova-site .website-tool h3 {
+  font-size: 26px;
+  letter-spacing: -0.035em;
+}
+.nova-site .website-tool p {
+  font-size: 16px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-top: 15px;
+  flex: 1;
+}
+.nova-site .website-tool-action {
+  display: inline-flex;
+  border-top: 1px solid var(--line);
+  width: 100%;
+  margin-top: 26px;
+  padding-top: 20px;
+  color: var(--lime);
+  font-weight: 500;
+  font-size: 14px;
+}
+.nova-site .telegram-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 30px;
+  padding-block: 38px;
+  margin-bottom: 58px;
+  border-top: 1px solid var(--line);
+}
+.nova-site .telegram-entry-title {
+  display: flex;
+  align-items: center;
+  gap: 25px;
+}
+.nova-site .telegram-entry-title > svg {
+  flex-shrink: 0;
+  color: #83caff;
+}
+.nova-site .telegram-entry h2 {
+  font-size: 28px;
+  margin: 9px 0;
+}
+.nova-site .telegram-entry p {
+  font-size: 16px;
+  color: var(--muted);
+  max-width: 650px;
+}
+.nova-site .telegram-page .page-heading {
+  align-items: center;
+}
+.nova-site .telegram-page .page-heading h1 {
+  font-size: 48px;
+}
+.nova-site .telegram-page .page-heading p,
+.nova-site .wallet-page .page-heading p {
+  font-size: 16px;
+}
+.nova-site .bot-welcome {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 28px;
+  margin-bottom: 20px;
+  border-color: #294250;
+  background: #111a1e;
+}
+.nova-site .bot-avatar {
+  width: 70px;
+  height: 70px;
+  flex-shrink: 0;
+  border-radius: 18px;
+  border: 1px solid #47728b;
+  background: #182d3c;
+  color: #91d1ff;
+  display: grid;
+  place-items: center;
+}
+.nova-site .bot-welcome .eyebrow {
+  color: #a1cce3;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+.nova-site .bot-welcome h2 {
+  font-size: 28px;
+}
+.nova-site .bot-welcome p {
+  font-size: 16px;
+  margin-top: 10px;
+  color: var(--muted);
+}
+.nova-site .bot-welcome > .outline-tag {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.nova-site .telegram-page .account-section {
+  padding: 24px 22px;
+}
+.nova-site .telegram-page .account-section p {
+  font-size: 16px;
+  min-height: 115px;
+  line-height: 1.7;
+}
+.nova-site .telegram-page .account-section h3 {
+  font-size: 22px;
+}
+.nova-site .telegram-page .account-section > a {
+  font-size: 14px;
+  line-height: 1.7;
+}
+.nova-site .telegram-page .source-note {
+  font-size: 14px;
+  line-height: 1.8;
+}
+.nova-site .telegram-page .access-banner strong {
+  font-size: 17px;
+}
+.nova-site .telegram-page .access-banner small {
+  font-size: 14px;
+}
+.nova-site .bot-account-note {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 30px 0;
+  border-block: 1px solid var(--line);
+}
+.nova-site .bot-account-note > svg {
+  flex-shrink: 0;
+  color: var(--lime);
+}
+.nova-site .bot-account-note h2 {
+  font-size: 23px;
+}
+.nova-site .bot-account-note p {
+  font-size: 16px;
+  margin-top: 12px;
+  line-height: 1.7;
+  max-width: 710px;
+  color: var(--muted);
+}
+.nova-site .bot-return {
+  display: flex;
+  gap: 28px;
+  padding-top: 25px;
+}
+.nova-site .bot-return a {
+  font-size: 14px;
+}
+.nova-site .wallet-page .page-heading h1 {
+  font-size: 52px;
+}
+.nova-site .wallet-workspace {
+  display: grid;
+  grid-template-columns: 1.12fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+.nova-site .wallet-connect-panel,
+.nova-site .wallet-details {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 12px;
+}
+.nova-site .wallet-panel-heading {
+  display: flex;
+  gap: 17px;
+  align-items: center;
+  padding: 26px;
+  border-bottom: 1px solid var(--line);
+}
+.nova-site .wallet-step {
+  font-size: 13px;
+  color: var(--lime);
+  border: 1px solid #c1ff753d;
+  border-radius: 50%;
+  width: 33px;
+  height: 33px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.nova-site .wallet-panel-heading h2 {
+  font-size: 24px;
+  letter-spacing: -0.03em;
+}
+.nova-site .wallet-panel-heading p {
+  font-size: 14px;
+  margin-top: 7px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.nova-site .wallet-panel-heading > svg {
+  margin-left: auto;
+  color: var(--lime);
+  flex-shrink: 0;
+}
+.nova-site .wallet-not-found,
+.nova-site .wallet-waiting {
+  padding: 34px 28px;
+  text-align: center;
+}
+.nova-site .wallet-empty-icon,
+.nova-site .wallet-pending-icon {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  border-radius: 20px;
+  background: #1a221c;
+  border: 1px solid #334232;
+  color: #c1ff75;
+  margin: 0 auto 23px;
+}
+.nova-site .wallet-not-found h3,
+.nova-site .wallet-waiting h3 {
+  font-size: 24px;
+  line-height: 1.25;
+}
+.nova-site .wallet-not-found p,
+.nova-site .wallet-waiting p {
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.75;
+  max-width: 405px;
+  margin: 15px auto 0;
+}
+.nova-site .wallet-waiting .nova-button {
+  margin-top: 25px;
+}
+.nova-site .wallet-install-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 23px;
+}
+.nova-site .wallet-install-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  color: var(--lime);
+}
+.nova-site .wallet-install-links a:hover {
+  text-decoration: underline;
+}
+.nova-site .wallet-embedded-note {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  margin-top: 20px;
+  text-align: left;
+}
+.nova-site .wallet-embedded-note p {
+  margin: 0;
+  font-size: 14px;
+}
+.nova-site .wallet-embedded-note a {
+  display: inline-flex;
+  margin-top: 12px;
+  font-size: 14px;
+  color: var(--lime);
+}
+.nova-site .wallet-recheck {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  font-size: 14px;
+  margin: 0 auto 27px;
+  padding: 9px;
+}
+.nova-site .wallet-recheck:hover {
+  color: var(--lime);
+}
+.nova-site .wallet-connect-foot {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding: 20px 26px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+  background: #0d120e;
+}
+.nova-site .wallet-connect-foot svg {
+  margin-top: 4px;
+  flex-shrink: 0;
+  color: var(--lime);
+}
+.nova-site .detected-wallets {
+  display: grid;
+  gap: 12px;
+  padding: 25px;
+}
+.nova-site .wallet-choice {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  border: 1px solid #3b493d;
+  border-radius: 9px;
+  padding: 19px;
+  background: #151d17;
+  text-align: left;
+}
+.nova-site .wallet-choice:hover {
+  border-color: var(--lime);
+  background: #1c281d;
+}
+.nova-site .wallet-choice img,
+.nova-site .wallet-approved-brand img {
+  border-radius: 10px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+.nova-site .wallet-choice strong {
+  display: block;
+  font-size: 17px;
+  font-weight: 550;
+}
+.nova-site .wallet-choice small {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.nova-site .wallet-choice-action {
+  color: var(--lime);
+  font-size: 14px;
+  margin-left: auto;
+}
+.nova-site .wallet-message {
+  margin: 0 25px 23px;
+  padding: 14px 17px;
+  border: 1px solid #3c503d;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #bacaad;
+  background: #192017;
+  line-height: 1.7;
+}
+.nova-site .wallet-error {
+  color: #ffbcc1;
+  border-color: #733b43;
+  background: #2c191d;
+}
+.nova-site .wallet-details-body {
+  padding: 25px;
+}
+.nova-site .wallet-chain-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 35px;
+}
+.nova-site .wallet-chain-row > div {
+  flex: 1;
+}
+.nova-site .wallet-chain-row strong {
+  font-size: 17px;
+  font-weight: 550;
+  display: block;
+}
+.nova-site .wallet-chain-row small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.nova-site .wallet-state-pill {
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 6px 10px;
+  border: 1px solid #3b453c;
+  color: var(--muted);
+  border-radius: 20px;
+}
+.nova-site .wallet-state-pill.is-connected {
+  color: var(--lime);
+  border-color: #607d44;
+  background: #1b2916;
+}
+.nova-site .wallet-field-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.07em;
+  margin-bottom: 12px;
+}
+.nova-site .wallet-address {
+  background: #0b100c;
+  border: 1px dashed #3a463a;
+  border-radius: 8px;
+  padding: 20px;
+  min-height: 98px;
+  display: flex;
+  align-items: center;
+  color: #87968a;
+}
+.nova-site .wallet-address code {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 1.8;
+}
+.nova-site .wallet-address.has-address {
+  border-style: solid;
+  border-color: #405736;
+  color: var(--text);
+  user-select: all;
+}
+.nova-site .wallet-address-actions {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.nova-site .wallet-address-actions .nova-button {
+  font-size: 14px;
+  padding: 11px 15px;
+}
+.nova-site .wallet-address-actions .text-link {
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.nova-site .wallet-access-details {
+  border-top: 1px solid var(--line);
+  margin-top: 27px;
+  padding-top: 12px;
+}
+.nova-site .wallet-access-details > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  padding-top: 14px;
+  font-size: 14px;
+}
+.nova-site .wallet-access-details > div > span {
+  color: var(--muted);
+}
+.nova-site .wallet-access-details strong {
+  font-weight: 500;
+}
+.nova-site .wallet-access-details a {
+  color: var(--lime);
+}
+.nova-site .wallet-access-details a:hover {
+  text-decoration: underline;
+}
+.nova-site .wallet-approved {
+  padding: 28px;
+}
+.nova-site .wallet-approved-brand {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+}
+.nova-site .wallet-approved-brand strong {
+  font-size: 22px;
+  font-weight: 500;
+}
+.nova-site .wallet-approved-brand span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--lime);
+  font-size: 14px;
+  margin-top: 5px;
+}
+.nova-site .wallet-permission {
+  display: flex;
+  gap: 14px;
+  border-block: 1px solid var(--line);
+  padding: 24px 0;
+  margin: 24px 0;
+}
+.nova-site .wallet-permission > svg {
+  color: var(--lime);
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.nova-site .wallet-permission strong {
+  font-size: 16px;
+  font-weight: 500;
+}
+.nova-site .wallet-permission p {
+  font-size: 16px;
+  color: var(--muted);
+  margin-top: 7px;
+  line-height: 1.7;
+}
+.nova-site .wallet-account-select {
+  display: block;
+  font-size: 14px;
+  margin-bottom: 24px;
+  color: var(--muted);
+}
+.nova-site .wallet-account-select select {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px;
+  background: #131c15;
+  color: var(--text);
+  margin-top: 9px;
+  font-size: 16px;
+}
+.nova-site .wallet-mobile-help {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 28px;
+  padding: 26px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.nova-site .wallet-mobile-help > div:first-child {
+  display: flex;
+  align-items: flex-start;
+  gap: 17px;
+  max-width: 670px;
+}
+.nova-site .wallet-mobile-help svg {
+  color: var(--lime);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.nova-site .wallet-mobile-help h2 {
+  font-size: 22px;
+}
+.nova-site .wallet-mobile-help p {
+  font-size: 16px;
+  color: var(--muted);
+  line-height: 1.75;
+  margin-top: 10px;
+}
+.nova-site .wallet-mobile-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.nova-site .wallet-mobile-links a {
+  font-size: 14px;
+}
+.nova-site .wallet-next-links {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 25px;
+  margin-top: 28px;
+}
+.nova-site .wallet-next-links a {
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+@media (max-width: 1200px) {
+  .nova-site .header-inner {
+    gap: 18px;
+  }
+  .nova-site .main-nav {
+    gap: 13px;
+  }
+  .nova-site .main-nav > a {
+    font-size: 14px;
+  }
+  .nova-site .wallet-header-link {
+    padding: 11px 14px;
+  }
+  .nova-site .website-tool {
+    padding: 24px 20px;
+  }
+  .nova-site .website-tool-top {
+    gap: 10px;
+  }
+  .nova-site .website-tool-top > span {
+    font-size: 12px;
+  }
+  .nova-site .telegram-page .account-sections {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .nova-site .telegram-page .account-section p {
+    min-height: 0;
+  }
+  .nova-site .telegram-page .page-heading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+@media (max-width: 1000px) {
+  .nova-site .wallet-workspace {
+    grid-template-columns: 1fr;
+  }
+  .nova-site .website-tools {
+    gap: 12px;
+  }
+  .nova-site .website-tool-top {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 18px;
+    margin-bottom: 24px;
+  }
+  .nova-site .bot-account-note {
+    flex-wrap: wrap;
+  }
+  .nova-site .bot-account-note > div {
+    flex: 1;
+    min-width: 220px;
+  }
+  .nova-site .bot-welcome > .outline-tag {
+    display: none;
+  }
+}
+@media (max-width: 1100px) {
+  .nova-site .menu-toggle {
+    display: flex !important;
+  }
+  .nova-site .main-nav {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    padding: 24px 32px;
+    background: #0c130e;
+    border-bottom: 1px solid #3b5032;
+    box-shadow: 0 25px 40px #0008;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+  .nova-site .main-nav.is-open {
+    display: flex;
+  }
+  .nova-site .main-nav > a {
+    font-size: 16px;
+    padding: 16px 4px;
+    border-bottom: 1px solid #28352288;
+  }
+  .nova-site .main-nav > a:last-child {
+    border: 0;
+  }
+  .nova-site .nav-divider {
+    height: 1px;
+    width: 100%;
+    background: #52674b;
+    margin: 8px 0;
+  }
+}
+@media (max-width: 850px) {
+  .nova-site .main-nav {
+    gap: 0;
+  }
+  .nova-site .main-nav > a {
+    font-size: 16px;
+  }
+  .nova-site .nav-divider {
+    height: 1px;
+    width: 100%;
+    background: #52674b;
+    margin: 8px 0;
+  }
+  .nova-site .telegram-entry {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+@media (max-width: 650px) {
+  .nova-site .website-tools {
+    grid-template-columns: 1fr;
+    margin-bottom: 55px;
+  }
+  .nova-site .website-tool {
+    padding: 25px;
+  }
+  .nova-site .website-tool-top {
+    align-items: center;
+    flex-direction: row;
+    margin-bottom: 24px;
+  }
+  .nova-site .website-tool p {
+    font-size: 16px;
+  }
+  .nova-site .workspace-intro {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .nova-site .workspace-intro h2 {
+    font-size: 30px;
+    line-height: 1.15;
+  }
+  .nova-site .wallet-page .page-heading h1,
+  .nova-site .telegram-page .page-heading h1 {
+    font-size: 38px;
+  }
+  .nova-site .wallet-panel-heading {
+    padding: 22px 19px;
+    gap: 12px;
+  }
+  .nova-site .wallet-panel-heading h2 {
+    font-size: 21px;
+  }
+  .nova-site .wallet-panel-heading > svg {
+    display: none;
+  }
+  .nova-site .wallet-not-found,
+  .nova-site .wallet-waiting {
+    padding: 29px 20px;
+  }
+  .nova-site .wallet-connect-foot {
+    padding: 18px 20px;
+  }
+  .nova-site .wallet-details-body {
+    padding: 22px 19px;
+  }
+  .nova-site .wallet-chain-row {
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+  }
+  .nova-site .wallet-chain-row .wallet-state-pill {
+    margin-top: 6px;
+  }
+  .nova-site .wallet-address {
+    padding: 17px;
+  }
+  .nova-site .wallet-mobile-help {
+    padding: 23px 20px;
+  }
+  .nova-site .wallet-mobile-help > div:first-child {
+    gap: 13px;
+  }
+  .nova-site .wallet-mobile-help h2 {
+    font-size: 21px;
+  }
+  .nova-site .wallet-mobile-links,
+  .nova-site .wallet-mobile-links a {
+    width: 100%;
+  }
+  .nova-site .wallet-next-links {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .nova-site .wallet-choice {
+    padding: 16px 13px;
+    gap: 12px;
+  }
+  .nova-site .wallet-choice-action {
+    font-size: 13px;
+  }
+  .nova-site .wallet-choice small {
+    font-size: 12px;
+  }
+  .nova-site .detected-wallets {
+    padding: 20px;
+  }
+  .nova-site .wallet-approved {
+    padding: 23px 20px;
+  }
+  .nova-site .bot-welcome {
+    padding: 24px 20px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .nova-site .bot-welcome h2 {
+    font-size: 25px;
+  }
+  .nova-site .telegram-page .account-sections {
+    grid-template-columns: 1fr;
+  }
+  .nova-site .telegram-page .account-section p,
+  .nova-site .telegram-page .account-section > a {
+    min-height: 0;
+  }
+  .nova-site .telegram-page .account-section > a {
+    font-size: 14px;
+  }
+  .nova-site .bot-account-note {
+    gap: 18px;
+  }
+  .nova-site .bot-return {
+    flex-direction: column;
+    gap: 18px;
+  }
+  .nova-site .telegram-entry-title {
+    align-items: flex-start;
+    gap: 18px;
+  }
+  .nova-site .telegram-entry h2 {
+    font-size: 26px;
+  }
+  .nova-site .header-actions .wallet-header-link {
+    font-size: 12px;
+    padding: 10px 11px;
+    gap: 7px;
+  }
+  .nova-site .header-actions .wallet-header-link svg {
+    display: none;
+  }
+}
+
+.nova-site .flash-arb-page .page-heading {
+  align-items: center;
+}
+.nova-site .flash-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+.nova-site .flash-status-grid article {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+}
+.nova-site .flash-status-grid span,
+.nova-site .flash-status-grid small {
+  display: block;
+  color: var(--muted);
+}
+.nova-site .flash-status-grid span {
+  font-size: 11px;
+}
+.nova-site .flash-status-grid strong {
+  display: block;
+  margin: 9px 0 5px;
+  font-size: 25px;
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+.nova-site .flash-status-grid small {
+  font-size: 10px;
+}
+.nova-site .flash-workspace {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 18px;
+  align-items: start;
+}
+.nova-site .flash-scenario-body {
+  padding: 25px;
+}
+.nova-site .flash-input-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.nova-site .flash-input-grid > label > span {
+  display: block;
+  margin-bottom: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.nova-site .flash-scenario-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 25px 0;
+  margin-top: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.nova-site .flash-scenario-result > div > span,
+.nova-site .flash-scenario-result small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+.nova-site .flash-scenario-result strong {
+  display: block;
+  margin: 7px 0 4px;
+  font-size: 40px;
+  line-height: 1.1;
+  font-weight: 500;
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums;
+}
+.nova-site .flash-gate-pass,
+.nova-site .flash-gate-blocked {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border-radius: 5px;
+  border: 1px solid;
+  font-size: 11px;
+}
+.nova-site .flash-gate-pass {
+  color: var(--lime);
+  border-color: #567b3d;
+  background: #172315;
+}
+.nova-site .flash-gate-blocked {
+  color: #efb5aa;
+  border-color: #70463d;
+  background: #281a17;
+}
+.nova-site .flash-gate-list {
+  margin: 0;
+  padding: 12px 0 18px;
+}
+.nova-site .flash-gate-list > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding-top: 13px;
+  font-size: 13px;
+}
+.nova-site .flash-gate-list dt {
+  color: var(--muted);
+}
+.nova-site .flash-gate-list dd {
+  margin: 0;
+  text-align: right;
+}
+.nova-site .flash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 4px;
+}
+.nova-site .flash-flow {
+  list-style: none;
+  margin: 0;
+  padding: 18px 24px 24px;
+}
+.nova-site .flash-flow li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 18px;
+  gap: 13px;
+  align-items: start;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.nova-site .flash-flow li:last-child {
+  border-bottom: 0;
+}
+.nova-site .flash-flow li > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #506441;
+  border-radius: 50%;
+  color: var(--lime);
+  font-size: 11px;
+}
+.nova-site .flash-flow strong {
+  display: block;
+  font-size: 16px;
+  font-weight: 500;
+}
+.nova-site .flash-flow p {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.nova-site .flash-flow i {
+  color: #75866d;
+  font-style: normal;
+  padding-top: 7px;
+}
+.nova-site .flash-readiness {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+.nova-site .flash-readiness article {
+  padding: 25px;
+}
+.nova-site .flash-readiness h2 {
+  font-size: 23px;
+  margin: 14px 0 11px;
+}
+.nova-site .flash-readiness p {
+  color: var(--muted);
+  line-height: 1.75;
+  font-size: 14px;
+}
+.nova-site .flash-readiness-icon {
+  display: grid;
+  place-items: center;
+  width: 43px;
+  height: 43px;
+  border-radius: 9px;
+  margin-bottom: 18px;
+  border: 1px solid var(--line);
+}
+.nova-site .flash-readiness-icon.ready {
+  color: var(--lime);
+  background: #172315;
+  border-color: #4c653d;
+}
+.nova-site .flash-readiness-icon.pending {
+  color: #c8d8b8;
+  background: #171d18;
+}
+.nova-site .flash-readiness-icon.locked {
+  color: #dfb1a7;
+  background: #251a18;
+  border-color: #573832;
+}
+.nova-site .flash-safety-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  margin: 22px 0 70px;
+  padding: 22px 24px;
+  border: 1px solid #46523d;
+  border-radius: 9px;
+  background: #111713;
+}
+.nova-site .flash-safety-banner > svg {
+  flex-shrink: 0;
+  color: var(--lime);
+  margin-top: 2px;
+}
+.nova-site .flash-safety-banner > div {
+  flex: 1;
+}
+.nova-site .flash-safety-banner strong {
+  font-size: 15px;
+  font-weight: 500;
+}
+.nova-site .flash-safety-banner p {
+  margin-top: 6px;
+  max-width: 780px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.nova-site .flash-safety-banner .text-link {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+@media (max-width: 1120px) {
+  .nova-site .website-tools {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .nova-site .flash-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 850px) {
+  .nova-site .flash-workspace,
+  .nova-site .flash-readiness {
+    grid-template-columns: 1fr;
+  }
+  .nova-site .flash-safety-banner {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 650px) {
+  .nova-site .flash-arb-page .page-heading h1 {
+    font-size: 38px;
+  }
+  .nova-site .flash-status-grid,
+  .nova-site .flash-input-grid {
+    grid-template-columns: 1fr;
+  }
+  .nova-site .flash-status-grid strong {
+    font-size: 23px;
+  }
+  .nova-site .flash-scenario-body {
+    padding: 21px 18px;
+  }
+  .nova-site .flash-scenario-result {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .nova-site .flash-scenario-result strong {
+    font-size: 34px;
+  }
+  .nova-site .flash-gate-list > div {
+    align-items: flex-start;
+  }
+  .nova-site .flash-actions,
+  .nova-site .flash-actions .nova-button {
+    width: 100%;
+  }
+  .nova-site .flash-safety-banner {
+    margin-bottom: 55px;
+  }
+}
+
+.nova-site .copy-trading-page .page-heading {
+  align-items: center;
+}
+.nova-site .copy-hero-visual {
+  position: relative;
+  min-height: 340px;
+  margin-bottom: 18px;
+  background: #08100b;
+}
+.nova-site .copy-hero-visual > img {
+  width: 100%;
+  height: 340px;
+  object-fit: cover;
+  display: block;
+}
+.nova-site .copy-hero-overlay {
+  position: absolute;
+  inset: 0;
+  padding: 42px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: linear-gradient(90deg, #070a08ee 0%, #070a08a8 45%, transparent 78%);
+}
+.nova-site .copy-hero-overlay h2 {
+  font-size: 42px;
+  max-width: 680px;
+}
+.nova-site .copy-hero-overlay p {
+  margin-top: 14px;
+  color: var(--muted);
+  max-width: 650px;
+}
+.nova-site .copy-control-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.nova-site .copy-control-strip > label,
+.nova-site .copy-mode {
+  padding: 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.nova-site .copy-control-strip > label > span,
+.nova-site .copy-mode > span {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.nova-site .copy-mode strong,
+.nova-site .copy-mode small {
+  display: block;
+}
+.nova-site .copy-mode strong {
+  font-size: 17px;
+  font-weight: 550;
+}
+.nova-site .copy-mode small {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--dim);
+}
+.nova-site .copy-wallet-panel,
+.nova-site .gmgn-feed-panel {
+  margin-top: 18px;
+}
+.nova-site .copy-wallet-table strong {
+  font-weight: 550;
+}
+.nova-site .copy-active-pill {
+  display: inline-flex;
+  padding: 6px 9px;
+  border: 1px solid #5a773f;
+  border-radius: 5px;
+  color: var(--lime);
+  background: #172315;
+  font-size: 10px;
+}
+.nova-site .copy-trading-page .inline-notice {
+  margin-bottom: 18px;
+}
+@media (max-width: 1000px) {
+  .nova-site .copy-control-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 650px) {
+  .nova-site .copy-trading-page .page-heading h1 {
+    font-size: 38px;
+  }
+  .nova-site .copy-hero-visual,
+  .nova-site .copy-hero-visual > img {
+    min-height: 300px;
+    height: 300px;
+  }
+  .nova-site .copy-hero-overlay {
+    padding: 24px 20px;
+    background: linear-gradient(0deg, #070a08f7 0%, #070a08a8 58%, transparent);
+  }
+  .nova-site .copy-hero-overlay h2 {
+    font-size: 31px;
+  }
+  .nova-site .copy-control-strip {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import type { Logger } from '@nova/shared';
+import type { Redis } from 'ioredis';
 import type { PositionManager } from './positionManager.js';
 import { SafetyCheckError } from './safety.js';
 
@@ -9,6 +10,7 @@ export interface CopyTradeSignal {
   tokenId: string;
   amountSolOriginal: number;
   entryPriceUsd: number;
+  signature: string;
 }
 
 /**
@@ -21,6 +23,7 @@ export class CopyTradingService {
     private readonly positionManager: PositionManager,
     private readonly logger: Logger,
     private readonly encryptionKey: string,
+    private readonly redis: Redis,
   ) {}
 
   async mirror(signal: CopyTradeSignal) {
@@ -28,6 +31,19 @@ export class CopyTradingService {
       where: { isActive: true, targetAddress: signal.targetAddress },
       include: { user: { include: { wallets: { where: { isActive: true } } } } },
     });
+
+    if (configs.length === 0) return;
+
+    const claimed = await this.redis
+      .set(`copy-trading:signal:${signal.signature}`, '1', 'EX', 7 * 24 * 60 * 60, 'NX')
+      .catch(() => null);
+    if (claimed !== 'OK') {
+      this.logger.debug(
+        { signature: signal.signature, targetAddress: signal.targetAddress },
+        'copy trade signal already processed',
+      );
+      return;
+    }
 
     for (const config of configs) {
       const wallet = config.user.wallets[0];

@@ -35,6 +35,8 @@ data/certbot/
 # misc
 *.tsbuildinfo
 .pnp.*
+__pycache__/
+*.pyc
 
 # generated marketing visuals (local-only, never served/committed — see
 # apps/marketing-engine/src/visuals/imageStore.ts)

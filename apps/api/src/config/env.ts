@@ -56,6 +56,7 @@ export const apiEnvSchema = envSchema.pick({
   ADDITIONAL_RPC_URLS: true,
   JITO_BLOCK_ENGINE_URL: true,
   JITO_AUTH_KEYPAIR: true,
+  GMGN_API_KEY: true,
   ANTHROPIC_API_KEY: true,
   OPENAI_API_KEY: true,
   OPENROUTER_API_KEY: true,

@@ -10,6 +10,9 @@ coverage
 .env
 .env.*
 !.env.example
+data/certbot
+__pycache__
+**/__pycache__
 docs
 apps/dashboard/node_modules
 apps/dashboard/dist

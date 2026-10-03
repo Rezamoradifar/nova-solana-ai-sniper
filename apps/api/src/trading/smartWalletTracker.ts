@@ -386,6 +386,9 @@ export interface SmartWalletTrackerDeps {
   connection: Connection;
   dexScreener: DexScreenerClient;
   logger: Logger;
+  onBuyEvent?: (
+    event: ResolvedBuyEvent & { mint: string; tokenId?: string },
+  ) => void | Promise<void>;
 }
 
 export class SmartWalletTrackerService {
@@ -645,6 +648,15 @@ export class SmartWalletTrackerService {
         buyEvents.map(async (ev) => {
           const wallet = await this.upsertWallet(ev.walletAddress);
           await this.recordTokenEntry(mint, tokenId, ev, poolCreatedAtMs, approxEntryPriceUsd);
+          if (this.deps.onBuyEvent) {
+            void Promise.resolve(this.deps.onBuyEvent({ ...ev, mint, tokenId })).catch(
+              (err: unknown) =>
+                this.deps.logger.error(
+                  { mint, walletAddress: ev.walletAddress, signature: ev.signature, err },
+                  'smartWalletTracker: copy-trade signal hook failed',
+                ),
+            );
+          }
           return wallet;
         }),
       );

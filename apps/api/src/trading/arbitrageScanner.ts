@@ -5,10 +5,10 @@ import { SOL_MINT, type QuoteParams, type QuoteResponse } from '../solana/jupite
  * DEX-to-DEX arbitrage scanner (paper only).
  *
  * For each configured token it quotes SOL -> token on every configured DEX
- * (single-DEX, direct routes only), takes the DEX that gives the most tokens,
- * then quotes token -> SOL with that amount on every OTHER DEX. The best round
- * trip minus the real cost of executing it (base fee, priority fee, Jito tip,
- * and a slippage buffer) is the net result. Nothing is ever executed: an
+ * (single-DEX, direct routes only), then quotes token -> SOL with each buy
+ * amount on every OTHER DEX. Each sequential quote pair is reduced by the
+ * configured execution-cost estimate and slippage buffer. Quotes are not
+ * atomic or a guarantee of an executable return. Nothing is ever executed: an
  * opportunity is only recorded, logged and exposed at /metrics/arbitrage.
  */
 
@@ -17,7 +17,7 @@ export interface ArbitrageConfig {
   /** Jupiter DEX labels, e.g. "Raydium", "Whirlpool", "Meteora DLMM". */
   dexes: string[];
   amountLamports: bigint;
-  /** Execution cost of one atomic round trip: base fee + priority fee + Jito tip. */
+  /** Estimated total execution cost: base fee + priority fee + Jito tip. */
   costLamports: bigint;
   /** Safety margin against price movement between quote and landing. */
   slippageBufferBps: number;
@@ -38,6 +38,18 @@ export interface RoundTripResult {
   at: number;
 }
 
+export interface RoundTripReport {
+  mint: string;
+  buyDex: string;
+  sellDex: string;
+  /** Timestamp of the earlier (buy) quote request, to avoid overstating freshness. */
+  at: number;
+  inSol: number;
+  outSol: number;
+  grossSol: number;
+  netSol: number;
+}
+
 export interface ArbitrageReport {
   enabled: true;
   mode: 'paper';
@@ -49,18 +61,46 @@ export interface ArbitrageReport {
   paperNetSol: number;
   bestNetSol: number | undefined;
   lastScanAt: number | undefined;
-  recent: (Omit<RoundTripResult, 'inLamports' | 'outLamports' | 'grossLamports' | 'netLamports'> & {
-    inSol: number;
-    grossSol: number;
-    netSol: number;
-  })[];
+  lastQuoteAt: number | undefined;
+  sessionStartedAt: number;
+  running: boolean;
+  scanInProgress: boolean;
+  configuration: {
+    amountSol: number;
+    estimatedCostSol: number;
+    slippageBufferBps: number;
+    minEstimatedNetSol: number;
+    dexes: string[];
+    mints: string[];
+  };
+  recent: RoundTripReport[];
   /** Best round trip of the last scan per token, opportunity or not. */
-  lastByMint: Record<string, { buyDex: string; sellDex: string; netSol: number } | null>;
+  lastByMint: Record<string, RoundTripReport | null>;
 }
 
 const LAMPORTS = 1_000_000_000;
 const toSol = (l: bigint) => Number(l) / LAMPORTS;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    if (signal.aborted) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener('abort', done, { once: true });
+  });
+const serializeRoundTrip = (r: RoundTripResult): RoundTripReport => ({
+  mint: r.mint,
+  buyDex: r.buyDex,
+  sellDex: r.sellDex,
+  at: r.at,
+  inSol: toSol(r.inLamports),
+  outSol: toSol(r.outLamports),
+  grossSol: toSol(r.grossLamports),
+  netSol: toSol(r.netLamports),
+});
 
 /** Net result of a round trip after execution cost and slippage buffer. Pure. */
 export function evaluateRoundTrip(
@@ -78,6 +118,8 @@ type QuoteFn = (params: QuoteParams) => Promise<QuoteResponse>;
 
 export class ArbitrageScanner {
   private timer?: NodeJS.Timeout;
+  // Each signal identifies one generation. stop() invalidates even pending quote responses.
+  private scanCancellation = new AbortController();
   private running = false;
   private scans = 0;
   private quotesOk = 0;
@@ -86,6 +128,8 @@ export class ArbitrageScanner {
   private paperNetLamports = 0n;
   private bestNetLamports: bigint | undefined;
   private lastScanAt: number | undefined;
+  private lastQuoteAt: number | undefined;
+  private readonly sessionStartedAt = Date.now();
   private readonly recent: RoundTripResult[] = [];
   private readonly lastByMint = new Map<string, RoundTripResult | null>();
 
@@ -98,11 +142,13 @@ export class ArbitrageScanner {
     if (this.timer) return;
     const tick = () => {
       if (this.running) return;
+      const generation = this.scanCancellation.signal;
       this.running = true;
       this.scanOnce()
         .catch((err) => this.deps.logger.warn({ err }, 'arbitrage scan failed'))
         .finally(() => {
-          this.running = false;
+          // An old scan must not clear the flag of a newly restarted generation.
+          if (generation === this.scanCancellation.signal) this.running = false;
         });
     };
     this.timer = setInterval(tick, intervalMs);
@@ -113,82 +159,103 @@ export class ArbitrageScanner {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    this.scanCancellation.abort();
+    this.scanCancellation = new AbortController();
+    this.running = false;
   }
 
-  private async quoteOut(params: QuoteParams): Promise<bigint | undefined> {
+  private async quoteOut(params: QuoteParams, signal: AbortSignal): Promise<bigint | undefined> {
+    if (signal.aborted) return undefined;
     try {
       const q = await this.deps.quote(params);
+      if (signal.aborted) return undefined;
+      if (typeof q.outAmount !== 'string' || !/^\d+$/.test(q.outAmount)) {
+        throw new Error('Invalid quote amount');
+      }
+      const out = BigInt(q.outAmount);
+      if (out <= 0n || !Number.isFinite(toSol(out))) throw new Error('Invalid quote amount');
       this.quotesOk++;
-      return BigInt(q.outAmount);
+      this.lastQuoteAt = Date.now();
+      return out;
     } catch {
-      this.quotesFailed++;
+      if (!signal.aborted) this.quotesFailed++;
       return undefined;
     } finally {
-      if (this.config.quoteGapMs > 0) await sleep(this.config.quoteGapMs);
+      if (this.config.quoteGapMs > 0) await sleep(this.config.quoteGapMs, signal);
     }
   }
 
   /** One pass over every configured token. Returns the best round trip per token. */
   async scanOnce(): Promise<RoundTripResult[]> {
+    const signal = this.scanCancellation.signal;
     const results: RoundTripResult[] = [];
     for (const mint of this.config.mints) {
-      const best = await this.scanMint(mint);
+      if (signal.aborted) return [];
+      const best = await this.scanMint(mint, signal);
+      if (signal.aborted) return [];
       this.lastByMint.set(mint, best ?? null);
       if (best) results.push(best);
     }
+    if (signal.aborted) return [];
     this.scans++;
     this.lastScanAt = Date.now();
     return results;
   }
 
-  private async scanMint(mint: string): Promise<RoundTripResult | undefined> {
+  private async scanMint(mint: string, signal: AbortSignal): Promise<RoundTripResult | undefined> {
     const { amountLamports } = this.config;
-
-    let buy: { dex: string; tokens: bigint } | undefined;
-    for (const dex of this.config.dexes) {
-      const tokens = await this.quoteOut({
-        inputMint: SOL_MINT,
-        outputMint: mint,
-        amountLamports,
-        slippageBps: 50,
-        dexes: [dex],
-      });
-      if (tokens !== undefined && tokens > 0n && (!buy || tokens > buy.tokens))
-        buy = { dex, tokens };
-    }
-    if (!buy) return undefined;
-
+    const dexes = [...new Set(this.config.dexes)];
     let best: RoundTripResult | undefined;
-    for (const dex of this.config.dexes) {
-      if (dex === buy.dex) continue;
-      const out = await this.quoteOut({
-        inputMint: mint,
-        outputMint: SOL_MINT,
-        amountLamports: buy.tokens,
-        slippageBps: 50,
-        dexes: [dex],
-      });
-      if (out === undefined) continue;
-      const { grossLamports, netLamports } = evaluateRoundTrip(
-        amountLamports,
-        out,
-        this.config.costLamports,
-        this.config.slippageBufferBps,
+    for (const buyDex of dexes) {
+      if (signal.aborted) return undefined;
+      const quotedAt = Date.now();
+      const tokens = await this.quoteOut(
+        {
+          inputMint: SOL_MINT,
+          outputMint: mint,
+          amountLamports,
+          slippageBps: 50,
+          dexes: [buyDex],
+        },
+        signal,
       );
-      if (!best || netLamports > best.netLamports) {
-        best = {
-          mint,
-          buyDex: buy.dex,
-          sellDex: dex,
-          inLamports: amountLamports,
-          outLamports: out,
-          grossLamports,
-          netLamports,
-          at: Date.now(),
-        };
+      if (tokens === undefined) continue;
+      for (const sellDex of dexes) {
+        if (signal.aborted) return undefined;
+        if (sellDex === buyDex) continue;
+        const out = await this.quoteOut(
+          {
+            inputMint: mint,
+            outputMint: SOL_MINT,
+            amountLamports: tokens,
+            slippageBps: 50,
+            dexes: [sellDex],
+          },
+          signal,
+        );
+        if (out === undefined) continue;
+        const { grossLamports, netLamports } = evaluateRoundTrip(
+          amountLamports,
+          out,
+          this.config.costLamports,
+          this.config.slippageBufferBps,
+        );
+        if (!best || netLamports > best.netLamports) {
+          best = {
+            mint,
+            buyDex,
+            sellDex,
+            inLamports: amountLamports,
+            outLamports: out,
+            grossLamports,
+            netLamports,
+            at: quotedAt,
+          };
+        }
       }
     }
 
+    if (signal.aborted) return undefined;
     if (best && best.netLamports >= this.config.minNetLamports) this.record(best);
     return best;
   }
@@ -216,9 +283,7 @@ export class ArbitrageScanner {
   report(): ArbitrageReport {
     const lastByMint: ArbitrageReport['lastByMint'] = {};
     for (const [mint, r] of this.lastByMint) {
-      lastByMint[mint] = r
-        ? { buyDex: r.buyDex, sellDex: r.sellDex, netSol: toSol(r.netLamports) }
-        : null;
+      lastByMint[mint] = r ? serializeRoundTrip(r) : null;
     }
     return {
       enabled: true,
@@ -230,15 +295,19 @@ export class ArbitrageScanner {
       paperNetSol: toSol(this.paperNetLamports),
       bestNetSol: this.bestNetLamports === undefined ? undefined : toSol(this.bestNetLamports),
       lastScanAt: this.lastScanAt,
-      recent: this.recent.map((r) => ({
-        mint: r.mint,
-        buyDex: r.buyDex,
-        sellDex: r.sellDex,
-        at: r.at,
-        inSol: toSol(r.inLamports),
-        grossSol: toSol(r.grossLamports),
-        netSol: toSol(r.netLamports),
-      })),
+      lastQuoteAt: this.lastQuoteAt,
+      sessionStartedAt: this.sessionStartedAt,
+      running: this.timer !== undefined,
+      scanInProgress: this.running,
+      configuration: {
+        amountSol: toSol(this.config.amountLamports),
+        estimatedCostSol: toSol(this.config.costLamports),
+        slippageBufferBps: this.config.slippageBufferBps,
+        minEstimatedNetSol: toSol(this.config.minNetLamports),
+        dexes: [...new Set(this.config.dexes)],
+        mints: [...new Set(this.config.mints)],
+      },
+      recent: this.recent.map(serializeRoundTrip),
       lastByMint,
     };
   }

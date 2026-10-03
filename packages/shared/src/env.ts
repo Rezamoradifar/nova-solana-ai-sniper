@@ -183,6 +183,8 @@ export const envSchema = z.object({
   ADDITIONAL_RPC_URLS: z.string().optional(),
   JITO_BLOCK_ENGINE_URL: z.string().url().optional(),
   JITO_AUTH_KEYPAIR: z.string().optional(),
+  // Optional GMGN OpenAPI key used for read-only Smart Money data on the public Copy Trading page.
+  GMGN_API_KEY: z.string().optional(),
   // Ceiling passed to Jupiter's dynamic/tiered priority-fee estimation — an
   // operator-controlled cap, same pattern as MAX_TRADE_SOL, so a fee spike can't
   // silently burn an unbounded amount of SOL per swap.
