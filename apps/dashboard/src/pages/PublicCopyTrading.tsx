@@ -21,6 +21,15 @@ interface LocalWallet {
   sybilConfidencePct: number | null;
 }
 
+interface GmgnWallet {
+  address: string;
+  trades: number;
+  volumeUsd: number;
+  buys: number;
+  sells: number;
+  tags: string[];
+}
+
 interface GmgnTrade {
   transactionHash: string;
   maker: string;
@@ -41,9 +50,9 @@ interface PublicCopyData {
   updatedAt: number;
   localWallets: LocalWallet[];
   gmgn:
-    | { status: 'not_configured'; trades: GmgnTrade[] }
-    | { status: 'connected'; trades: GmgnTrade[] }
-    | { status: 'unavailable'; trades: GmgnTrade[]; reason: string };
+    | { status: 'not_configured'; trades: GmgnTrade[]; wallets: GmgnWallet[] }
+    | { status: 'connected'; trades: GmgnTrade[]; wallets: GmgnWallet[] }
+    | { status: 'unavailable'; trades: GmgnTrade[]; wallets: GmgnWallet[]; reason: string };
 }
 
 interface CopyConfig {
@@ -216,6 +225,80 @@ export default function PublicCopyTrading() {
           </table>
           {!data?.localWallets.length && <div className="empty-state"><Icon name="wallet" size={30} /><h3>Building wallet history</h3><p>Enable Smart Money analysis and the network trade scanner to populate scored wallets from on-chain activity.</p></div>}
         </div>
+      </section>
+
+      <section className="panel gmgn-wallet-panel">
+        <div className="table-toolbar">
+          <div>
+            <h2>GMGN Smart Money wallets</h2>
+            <p>Wallets observed in the official GMGN Solana Smart Money feed, ranked by recent observed volume.</p>
+          </div>
+          <span className="outline-tag">
+            {data?.gmgn.status === 'connected' ? 'OFFICIAL OPENAPI' : 'GMGN API KEY REQUIRED'}
+          </span>
+        </div>
+        {data?.gmgn.status === 'connected' && data.gmgn.wallets.length ? (
+          <div className="table-scroll">
+            <table className="nova-table copy-wallet-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Wallet</th>
+                  <th>Observed trades</th>
+                  <th>Buys / sells</th>
+                  <th>Observed volume</th>
+                  <th>Tags</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {data.gmgn.wallets.map((wallet, index) => (
+                  <tr key={wallet.address}>
+                    <td>{index + 1}</td>
+                    <td className="number">{short(wallet.address)}</td>
+                    <td className="number">{wallet.trades}</td>
+                    <td className="number">
+                      <span className="positive">{wallet.buys}</span> /{' '}
+                      <span className="negative">{wallet.sells}</span>
+                    </td>
+                    <td className="number">{usd(wallet.volumeUsd)}</td>
+                    <td>{wallet.tags.slice(0, 2).join(' · ') || '—'}</td>
+                    <td>
+                      {configured.has(wallet.address) ? (
+                        <span className="copy-active-pill">Configured</span>
+                      ) : user ? (
+                        <button
+                          className="nova-button button-sm"
+                          disabled={busyAddress === wallet.address}
+                          onClick={() => void addCopy(wallet.address)}
+                        >
+                          {busyAddress === wallet.address ? 'Adding…' : 'Copy wallet'}
+                        </button>
+                      ) : (
+                        <Link className="nova-button button-sm button-outline" to="/login">
+                          Sign in to copy
+                        </Link>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-state">
+            <Icon name="activity" size={30} />
+            <h3>
+              {data?.gmgn.status === 'not_configured'
+                ? 'Connect the official GMGN OpenAPI'
+                : 'No GMGN Smart Money wallets available'}
+            </h3>
+            <p>
+              Add an approved GMGN_API_KEY directly to the server environment. GSP TRADEING does
+              not scrape private GMGN endpoints.
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="panel gmgn-feed-panel">
