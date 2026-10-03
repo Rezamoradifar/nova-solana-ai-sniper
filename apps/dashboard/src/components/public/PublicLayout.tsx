@@ -198,7 +198,7 @@ function MarketProvider({ children }: { children: ReactNode }) {
             const prior = previous.get(token.mint);
             const tickChangePercent =
               prior && prior > 0 ? ((token.price - prior) / prior) * 100 : 0;
-            const tickDirection =
+            const tickDirection: MarketToken['tickDirection'] =
               tickChangePercent > 0 ? 'up' : tickChangePercent < 0 ? 'down' : 'flat';
             previous.set(token.mint, token.price);
             return {
