@@ -81,6 +81,7 @@ import { PriorityConcurrencyQueue } from './lib/priorityQueue.js';
 import { PerfMonitor } from './lib/perfMonitor.js';
 import { ScannerConcurrencyGovernor } from './detection/scannerConcurrencyGovernor.js';
 import { SmartWalletTrackerService } from './trading/smartWalletTracker.js';
+import { CopyTradingService } from './trading/copyTrading.js';
 import { EarlyMomentumDetectorService } from './trading/earlyMomentumDetector.js';
 import {
   evaluateSmartMoneyAndMomentum,
@@ -364,11 +365,29 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // switches default false; SHADOW_MODE_ENABLED (default true) is the pure
   // logging layer's own switch, independent of whether either scoring engine
   // is actually on (score fields are simply null in the log if not).
+  const copyTrading = new CopyTradingService(
+    app.prisma,
+    positionManager,
+    app.log as never,
+    app.config.ENCRYPTION_KEY,
+    app.redis,
+  );
   const smartWalletTracker = new SmartWalletTrackerService({
     prisma: app.prisma,
     connection,
     dexScreener,
     logger: app.log as never,
+    onBuyEvent: (event) => {
+      if (!event.tokenId || event.amountSol === undefined || event.amountSol <= 0) return;
+      return copyTrading.mirror({
+        targetAddress: event.walletAddress,
+        mint: event.mint,
+        tokenId: event.tokenId,
+        amountSolOriginal: event.amountSol,
+        entryPriceUsd: 0,
+        signature: event.signature,
+      });
+    },
   });
   const earlyMomentumDetector = new EarlyMomentumDetectorService({
     dexScreener,
