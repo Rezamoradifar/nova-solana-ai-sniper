@@ -29,11 +29,6 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Show exact Prettier diff for GSP TRADING refresh
-        run: |
-          npx prettier --write apps/dashboard/src/components/public/PublicLayout.tsx apps/dashboard/src/landing.css
-          git diff -- apps/dashboard/src/components/public/PublicLayout.tsx apps/dashboard/src/landing.css
-
       - name: Format check
         run: npm run format:check
 
