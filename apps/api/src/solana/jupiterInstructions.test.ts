@@ -55,14 +55,18 @@ describe('JupiterInstructionClient', () => {
     expect(fetchMock.mock.calls[0]?.[0]?.toString()).toBe(
       'https://example.test/swap/v1/swap-instructions',
     );
-    expect(result.computeBudgetInstructions.map((instruction) => [...instruction.data])).toEqual([[1]]);
+    expect(
+      result.computeBudgetInstructions.map((instruction) => [...instruction.data]),
+    ).toEqual([[1]]);
     expect(result.instructions.map((instruction) => [...instruction.data])).toEqual([
       [2],
       [3],
       [4],
       [5],
     ]);
-    expect(result.instructions.every((instruction) => instruction.programId.equals(PROGRAM))).toBe(true);
+    expect(
+      result.instructions.every((instruction) => instruction.programId.equals(PROGRAM)),
+    ).toBe(true);
     expect(result.addressLookupTableAddresses.map((address) => address.toBase58())).toEqual([
       LUT.toBase58(),
     ]);

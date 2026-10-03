@@ -11,7 +11,13 @@ import type { QuoteResponse } from '../solana/jupiter.js';
 const BASE = 'Base111111111111111111111111111111111111111';
 const TOKEN = 'Token11111111111111111111111111111111111111';
 
-function quote(inputMint: string, outputMint: string, input: bigint, minOut: bigint, impact = '0.0005') {
+function quote(
+  inputMint: string,
+  outputMint: string,
+  input: bigint,
+  minOut: bigint,
+  impact = '0.0005',
+) {
   return {
     inputMint,
     outputMint,
@@ -23,7 +29,9 @@ function quote(inputMint: string, outputMint: string, input: bigint, minOut: big
   } satisfies QuoteResponse;
 }
 
-function candidate(overrides: Partial<FlashArbitrageCandidate> = {}): FlashArbitrageCandidate {
+function candidate(
+  overrides: Partial<FlashArbitrageCandidate> = {},
+): FlashArbitrageCandidate {
   const borrow = 1_000_000_000n;
   const intermediate = 2_000_000_000n;
   const finalOut = 1_006_000_000n;
@@ -68,13 +76,22 @@ describe('evaluateFlashArbitrage', () => {
     expect(evaluateFlashArbitrage(candidate(), config, 7_000).reason).toBe('stale_quote');
     expect(
       evaluateFlashArbitrage(
-        candidate({ buyQuote: quote(BASE, TOKEN, 1_000_000_000n, 2_000_000_000n, '0.01') }),
+        candidate({
+          buyQuote: quote(BASE, TOKEN, 1_000_000_000n, 2_000_000_000n, '0.01'),
+        }),
         config,
         1_500,
       ).reason,
     ).toBe('price_impact');
     expect(
-      evaluateFlashArbitrage(candidate({ finalMinOut: 1_002_000_000n, sellQuote: quote(TOKEN, BASE, 2_000_000_000n, 1_002_000_000n) }), config, 1_500).reason,
+      evaluateFlashArbitrage(
+        candidate({
+          finalMinOut: 1_002_000_000n,
+          sellQuote: quote(TOKEN, BASE, 2_000_000_000n, 1_002_000_000n),
+        }),
+        config,
+        1_500,
+      ).reason,
     ).toBe('below_minimum_edge');
     expect(
       evaluateFlashArbitrage(
@@ -91,7 +108,9 @@ describe('evaluateFlashArbitrage', () => {
   it('fails closed if quote identity or threshold chaining does not match the candidate', () => {
     expect(
       evaluateFlashArbitrage(
-        candidate({ sellQuote: quote(TOKEN, BASE, 1_999_999_999n, 1_006_000_000n) }),
+        candidate({
+          sellQuote: quote(TOKEN, BASE, 1_999_999_999n, 1_006_000_000n),
+        }),
         config,
         1_500,
       ).reason,
@@ -106,8 +125,15 @@ describe('FlashArbitrageExecutor', () => {
     submit: ReturnType<typeof vi.fn>;
   } {
     return {
-      buildAtomic: vi.fn(async () => ({ transaction: { id: 'atomic' }, txSizeBytes: 900, accountLocks: 40 })),
-      simulate: vi.fn(async () => ({ ok: simulationOk, error: simulationOk ? undefined : 'simulation failed' })),
+      buildAtomic: vi.fn(async () => ({
+        transaction: { id: 'atomic' },
+        txSizeBytes: 900,
+        accountLocks: 40,
+      })),
+      simulate: vi.fn(async () => ({
+        ok: simulationOk,
+        error: simulationOk ? undefined : 'simulation failed',
+      })),
       submit: vi.fn(async () => 'signature-123'),
     };
   }
@@ -124,7 +150,10 @@ describe('FlashArbitrageExecutor', () => {
 
   it('never submits a transaction whose simulation failed', async () => {
     const rt = runtime(false);
-    const executor = new FlashArbitrageExecutor(rt, { ...config, liveExecutionEnabled: true });
+    const executor = new FlashArbitrageExecutor(rt, {
+      ...config,
+      liveExecutionEnabled: true,
+    });
     const result = await executor.execute(candidate(), 'LIVE', 1_500);
     expect(result.status).toBe('SIMULATION_FAILED');
     expect(rt.submit).not.toHaveBeenCalled();
@@ -139,7 +168,10 @@ describe('FlashArbitrageExecutor', () => {
 
   it('submits only after profitability and simulation both pass with LIVE explicitly enabled', async () => {
     const rt = runtime();
-    const executor = new FlashArbitrageExecutor(rt, { ...config, liveExecutionEnabled: true });
+    const executor = new FlashArbitrageExecutor(rt, {
+      ...config,
+      liveExecutionEnabled: true,
+    });
     const result = await executor.execute(candidate(), 'LIVE', 1_500);
     expect(result).toMatchObject({ status: 'SUBMITTED', signature: 'signature-123' });
     expect(rt.buildAtomic).toHaveBeenCalledOnce();
@@ -150,7 +182,10 @@ describe('FlashArbitrageExecutor', () => {
   it('does not build or simulate candidates rejected by the profitability gate', async () => {
     const rt = runtime();
     const executor = new FlashArbitrageExecutor(rt, config);
-    const bad = candidate({ finalMinOut: 1_000_000_000n, sellQuote: quote(TOKEN, BASE, 2_000_000_000n, 1_000_000_000n) });
+    const bad = candidate({
+      finalMinOut: 1_000_000_000n,
+      sellQuote: quote(TOKEN, BASE, 2_000_000_000n, 1_000_000_000n),
+    });
     const result = await executor.execute(bad, 'SIMULATION', 1_500);
     expect(result.status).toBe('REJECTED');
     expect(rt.buildAtomic).not.toHaveBeenCalled();

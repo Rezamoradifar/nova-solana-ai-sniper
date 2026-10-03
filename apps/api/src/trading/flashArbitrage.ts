@@ -109,7 +109,9 @@ function rawAmount(value: unknown): bigint | undefined {
 }
 
 function quotePriceImpactBps(quote: QuoteResponse): number | undefined {
-  if (typeof quote.priceImpactPct !== 'string' || quote.priceImpactPct.trim() === '') return undefined;
+  if (typeof quote.priceImpactPct !== 'string' || quote.priceImpactPct.trim() === '') {
+    return undefined;
+  }
   const ratio = Number(quote.priceImpactPct);
   if (!Number.isFinite(ratio) || ratio < 0) return undefined;
   return ratio * 10_000;
@@ -179,10 +181,9 @@ export function evaluateFlashArbitrage(
   const worstPriceImpactBps = Math.max(buyImpact, sellImpact);
   const guaranteedNetBaseUnits =
     candidate.finalMinOut - candidate.borrowAmount - candidate.estimatedExecutionCostBaseUnits;
-  const guaranteedNetBps =
-    guaranteedNetBaseUnits <= 0n
-      ? Number((guaranteedNetBaseUnits * BPS_DENOMINATOR) / candidate.borrowAmount)
-      : Number((guaranteedNetBaseUnits * BPS_DENOMINATOR) / candidate.borrowAmount);
+  const guaranteedNetBps = Number(
+    (guaranteedNetBaseUnits * BPS_DENOMINATOR) / candidate.borrowAmount,
+  );
 
   if (worstPriceImpactBps > config.maxPriceImpactBps) {
     return {
@@ -232,7 +233,9 @@ export class FlashArbitrageExecutor {
     if (!evaluation.accepted) return { status: 'REJECTED', evaluation };
 
     if (mode === 'LIVE' && !this.config.liveExecutionEnabled) {
-      throw new Error('Flash arbitrage LIVE execution is disabled by the independent safety gate.');
+      throw new Error(
+        'Flash arbitrage LIVE execution is disabled by the independent safety gate.',
+      );
     }
 
     const build = await this.runtime.buildAtomic(candidate);

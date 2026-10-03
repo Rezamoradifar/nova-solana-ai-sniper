@@ -123,7 +123,8 @@ export class JupiterInstructionClient {
     const response = await fetch(`${this.apiBase}/swap/v1/swap-instructions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal: options.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs),
+      signal:
+        options.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs),
       body: JSON.stringify({
         quoteResponse: quote,
         userPublicKey: userPublicKey.toBase58(),
@@ -143,7 +144,9 @@ export class JupiterInstructionClient {
       !Array.isArray(raw.setupInstructions) ||
       !raw.swapInstruction ||
       !Array.isArray(raw.addressLookupTableAddresses) ||
-      (raw.cleanupInstruction !== null && raw.cleanupInstruction !== undefined && typeof raw.cleanupInstruction !== 'object') ||
+      (raw.cleanupInstruction !== null &&
+        raw.cleanupInstruction !== undefined &&
+        typeof raw.cleanupInstruction !== 'object') ||
       (raw.otherInstructions !== undefined && !Array.isArray(raw.otherInstructions))
     ) {
       throw new Error('Jupiter returned an incomplete swap-instructions response.');
