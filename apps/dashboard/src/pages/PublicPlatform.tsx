@@ -15,7 +15,7 @@ const QUESTIONS = [
   ],
   [
     'What is the difference between the terminal and the Telegram app?',
-    'The website provides public market discovery and read-only route analysis. The separate GSP Bank Sniper Telegram app provides account, plan, wallet, and trading workflows. Its availability and enabled features depend on the deployed service and your plan.',
+    'The website provides public market discovery and read-only route analysis. The separate GSP TRADING Telegram app provides account, plan, wallet, and trading workflows. Its availability and enabled features depend on the deployed service and your plan.',
   ],
   [
     'Where does the data come from?',
@@ -27,7 +27,7 @@ const QUESTIONS = [
   ],
   [
     'How do I get started?',
-    'Open Markets to explore the selected assets, then use the arbitrage terminal to compare direct routes. For account-based GSP Bank Sniper features, open the linked Telegram app and confirm the available plans, custody model, and settings before funding an account.',
+    'Open Markets to explore the selected assets, then use the arbitrage terminal to compare direct routes. For account-based GSP TRADING features, open the linked Telegram app and confirm the available plans, custody model, and settings before funding an account.',
   ],
 ] as const;
 
@@ -186,7 +186,7 @@ export function PublicSecurity() {
           [
             '01',
             'Custody, made explicit',
-            'Markets and quote analysis work without a wallet. The optional website wallet connection reads your approved public address; keys stay in your wallet. The separate GSP Bank Sniper bot supports server-managed wallets with encrypted key storage. That is a custodial model: you depend on the operator and its infrastructure to safeguard those keys.',
+            'Markets and quote analysis work without a wallet. The optional website wallet connection reads your approved public address; keys stay in your wallet. The separate GSP TRADING bot supports server-managed wallets with encrypted key storage. That is a custodial model: you depend on the operator and its infrastructure to safeguard those keys.',
           ],
           [
             '02',
@@ -333,7 +333,7 @@ export function PublicPricing() {
       <PageHeading
         eyebrow="TELEGRAM BOT PACKAGES"
         title="Your bot. Your package."
-        text="Start free — upgrade in Packages for a lower fee and higher limits. Explore current options in the GSP Bank Sniper Telegram app."
+        text="Start free — upgrade in Packages for a lower fee and higher limits. Explore current options in the GSP TRADING Telegram app."
       />
       <div className="access-banner">
         <div>
@@ -426,7 +426,7 @@ export function PublicPricing() {
       </div>
       <p className="pricing-note">
         {plans.length
-          ? 'Plan details are supplied by the connected GSP Bank Sniper service. Confirm the final terms in the app.'
+          ? 'Plan details are supplied by the connected GSP TRADING service. Confirm the final terms in the app.'
           : 'The pricing service is not connected in this website session. Current prices are not being estimated or substituted.'}{' '}
         Network costs and trading risk are separate from plan access.
       </p>
@@ -464,7 +464,7 @@ export function PublicPricing() {
               <Icon name="chevron" size={18} />
             </summary>
             <p>
-              Open the linked GSP Bank Sniper Telegram app to review the available account and plan
+              Open the linked GSP TRADING Telegram app to review the available account and plan
               workflows. Confirm the operator, current pricing, and payment instructions inside the
               app.
             </p>
