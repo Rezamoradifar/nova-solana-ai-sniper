@@ -29,6 +29,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Show wallet Prettier diff
+        run: |
+          npx prettier --write apps/dashboard/src/lib/walletConnection.ts apps/dashboard/src/lib/walletConnection.test.ts
+          git diff -- apps/dashboard/src/lib/walletConnection.ts apps/dashboard/src/lib/walletConnection.test.ts
+
       - name: Format check
         run: npm run format:check
 
