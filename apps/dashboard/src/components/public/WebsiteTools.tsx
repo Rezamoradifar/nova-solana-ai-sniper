@@ -22,6 +22,15 @@ const TOOLS = [
   },
   {
     number: '03',
+    icon: 'layers' as const,
+    title: 'Flash Loan Lab',
+    tag: 'SIMULATION',
+    text: 'Model atomic borrow, two-leg routing, repayment, and the safety gates required before live execution.',
+    route: '/flash-arbitrage',
+    action: 'Open flash loan lab',
+  },
+  {
+    number: '04',
     icon: 'wallet' as const,
     title: 'Wallet connection',
     tag: 'YOUR ACCOUNT',
