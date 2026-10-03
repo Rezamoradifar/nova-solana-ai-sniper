@@ -154,7 +154,7 @@ export function NovaMark({ small = false }: { small?: boolean }) {
         />
       </svg>
       <span className="brand-word">
-        GSP<span>TRADING</span>
+        GSP<span>TRADEING</span>
       </span>
     </span>
   );
@@ -307,8 +307,9 @@ export function PublicLayout() {
       '/wallet': 'Connect your Solana wallet',
       '/security': 'Risk & security',
       '/pricing': 'Packages',
+      '/copy-trading': 'Solana copy trading',
     };
-    document.title = `GSP TRADING — ${titles[location.pathname] ?? 'Solana trading'}`;
+    document.title = `GSP TRADEING — ${titles[location.pathname] ?? 'Solana trading'}`;
   }, [location.pathname]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -325,7 +326,7 @@ export function PublicLayout() {
         </a>
         <header className="nova-header">
           <div className="site-container header-inner">
-            <Link to="/" aria-label="GSP TRADING home">
+            <Link to="/" aria-label="GSP TRADEING home">
               <NovaMark />
             </Link>
             <nav
@@ -339,6 +340,7 @@ export function PublicLayout() {
               </NavLink>
               <NavLink to="/markets">Markets</NavLink>
               <NavLink to="/flash-arbitrage">Flash Loan</NavLink>
+              <NavLink to="/copy-trading">Copy Trading</NavLink>
               <span className="nav-divider" aria-hidden="true" />
               <NavLink to="/telegram">
                 <Icon name="telegram" size={17} /> Telegram bot
@@ -389,6 +391,7 @@ export function PublicLayout() {
                 <Link to="/arbitrage">Arbitrage terminal</Link>
                 <Link to="/markets">Live markets</Link>
                 <Link to="/flash-arbitrage">Flash Loan Lab</Link>
+                <Link to="/copy-trading">Copy Trading</Link>
                 <Link to="/wallet">Connect wallet</Link>
               </div>
               <div className="footer-column">
@@ -416,7 +419,7 @@ export function PublicLayout() {
               </div>
             </div>
             <div className="footer-bottom">
-              <span>© {new Date().getFullYear()} GSP TRADING. All rights reserved.</span>
+              <span>© {new Date().getFullYear()} GSP TRADEING. All rights reserved.</span>
               <span>Clarity before execution.</span>
             </div>
             <p className="risk-note">
