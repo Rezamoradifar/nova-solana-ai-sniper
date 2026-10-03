@@ -11,6 +11,170 @@ export type ConnectionWallet = Wallet & {
   features: StandardConnectFeature & StandardEventsFeature & Partial<StandardDisconnectFeature>;
 };
 
+
+interface LegacyInjectedPublicKey {
+  toBase58?: () => string;
+  toBytes?: () => Uint8Array;
+  toString: () => string;
+}
+
+interface LegacyInjectedProvider {
+  isPhantom?: boolean;
+  isSolflare?: boolean;
+  publicKey?: LegacyInjectedPublicKey | null;
+  connect: () => Promise<{ publicKey?: LegacyInjectedPublicKey } | void>;
+  disconnect?: () => Promise<void>;
+  on?: (event: string, listener: (value?: unknown) => void) => void;
+  off?: (event: string, listener: (value?: unknown) => void) => void;
+}
+
+interface LegacyInjectedWindow {
+  phantom?: { solana?: LegacyInjectedProvider };
+  solflare?: LegacyInjectedProvider;
+}
+
+function legacyPublicKey(value: unknown): LegacyInjectedPublicKey | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Partial<LegacyInjectedPublicKey>;
+  if (typeof candidate.toString !== 'function') return null;
+  return candidate as LegacyInjectedPublicKey;
+}
+
+function legacyAccount(publicKey: LegacyInjectedPublicKey | null | undefined): WalletAccount | null {
+  if (!publicKey) return null;
+  const address =
+    typeof publicKey.toBase58 === 'function' ? publicKey.toBase58() : publicKey.toString();
+  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return null;
+  const bytes = typeof publicKey.toBytes === 'function' ? publicKey.toBytes() : null;
+  if (!(bytes instanceof Uint8Array) || bytes.length !== 32) return null;
+  return {
+    address,
+    publicKey: bytes,
+    chains: ['solana:mainnet'],
+    features: [],
+  };
+}
+
+function legacyWallet(
+  name: string,
+  icon: Wallet['icon'],
+  provider: LegacyInjectedProvider,
+): ConnectionWallet {
+  const listeners = new Set<(properties: StandardEventsChangeProperties) => void>();
+  let current = legacyAccount(provider.publicKey);
+
+  const notifyAccount = (value?: unknown) => {
+    const key = legacyPublicKey(value) ?? provider.publicKey ?? null;
+    current = legacyAccount(key);
+    const accounts = current ? [current] : [];
+    listeners.forEach((listener) => listener({ accounts }));
+  };
+  const notifyDisconnect = () => {
+    current = null;
+    listeners.forEach((listener) => listener({ accounts: [] }));
+  };
+
+  return {
+    version: '1.0.0',
+    name,
+    icon,
+    chains: ['solana:mainnet'],
+    get accounts() {
+      return current ? [current] : [];
+    },
+    features: {
+      'standard:connect': {
+        version: '1.0.0',
+        connect: async () => {
+          const result = await provider.connect();
+          const resultKey =
+            result && typeof result === 'object' && 'publicKey' in result
+              ? legacyPublicKey(result.publicKey)
+              : null;
+          current = legacyAccount(resultKey ?? provider.publicKey);
+          return { accounts: current ? [current] : [] };
+        },
+      },
+      'standard:disconnect': {
+        version: '1.0.0',
+        disconnect: async () => {
+          await provider.disconnect?.();
+          notifyDisconnect();
+        },
+      },
+      'standard:events': {
+        version: '1.0.0',
+        on: (_event, listener) => {
+          listeners.add(listener);
+          provider.on?.('accountChanged', notifyAccount);
+          provider.on?.('disconnect', notifyDisconnect);
+          return () => {
+            listeners.delete(listener);
+            provider.off?.('accountChanged', notifyAccount);
+            provider.off?.('disconnect', notifyDisconnect);
+          };
+        },
+      },
+    },
+  };
+}
+
+const PHANTOM_ICON =
+  'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiM3YzY1ZmYiLz48cGF0aCBkPSJNMTYgNDJjNC0xOCAxNi0yOCAzMC0yOCA4IDAgMTIgNSAxMiAxMSAwIDEyLTEzIDI1LTMwIDI1LTUgMC0xNC0xLTEyLTgtNSA0LTggMi04LTQgMCAwLTQgNi04IDYiLTQiIGZpbGw9IiNmZmYiLz48L3N2Zz4=' as Wallet['icon'];
+const SOLFLARE_ICON =
+  'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiNmNThhMWYiLz48cGF0aCBkPSJNMzIgMTJsNiAxNCAxNCA2LTE0IDYtNiAxNC02LTE0LTE0LTYgMTQtNiA2LTE0eiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==' as Wallet['icon'];
+
+/**
+ * Some injected wallets expose their legacy browser provider before (or without)
+ * registering Wallet Standard. Register a read-only connection adapter so the
+ * public-address connect flow still works in those environments.
+ */
+export function registerLegacyInjectedWallets(
+  registry: Wallets,
+  scope: LegacyInjectedWindow = globalThis as unknown as LegacyInjectedWindow,
+  seen: Set<object> = new Set(),
+): Array<() => void> {
+  const existingNames = new Set(registry.get().map((wallet) => wallet.name.toLowerCase()));
+  const candidates: Array<{
+    name: string;
+    icon: Wallet['icon'];
+    provider: LegacyInjectedProvider | undefined;
+    valid: (provider: LegacyInjectedProvider) => boolean;
+  }> = [
+    {
+      name: 'Phantom',
+      icon: PHANTOM_ICON,
+      provider: scope.phantom?.solana,
+      valid: (provider) => provider.isPhantom === true,
+    },
+    {
+      name: 'Solflare',
+      icon: SOLFLARE_ICON,
+      provider: scope.solflare,
+      valid: (provider) => provider.isSolflare === true,
+    },
+  ];
+
+  const off: Array<() => void> = [];
+  for (const candidate of candidates) {
+    const provider = candidate.provider;
+    if (
+      !provider ||
+      typeof provider !== 'object' ||
+      seen.has(provider as object) ||
+      existingNames.has(candidate.name.toLowerCase()) ||
+      typeof provider.connect !== 'function' ||
+      !candidate.valid(provider)
+    ) {
+      continue;
+    }
+    seen.add(provider as object);
+    off.push(registry.register(legacyWallet(candidate.name, candidate.icon, provider)));
+    existingNames.add(candidate.name.toLowerCase());
+  }
+  return off;
+}
+
 export interface WalletConnectionState {
   available: readonly ConnectionWallet[];
   status: 'disconnected' | 'connecting' | 'connected' | 'disconnecting';
