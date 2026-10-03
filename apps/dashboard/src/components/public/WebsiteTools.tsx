@@ -31,6 +31,15 @@ const TOOLS = [
   },
   {
     number: '04',
+    icon: 'copy' as const,
+    title: 'Copy Trading',
+    tag: 'SMART MONEY',
+    text: 'Rank Solana wallets, inspect GMGN Smart Money activity, and create bounded copy configurations.',
+    route: '/copy-trading',
+    action: 'Open copy trading',
+  },
+  {
+    number: '05',
     icon: 'wallet' as const,
     title: 'Wallet connection',
     tag: 'YOUR ACCOUNT',
