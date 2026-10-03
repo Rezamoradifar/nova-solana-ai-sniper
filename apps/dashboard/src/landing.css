@@ -4257,3 +4257,356 @@
     padding: 12px;
   }
 }
+
+
+/* GSP TRADING — institutional visual refinement */
+.nova-site {
+  --bg: #070a08;
+  --panel: #0e1410;
+  --panel-2: #121a14;
+  --line: #273229;
+  --lime: #bdfb72;
+  --text: #f3f6f1;
+  --muted: #9ba79e;
+  --dim: #718076;
+}
+.nova-site .nova-header {
+  border-bottom-color: #ffffff0d;
+  background: linear-gradient(180deg, #070a08fa 0%, #070a08e8 100%);
+  box-shadow:
+    0 18px 45px #00000035,
+    inset 0 -1px #ffffff04;
+}
+.nova-site .nova-brand {
+  letter-spacing: 0.09em;
+}
+.nova-site .nova-brand > svg {
+  filter: drop-shadow(0 0 14px #bdfb7222);
+}
+.nova-site .brand-word > span {
+  color: var(--lime);
+  letter-spacing: 0.25em;
+}
+.nova-site .main-nav > a {
+  position: relative;
+}
+.nova-site .main-nav > a::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 100%;
+  bottom: -12px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--lime), transparent);
+  transition: right 0.22s ease;
+}
+.nova-site .main-nav > a:hover::after,
+.nova-site .main-nav > a.active::after {
+  right: 0;
+}
+.nova-site .nova-button {
+  box-shadow:
+    inset 0 1px #ffffff80,
+    0 10px 28px #96d85c12;
+}
+.nova-site .nova-button:hover {
+  box-shadow:
+    inset 0 1px #ffffff9c,
+    0 14px 34px #96d85c22;
+}
+.nova-site .button-outline {
+  box-shadow: inset 0 1px #ffffff08;
+}
+.nova-site .nova-hero {
+  isolation: isolate;
+  min-height: 790px;
+  background:
+    radial-gradient(circle at 73% 30%, #203321 0%, transparent 31%),
+    radial-gradient(circle at 18% 15%, #132019 0%, transparent 27%),
+    linear-gradient(180deg, #060807 0%, #080b09 100%);
+}
+.nova-site .nova-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.17;
+  background-image:
+    linear-gradient(#bdfb720d 1px, transparent 1px),
+    linear-gradient(90deg, #bdfb720d 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: linear-gradient(90deg, #000 0%, #000a 42%, transparent 80%);
+}
+.nova-site .nova-hero::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 190px;
+  pointer-events: none;
+  background: linear-gradient(180deg, transparent, #070a08);
+}
+.nova-site .hero-art {
+  filter: saturate(0.78) contrast(1.16) brightness(0.72);
+}
+.nova-site .hero-shade {
+  z-index: 0;
+  background:
+    radial-gradient(circle at 70% 35%, #caff7a17 0%, transparent 18%),
+    radial-gradient(circle at 58% 72%, #6c9f4c0f 0%, transparent 24%),
+    linear-gradient(90deg, #060807 0%, #060807f8 25%, #060807b0 45%, #06080728 70%),
+    linear-gradient(0deg, #070a08 0%, transparent 38%);
+}
+.nova-site .hero-content {
+  padding-top: 70px;
+}
+.nova-site .hero-brand-lockup {
+  position: relative;
+  border-color: #c8ff9528;
+  background:
+    linear-gradient(135deg, #ffffff0a, transparent 58%),
+    #0b110dd1;
+  box-shadow:
+    inset 0 1px #ffffff0a,
+    0 16px 40px #0004;
+}
+.nova-site .hero-brand-lockup::after {
+  content: '';
+  position: absolute;
+  inset: auto 10px -1px 10px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--lime), transparent);
+  opacity: 0.55;
+}
+.nova-site .hero-brand-lockup > strong {
+  text-shadow: 0 0 20px #bdfb7230;
+}
+.nova-site .hero-content h1 {
+  max-width: 940px;
+  text-shadow: 0 18px 55px #0009;
+}
+.nova-site .hero-content h1 > span {
+  background: linear-gradient(90deg, #f3f6f1 0%, #b9c6bb 52%, #8da07f 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: none;
+}
+.nova-site .hero-content > p {
+  max-width: 610px;
+  color: #b2bcb5;
+}
+.nova-site .hero-system-strip {
+  border-color: #ffffff16;
+  background:
+    linear-gradient(180deg, #ffffff05, transparent),
+    #09100cbf;
+  box-shadow:
+    0 18px 50px #0005,
+    inset 0 1px #ffffff09;
+}
+.nova-site .hero-system-strip > div {
+  position: relative;
+}
+.nova-site .hero-system-strip > div::after {
+  content: '';
+  position: absolute;
+  left: 17px;
+  right: 17px;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--lime), transparent);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.nova-site .hero-system-strip > div:hover::after {
+  opacity: 0.55;
+}
+.nova-site .market-ticker {
+  border-color: #ffffff10;
+  background:
+    linear-gradient(90deg, #ffffff02, transparent 40%),
+    #0a0f0c;
+  box-shadow: inset 0 1px #ffffff04;
+}
+.nova-site .venue-strip > div {
+  transition:
+    color 0.22s,
+    opacity 0.22s,
+    transform 0.22s;
+}
+.nova-site .venue-strip > div:hover {
+  color: #e7eee8;
+  opacity: 1;
+  transform: translateY(-2px);
+}
+.nova-site .section-heading h2,
+.nova-site .split-section h2,
+.nova-site .security-copy h2 {
+  text-wrap: balance;
+}
+.nova-site .website-tool,
+.nova-site .feature-card,
+.nova-site .route-illustration,
+.nova-site .security-art,
+.nova-site .panel {
+  box-shadow:
+    inset 0 1px #ffffff05,
+    0 18px 55px #0000001f;
+}
+.nova-site .website-tool {
+  transform: translateY(0);
+  transition:
+    background 0.24s,
+    border-color 0.24s,
+    transform 0.24s,
+    box-shadow 0.24s;
+}
+.nova-site .website-tool:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    inset 0 1px #ffffff08,
+    0 24px 65px #00000033;
+}
+.nova-site .website-tool-top > svg {
+  filter: drop-shadow(0 0 18px #bdfb7228);
+}
+.nova-site .feature-card {
+  transition:
+    border-color 0.25s,
+    transform 0.25s,
+    box-shadow 0.25s;
+}
+.nova-site .feature-card:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    inset 0 1px #ffffff08,
+    0 28px 80px #00000038;
+}
+.nova-site .feature-main > img {
+  transition:
+    transform 0.6s ease,
+    filter 0.6s ease;
+  filter: saturate(0.85) contrast(1.05);
+}
+.nova-site .feature-main:hover > img {
+  transform: scale(1.035);
+  filter: saturate(0.95) contrast(1.08);
+}
+.nova-site .feature-main:after {
+  background:
+    radial-gradient(circle at 73% 26%, #bdfb720e, transparent 30%),
+    linear-gradient(0deg, #0b100dfd 0%, #0d120f8a 48%, transparent 78%);
+}
+.nova-site .feature-markets {
+  background:
+    radial-gradient(circle at 68% 24%, #bdfb7210, transparent 27%),
+    radial-gradient(ellipse at 80% 25%, #1d2f21 0%, #0e1510 72%);
+}
+.nova-site .token-orbit .token-mark {
+  border-color: #ffffff16;
+  box-shadow:
+    0 16px 40px #0007,
+    inset 0 1px #ffffff12;
+}
+.nova-site .route-illustration {
+  background:
+    radial-gradient(circle at 50% 42%, #bdfb7208, transparent 30%),
+    linear-gradient(180deg, #111814, #0d120f);
+}
+.nova-site .security-art {
+  position: relative;
+}
+.nova-site .security-art::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid #ffffff08;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 75% 42%, #bdfb720c, transparent 28%),
+    linear-gradient(180deg, transparent 50%, #080b096b);
+  pointer-events: none;
+}
+.nova-site .closing-cta {
+  border-top: 1px solid #ffffff0b;
+  background:
+    radial-gradient(circle at 86% 50%, #bdfb7209, transparent 25%),
+    linear-gradient(180deg, transparent, #0b100d48);
+}
+.nova-site .closing-cta .cta-orbit {
+  color: #bdfb7209;
+  filter: blur(0.2px);
+}
+.nova-site .nova-footer {
+  background:
+    linear-gradient(180deg, #0a0e0b 0%, #060806 100%);
+}
+.nova-site .flash-status-grid article,
+.nova-site .flash-readiness article {
+  background:
+    linear-gradient(180deg, #ffffff04 0%, transparent 35%),
+    var(--panel);
+}
+.nova-site .flash-scenario-panel,
+.nova-site .flash-flow-panel {
+  border-color: #324036;
+}
+.nova-site .flash-scenario-result strong {
+  text-shadow: 0 0 26px #bdfb7212;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nova-site .website-tool,
+  .nova-site .feature-card,
+  .nova-site .feature-main > img,
+  .nova-site .nova-button,
+  .nova-site .venue-strip > div {
+    transition: none;
+  }
+  .nova-site .website-tool:hover,
+  .nova-site .feature-card:hover,
+  .nova-site .nova-button:hover,
+  .nova-site .venue-strip > div:hover,
+  .nova-site .feature-main:hover > img {
+    transform: none;
+  }
+}
+@media (max-width: 900px) {
+  .nova-site .nova-hero::before {
+    opacity: 0.1;
+    background-size: 48px 48px;
+  }
+  .nova-site .hero-content h1 {
+    max-width: 760px;
+  }
+}
+@media (max-width: 650px) {
+  .nova-site .nova-hero {
+    min-height: 750px;
+  }
+  .nova-site .nova-hero::before {
+    mask-image: linear-gradient(180deg, #000 0%, transparent 78%);
+  }
+  .nova-site .hero-art {
+    right: -30%;
+    width: 140%;
+    opacity: 0.62;
+  }
+  .nova-site .hero-content {
+    padding-top: 46px;
+  }
+  .nova-site .hero-brand-lockup {
+    padding: 9px 11px 8px;
+  }
+  .nova-site .hero-brand-lockup > span,
+  .nova-site .hero-brand-lockup > strong {
+    font-size: 15px;
+  }
+  .nova-site .hero-system-strip {
+    margin-top: 32px;
+  }
+}
