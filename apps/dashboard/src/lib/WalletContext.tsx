@@ -27,11 +27,22 @@ export function WalletConnectionProvider({ children }: { children: ReactNode }) 
     const retry250 = window.setTimeout(registerInjected, 250);
     const retry1000 = window.setTimeout(registerInjected, 1000);
     const retry2500 = window.setTimeout(registerInjected, 2500);
+    const retry5000 = window.setTimeout(registerInjected, 5000);
+    const retry10000 = window.setTimeout(registerInjected, 10_000);
+    const onResume = () => registerInjected();
+    window.addEventListener('focus', onResume);
+    window.addEventListener('pageshow', onResume);
+    document.addEventListener('visibilitychange', onResume);
 
     return () => {
       window.clearTimeout(retry250);
       window.clearTimeout(retry1000);
       window.clearTimeout(retry2500);
+      window.clearTimeout(retry5000);
+      window.clearTimeout(retry10000);
+      window.removeEventListener('focus', onResume);
+      window.removeEventListener('pageshow', onResume);
+      document.removeEventListener('visibilitychange', onResume);
       cleanups.splice(0).forEach((off) => off());
       store.stop();
     };
