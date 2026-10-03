@@ -386,7 +386,9 @@ export interface SmartWalletTrackerDeps {
   connection: Connection;
   dexScreener: DexScreenerClient;
   logger: Logger;
-  onBuyEvent?: (event: ResolvedBuyEvent & { mint: string; tokenId?: string }) => void | Promise<void>;
+  onBuyEvent?: (
+    event: ResolvedBuyEvent & { mint: string; tokenId?: string },
+  ) => void | Promise<void>;
 }
 
 export class SmartWalletTrackerService {
