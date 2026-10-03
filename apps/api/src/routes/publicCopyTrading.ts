@@ -45,19 +45,56 @@ export default async function publicCopyTradingRoutes(fastify: FastifyInstance) 
 
       const gmgnApiKey = fastify.config.GMGN_API_KEY?.trim();
       let gmgn:
-        | { status: 'not_configured'; trades: [] }
-        | { status: 'connected'; trades: Awaited<ReturnType<typeof fetchGmgnSmartMoney>> }
-        | { status: 'unavailable'; trades: []; reason: string };
+        | { status: 'not_configured'; trades: []; wallets: [] }
+        | {
+            status: 'connected';
+            trades: Awaited<ReturnType<typeof fetchGmgnSmartMoney>>;
+            wallets: Array<{
+              address: string;
+              trades: number;
+              volumeUsd: number;
+              buys: number;
+              sells: number;
+              tags: string[];
+            }>;
+          }
+        | { status: 'unavailable'; trades: []; wallets: []; reason: string };
 
       if (!gmgnApiKey) {
-        gmgn = { status: 'not_configured', trades: [] };
+        gmgn = { status: 'not_configured', trades: [], wallets: [] };
       } else {
         try {
-          gmgn = { status: 'connected', trades: await fetchGmgnSmartMoney(gmgnApiKey, 50) };
+          const trades = await fetchGmgnSmartMoney(gmgnApiKey, 50);
+          const byMaker = new Map<
+            string,
+            { address: string; trades: number; volumeUsd: number; buys: number; sells: number; tags: Set<string> }
+          >();
+          for (const trade of trades) {
+            const current = byMaker.get(trade.maker) ?? {
+              address: trade.maker,
+              trades: 0,
+              volumeUsd: 0,
+              buys: 0,
+              sells: 0,
+              tags: new Set<string>(),
+            };
+            current.trades += 1;
+            current.volumeUsd += trade.amountUsd ?? 0;
+            if (trade.side === 'buy') current.buys += 1;
+            if (trade.side === 'sell') current.sells += 1;
+            for (const tag of trade.tags) current.tags.add(tag);
+            byMaker.set(trade.maker, current);
+          }
+          const wallets = [...byMaker.values()]
+            .map((wallet) => ({ ...wallet, tags: [...wallet.tags].slice(0, 8) }))
+            .sort((a, b) => b.volumeUsd - a.volumeUsd || b.trades - a.trades)
+            .slice(0, 30);
+          gmgn = { status: 'connected', trades, wallets };
         } catch (error) {
           gmgn = {
             status: 'unavailable',
             trades: [],
+            wallets: [],
             reason: error instanceof Error ? error.message : 'GMGN data unavailable',
           };
         }
@@ -67,7 +104,7 @@ export default async function publicCopyTradingRoutes(fastify: FastifyInstance) 
         chain: 'solana',
         mode: 'signal_only',
         copyConfigEnabled: true,
-        liveExecutionEnabled: false,
+        liveExecutionEnabled: fastify.tradingMode === 'LIVE',
         updatedAt: Date.now(),
         localWallets,
         gmgn,
