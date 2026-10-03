@@ -60,6 +60,9 @@ export interface MarketToken {
   volume: number;
   liquidity: number;
   pairs: MarketPair[];
+  tickChangePercent?: number;
+  tickDirection?: 'up' | 'down' | 'flat';
+  priceUpdatedAt?: number;
 }
 
 function finiteNumber(value: unknown): number | undefined {
