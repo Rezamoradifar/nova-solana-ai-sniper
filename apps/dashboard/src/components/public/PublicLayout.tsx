@@ -376,7 +376,8 @@ export function PublicLayout() {
                 </Link>
                 <p>
                   Institutional Solana intelligence.
-                  <br />Built for disciplined execution.
+                  <br />
+                  Built for disciplined execution.
                 </p>
                 <span className="footer-network">
                   <Icon name="globe" size={15} /> Built around Solana
