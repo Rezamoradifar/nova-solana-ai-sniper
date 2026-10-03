@@ -298,7 +298,7 @@ export function PublicLayout() {
     setMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'instant' });
     const titles: Record<string, string> = {
-      '/': 'A clearer edge on Solana',
+      '/': 'Institutional Solana trading intelligence',
       '/arbitrage': 'Live arbitrage terminal',
       '/markets': 'Solana markets',
       '/platform': 'Website tools',
@@ -333,7 +333,7 @@ export function PublicLayout() {
               id="public-nav"
               aria-label="Main navigation"
             >
-              <NavLink to="/tools">Website tools</NavLink>
+              <NavLink to="/tools">Platform</NavLink>
               <NavLink to="/arbitrage">
                 Arbitrage <span className="nav-new">LIVE</span>
               </NavLink>
@@ -375,8 +375,8 @@ export function PublicLayout() {
                   <NovaMark />
                 </Link>
                 <p>
-                  A clearer view of Solana.
-                  <br />A considered approach to every trade.
+                  Institutional Solana intelligence.
+                  <br />Built for disciplined execution.
                 </p>
                 <span className="footer-network">
                   <Icon name="globe" size={15} /> Built around Solana
