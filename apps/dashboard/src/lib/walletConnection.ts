@@ -11,10 +11,9 @@ export type ConnectionWallet = Wallet & {
   features: StandardConnectFeature & StandardEventsFeature & Partial<StandardDisconnectFeature>;
 };
 
-
 interface LegacyInjectedPublicKey {
   toBase58?: () => string;
-  toBytes?: () => Uint8Array;
+  toBytes?: () => WalletAccount['publicKey'];
   toString: () => string;
 }
 
@@ -40,13 +39,15 @@ function legacyPublicKey(value: unknown): LegacyInjectedPublicKey | null {
   return candidate as LegacyInjectedPublicKey;
 }
 
-function legacyAccount(publicKey: LegacyInjectedPublicKey | null | undefined): WalletAccount | null {
+function legacyAccount(
+  publicKey: LegacyInjectedPublicKey | null | undefined,
+): WalletAccount | null {
   if (!publicKey) return null;
   const address =
     typeof publicKey.toBase58 === 'function' ? publicKey.toBase58() : publicKey.toString();
   if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return null;
   const bytes = typeof publicKey.toBytes === 'function' ? publicKey.toBytes() : null;
-  if (!(bytes instanceof Uint8Array) || bytes.length !== 32) return null;
+  if (!bytes || bytes.length !== 32) return null;
   return {
     address,
     publicKey: bytes,
@@ -131,9 +132,10 @@ const SOLFLARE_ICON =
  */
 export function registerLegacyInjectedWallets(
   registry: Wallets,
-  scope: LegacyInjectedWindow = globalThis as unknown as LegacyInjectedWindow,
+  scope: unknown = globalThis,
   seen: Set<object> = new Set(),
 ): Array<() => void> {
+  const injected = scope as LegacyInjectedWindow;
   const existingNames = new Set(registry.get().map((wallet) => wallet.name.toLowerCase()));
   const candidates: Array<{
     name: string;
@@ -144,13 +146,13 @@ export function registerLegacyInjectedWallets(
     {
       name: 'Phantom',
       icon: PHANTOM_ICON,
-      provider: scope.phantom?.solana,
+      provider: injected.phantom?.solana,
       valid: (provider) => provider.isPhantom === true,
     },
     {
       name: 'Solflare',
       icon: SOLFLARE_ICON,
-      provider: scope.solflare,
+      provider: injected.solflare,
       valid: (provider) => provider.isSolflare === true,
     },
   ];
