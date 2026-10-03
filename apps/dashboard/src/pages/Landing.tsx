@@ -19,7 +19,7 @@ export default function Landing() {
         <div className="hero-shade" />
         <div className="site-container hero-content">
           <div className="eyebrow">
-            <span /> A NEW PERSPECTIVE ON SOLANA
+            <span /> INSTITUTIONAL-GRADE SOLANA INTELLIGENCE
           </div>
           <h1>
             See the edge.
@@ -36,7 +36,7 @@ export default function Landing() {
               Open arbitrage terminal <Icon name="external" size={17} />
             </Link>
             <Link className="nova-button button-ghost" to="/tools">
-              Explore website tools
+              Explore GSP TRADING
             </Link>
           </div>
           <div className="hero-caption">
@@ -258,7 +258,7 @@ export default function Landing() {
             <span className="muted">One informed view.</span>
           </h2>
           <p className="large-copy">
-            A spread is only the beginning. GSP Bank Sniper brings both sides of the route,
+            A spread is only the beginning. GSP TRADING brings both sides of the route,
             execution-cost assumptions, and quote freshness into the same frame.
           </p>
           <div className="check-list">
@@ -352,14 +352,14 @@ export default function Landing() {
       </section>
       <section className="site-container closing-cta">
         <div className="eyebrow">
-          <span /> A CLEARER EDGE STARTS HERE
+          <span /> GSP TRADING · BUILT FOR EXECUTION
         </div>
         <h2>
           The whole picture.
           <br />
           <span>Within reach.</span>
         </h2>
-        <p>Open the market. Explore the routes. Find your perspective.</p>
+        <p>Open the market, inspect the route, and act only when the numbers justify it.</p>
         <div className="button-row">
           <Link className="nova-button" to="/arbitrage">
             Open the terminal <Icon name="external" size={17} />
@@ -377,7 +377,7 @@ export default function Landing() {
           <Icon name="telegram" size={32} />
           <div>
             <span className="eyebrow">IN TELEGRAM</span>
-            <h2>GSP Bank Sniper bot</h2>
+            <h2>GSP TRADING bot</h2>
             <p>Wallets, snipe configs, open positions, and packages — in your Telegram account.</p>
           </div>
         </div>
