@@ -1,14 +1,16 @@
 /* Public GSP Bank Sniper experience. Styles stay scoped away from account screens. */
 .nova-site {
-  --bg: #090c0b;
-  --panel: #101512;
-  --panel-2: #141b16;
-  --line: #263028;
-  --lime: #c1ff75;
-  --text: #f0f4ed;
-  --muted: #9aa69d;
-  --dim: #738278;
+  --bg: #070908;
+  --panel: #0d1210;
+  --panel-2: #121915;
+  --line: #28322b;
+  --lime: #caff7a;
+  --text: #f4f7f2;
+  --muted: #a3afa7;
+  --dim: #748078;
   --negative: #f098a0;
+  --metal: #cbd3cc;
+  --deep-green: #121d14;
   background: var(--bg);
   color: var(--text);
   font-family: Inter, 'Helvetica Neue', Arial, sans-serif;
@@ -121,12 +123,13 @@
 }
 .nova-site .nova-header {
   height: 88px;
-  border-bottom: 1px solid #ffffff0c;
+  border-bottom: 1px solid #ffffff10;
   position: sticky;
   top: 0;
   z-index: 30;
-  background: #090c0bf2;
-  backdrop-filter: blur(18px);
+  background: linear-gradient(180deg, #080b09f8 0%, #080b09e9 100%);
+  backdrop-filter: blur(22px) saturate(135%);
+  box-shadow: 0 12px 35px #00000028;
 }
 .nova-site .header-inner {
   height: 100%;
@@ -138,11 +141,12 @@
 .nova-site .nova-brand {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  font-weight: 700;
-  font-size: 26px;
-  letter-spacing: 0.04em;
+  gap: 11px;
+  font-weight: 720;
+  font-size: 27px;
+  letter-spacing: 0.07em;
   line-height: 1;
+  text-transform: uppercase;
 }
 .nova-site .nova-brand > svg {
   color: var(--lime);
@@ -157,10 +161,10 @@
   gap: 5px;
 }
 .nova-site .brand-word > span {
-  font-size: 11px;
-  letter-spacing: 0.09em;
-  font-weight: 500;
-  color: #b9c5bc;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  font-weight: 650;
+  color: #d2d9d3;
 }
 .nova-site .main-nav {
   display: flex;
@@ -299,30 +303,36 @@
 }
 .nova-site .nova-hero {
   position: relative;
-  min-height: 690px;
+  min-height: 760px;
   overflow: hidden;
-  background: #080a09;
+  background:
+    radial-gradient(circle at 72% 28%, #223123 0%, transparent 28%),
+    linear-gradient(180deg, #070908 0%, #080b09 100%);
 }
 .nova-site .hero-art {
   max-width: none;
   position: absolute;
-  right: -10%;
-  top: -13%;
-  width: 107%;
-  height: 119%;
+  right: -6%;
+  top: -10%;
+  width: 103%;
+  height: 116%;
   object-fit: cover;
   object-position: center;
+  filter: saturate(0.82) contrast(1.09) brightness(0.82);
+  transform: scale(1.025);
 }
 .nova-site .hero-shade {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, #090c0b 0%, #090c0bc9 28%, #090c0b0a 65%),
-    linear-gradient(0deg, #090c0b 0%, transparent 25%);
+    radial-gradient(circle at 68% 37%, #caff7a12 0%, transparent 22%),
+    linear-gradient(90deg, #070908 0%, #070908f2 27%, #07090880 47%, #07090812 70%),
+    linear-gradient(0deg, #070908 0%, transparent 33%),
+    linear-gradient(180deg, #00000033 0%, transparent 28%);
 }
 .nova-site .hero-content {
   position: relative;
-  padding-top: 106px;
+  padding-top: 76px;
   z-index: 1;
 }
 .nova-site .hero-content .eyebrow {
@@ -330,21 +340,23 @@
   color: #d0dbce;
 }
 .nova-site .hero-content h1 {
-  font-size: clamp(54px, 6.3vw, 94px);
-  font-weight: 450;
-  letter-spacing: -0.06em;
-  line-height: 1.04;
-  max-width: 780px;
+  font-size: clamp(58px, 6.6vw, 102px);
+  font-weight: 430;
+  letter-spacing: -0.065em;
+  line-height: 0.99;
+  max-width: 890px;
+  text-wrap: balance;
 }
 .nova-site .hero-content h1 > span {
-  color: #b9c8b6;
+  color: #c6d1c7;
+  text-shadow: 0 0 35px #caff7a12;
 }
 .nova-site .hero-content > p {
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1.8;
-  color: #a4b0a6;
-  margin: 27px 0 30px;
-  max-width: 405px;
+  color: #adb7b0;
+  margin: 29px 0 32px;
+  max-width: 570px;
 }
 .nova-site .hero-caption {
   display: flex;
@@ -4118,5 +4130,135 @@
   }
   .nova-site .hero-content > p {
     font-size: 15px;
+  }
+}
+
+.nova-site .hero-brand-lockup {
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  gap: 8px 10px;
+  margin-bottom: 28px;
+  padding: 10px 13px 9px;
+  border: 1px solid #d8f9bd20;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #ffffff08, #ffffff02);
+  backdrop-filter: blur(10px);
+}
+.nova-site .hero-brand-lockup > span {
+  font-size: 17px;
+  font-weight: 760;
+  letter-spacing: 0.16em;
+}
+.nova-site .hero-brand-lockup > strong {
+  font-size: 17px;
+  font-weight: 760;
+  letter-spacing: 0.24em;
+  color: var(--lime);
+}
+.nova-site .hero-brand-lockup > i {
+  grid-column: 1 / -1;
+  font-style: normal;
+  font-size: 8px;
+  letter-spacing: 0.21em;
+  color: #87938a;
+}
+.nova-site .hero-system-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, auto));
+  gap: 0;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 42px;
+  border: 1px solid #ffffff12;
+  border-radius: 8px;
+  background: #0b100db8;
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+}
+.nova-site .hero-system-strip > div {
+  min-width: 136px;
+  padding: 13px 17px 12px;
+  border-right: 1px solid #ffffff0e;
+}
+.nova-site .hero-system-strip > div:last-child {
+  border-right: 0;
+}
+.nova-site .hero-system-strip span,
+.nova-site .hero-system-strip strong {
+  display: block;
+}
+.nova-site .hero-system-strip span {
+  font-size: 8px;
+  color: #7f8d82;
+  letter-spacing: 0.15em;
+}
+.nova-site .hero-system-strip strong {
+  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 550;
+  color: #d8dfd9;
+}
+.nova-site .website-tool {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, #ffffff05 0%, transparent 35%),
+    var(--panel);
+}
+.nova-site .website-tool::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #caff7a55, transparent);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.nova-site .website-tool:hover::after {
+  opacity: 1;
+}
+.nova-site .panel {
+  background:
+    linear-gradient(180deg, #ffffff03 0%, transparent 22%),
+    var(--panel);
+  box-shadow: inset 0 1px #ffffff05;
+}
+.nova-site .market-ticker {
+  background:
+    linear-gradient(180deg, #111713 0%, #0b100d 100%);
+}
+@media (max-width: 900px) {
+  .nova-site .hero-system-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+  .nova-site .hero-system-strip > div:nth-child(2) {
+    border-right: 0;
+  }
+  .nova-site .hero-system-strip > div:nth-child(-n + 2) {
+    border-bottom: 1px solid #ffffff0e;
+  }
+}
+@media (max-width: 650px) {
+  .nova-site .nova-hero {
+    min-height: 720px;
+  }
+  .nova-site .hero-content {
+    padding-top: 54px;
+  }
+  .nova-site .hero-brand-lockup {
+    margin-bottom: 22px;
+  }
+  .nova-site .hero-content h1 {
+    font-size: clamp(48px, 15vw, 68px);
+  }
+  .nova-site .hero-content > p {
+    font-size: 16px;
+    max-width: 100%;
+  }
+  .nova-site .hero-system-strip > div {
+    min-width: 0;
+    padding: 12px;
   }
 }
