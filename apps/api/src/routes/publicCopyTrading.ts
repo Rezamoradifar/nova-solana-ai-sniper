@@ -67,7 +67,14 @@ export default async function publicCopyTradingRoutes(fastify: FastifyInstance) 
           const trades = await fetchGmgnSmartMoney(gmgnApiKey, 50);
           const byMaker = new Map<
             string,
-            { address: string; trades: number; volumeUsd: number; buys: number; sells: number; tags: Set<string> }
+            {
+              address: string;
+              trades: number;
+              volumeUsd: number;
+              buys: number;
+              sells: number;
+              tags: Set<string>;
+            }
           >();
           for (const trade of trades) {
             const current = byMaker.get(trade.maker) ?? {
