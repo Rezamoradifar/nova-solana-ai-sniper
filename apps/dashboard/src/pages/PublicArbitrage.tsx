@@ -694,9 +694,14 @@ export default function PublicArbitrage() {
             </a>
           </div>
         </details>
-        <Link className="text-link" to="/security">
-          Understand risk & custody ↗
-        </Link>
+        <div className="button-row">
+          <Link className="text-link" to="/flash-arbitrage">
+            Open Flash Loan Lab ↗
+          </Link>
+          <Link className="text-link" to="/security">
+            Understand risk & custody ↗
+          </Link>
+        </div>
       </div>
     </div>
   );
