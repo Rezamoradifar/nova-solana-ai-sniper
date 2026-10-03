@@ -264,7 +264,15 @@ export function MarketTicker() {
           tokens.slice(0, 5).map((t) => (
             <Link to="/markets" key={t.mint} className="ticker-item">
               <span>{t.symbol}</span>
-              <strong className={t.tickDirection === 'up' ? 'tick-up' : t.tickDirection === 'down' ? 'tick-down' : ''}>
+              <strong
+                className={
+                  t.tickDirection === 'up'
+                    ? 'tick-up'
+                    : t.tickDirection === 'down'
+                      ? 'tick-down'
+                      : ''
+                }
+              >
                 {money(t.price)}
               </strong>
               <span className={t.tickDirection === 'down' ? 'negative' : 'positive'}>
