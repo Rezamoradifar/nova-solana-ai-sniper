@@ -182,6 +182,7 @@ function MarketProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const requestRef = useRef<AbortController>();
+  const previousPricesRef = useRef(new Map<string, number>());
   const refresh = useCallback(() => {
     if (document.hidden) return;
     requestRef.current?.abort();
@@ -191,8 +192,24 @@ function MarketProvider({ children }: { children: ReactNode }) {
     fetchMarkets(controller.signal)
       .then((data) => {
         if (!controller.signal.aborted) {
-          setTokens(data);
-          setUpdatedAt(Date.now());
+          const now = Date.now();
+          const previous = previousPricesRef.current;
+          const next = data.map((token) => {
+            const prior = previous.get(token.mint);
+            const tickChangePercent =
+              prior && prior > 0 ? ((token.price - prior) / prior) * 100 : 0;
+            const tickDirection =
+              tickChangePercent > 0 ? 'up' : tickChangePercent < 0 ? 'down' : 'flat';
+            previous.set(token.mint, token.price);
+            return {
+              ...token,
+              tickChangePercent,
+              tickDirection,
+              priceUpdatedAt: now,
+            };
+          });
+          setTokens(next);
+          setUpdatedAt(now);
           setError(data.length ? null : 'No market data returned.');
         }
       })
@@ -206,7 +223,7 @@ function MarketProvider({ children }: { children: ReactNode }) {
   }, []);
   useEffect(() => {
     refresh();
-    const timer = setInterval(refresh, 30_000);
+    const timer = setInterval(refresh, 2_000);
     const visible = () => {
       if (!document.hidden) refresh();
       else requestRef.current?.abort();
@@ -247,9 +264,12 @@ export function MarketTicker() {
           tokens.slice(0, 5).map((t) => (
             <Link to="/markets" key={t.mint} className="ticker-item">
               <span>{t.symbol}</span>
-              <strong>{money(t.price)}</strong>
-              <span className={t.change != null && t.change < 0 ? 'negative' : 'positive'}>
-                {pct(t.change)}
+              <strong className={t.tickDirection === 'up' ? 'tick-up' : t.tickDirection === 'down' ? 'tick-down' : ''}>
+                {money(t.price)}
+              </strong>
+              <span className={t.tickDirection === 'down' ? 'negative' : 'positive'}>
+                {t.tickDirection === 'up' ? '↑ ' : t.tickDirection === 'down' ? '↓ ' : ''}
+                {pct(t.tickChangePercent)}
               </span>
             </Link>
           ))
