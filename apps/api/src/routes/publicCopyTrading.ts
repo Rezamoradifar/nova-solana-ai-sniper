@@ -43,7 +43,7 @@ export default async function publicCopyTradingRoutes(fastify: FastifyInstance) 
         .map((wallet) => ({ ...wallet, signalScore: publicWalletScore(wallet) }))
         .sort((a, b) => b.signalScore - a.signalScore);
 
-      const gmgnApiKey = process.env.GMGN_API_KEY?.trim();
+      const gmgnApiKey = fastify.config.GMGN_API_KEY?.trim();
       let gmgn:
         | { status: 'not_configured'; trades: [] }
         | { status: 'connected'; trades: Awaited<ReturnType<typeof fetchGmgnSmartMoney>> }
