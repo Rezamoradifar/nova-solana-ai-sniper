@@ -17,6 +17,10 @@ export default function PublicWallet() {
       ? `${window.location.origin}/wallet`
       : null;
   const embedded = typeof window !== 'undefined' && window.self !== window.top;
+  const mobileBrowser =
+    typeof navigator !== 'undefined' &&
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) &&
+    !/Phantom|Solflare/i.test(navigator.userAgent);
 
   useLayoutEffect(() => {
     const guard = { address: state.account?.address, active: true, attempt: 0 };
@@ -133,8 +137,9 @@ export default function PublicWallet() {
                   </span>
                   <h3>No compatible wallet detected</h3>
                   <p>
-                    Use a browser with a Solana wallet extension, or open this page in a supported
-                    wallet’s in-app browser.
+                    {mobileBrowser
+                      ? 'Mobile Chrome/Safari cannot expose Phantom or Solflare to this page. Open GSP TRADEING inside the wallet app browser, then connect again.'
+                      : 'Use a browser with a Solana wallet extension, or open this page in a supported wallet’s in-app browser.'}
                   </p>
                   {embedded && (
                     <div className="wallet-embedded-note">
@@ -150,6 +155,26 @@ export default function PublicWallet() {
                     </a>
                     <a href="https://solflare.com/download" target="_blank" rel="noreferrer">
                       Get Solflare <Icon name="external" size={14} />
+                    </a>
+                  </div>
+                </div>
+              )}
+              {mobileBrowser && mobileUrl && (
+                <div className="wallet-mobile-quickstart">
+                  <strong>Mobile connection</strong>
+                  <p>Open this exact GSP TRADEING page inside your wallet app.</p>
+                  <div className="wallet-mobile-links">
+                    <a
+                      href={`https://phantom.app/ul/browse/${encodeURIComponent(mobileUrl)}?ref=${encodeURIComponent(window.location.origin)}`}
+                      className="nova-button"
+                    >
+                      Open in Phantom
+                    </a>
+                    <a
+                      href={`https://solflare.com/ul/v1/browse/${encodeURIComponent(mobileUrl)}?ref=${encodeURIComponent(window.location.origin)}`}
+                      className="nova-button button-outline"
+                    >
+                      Open in Solflare
                     </a>
                   </div>
                 </div>
