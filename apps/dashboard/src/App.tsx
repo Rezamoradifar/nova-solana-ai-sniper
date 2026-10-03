@@ -18,6 +18,7 @@ import { PublicLayout } from './components/public/PublicLayout.js';
 import PublicMarkets from './pages/PublicMarkets.js';
 import PublicArbitrage from './pages/PublicArbitrage.js';
 import PublicFlashArbitrage from './pages/PublicFlashArbitrage.js';
+import PublicCopyTrading from './pages/PublicCopyTrading.js';
 import { PublicPlatform, PublicPricing, PublicSecurity } from './pages/PublicPlatform.js';
 import PublicTelegram from './pages/PublicTelegram.js';
 import PublicWallet from './pages/PublicWallet.js';
@@ -32,6 +33,7 @@ export function App() {
               <Route path="/" element={<Landing />} />
               <Route path="/arbitrage" element={<PublicArbitrage />} />
               <Route path="/flash-arbitrage" element={<PublicFlashArbitrage />} />
+              <Route path="/copy-trading" element={<PublicCopyTrading />} />
               <Route path="/markets" element={<PublicMarkets />} />
               <Route path="/platform" element={<PublicPlatform />} />
               <Route path="/tools" element={<PublicPlatform />} />
