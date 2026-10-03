@@ -27,7 +27,7 @@
 }
 .nova-site .website-tools {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(235px, 1fr));
   gap: 16px;
   margin-bottom: 72px;
 }
@@ -1160,5 +1160,116 @@
   }
   .nova-site .flash-safety-banner {
     margin-bottom: 55px;
+  }
+}
+
+.nova-site .copy-trading-page .page-heading {
+  align-items: center;
+}
+.nova-site .copy-hero-visual {
+  position: relative;
+  min-height: 340px;
+  margin-bottom: 18px;
+  background: #08100b;
+}
+.nova-site .copy-hero-visual > img {
+  width: 100%;
+  height: 340px;
+  object-fit: cover;
+  display: block;
+}
+.nova-site .copy-hero-overlay {
+  position: absolute;
+  inset: 0;
+  padding: 42px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: linear-gradient(90deg, #070a08ee 0%, #070a08a8 45%, transparent 78%);
+}
+.nova-site .copy-hero-overlay h2 {
+  font-size: 42px;
+  max-width: 680px;
+}
+.nova-site .copy-hero-overlay p {
+  margin-top: 14px;
+  color: var(--muted);
+  max-width: 650px;
+}
+.nova-site .copy-control-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.nova-site .copy-control-strip > label,
+.nova-site .copy-mode {
+  padding: 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.nova-site .copy-control-strip > label > span,
+.nova-site .copy-mode > span {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.nova-site .copy-mode strong,
+.nova-site .copy-mode small {
+  display: block;
+}
+.nova-site .copy-mode strong {
+  font-size: 17px;
+  font-weight: 550;
+}
+.nova-site .copy-mode small {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--dim);
+}
+.nova-site .copy-wallet-panel,
+.nova-site .gmgn-feed-panel {
+  margin-top: 18px;
+}
+.nova-site .copy-wallet-table strong {
+  font-weight: 550;
+}
+.nova-site .copy-active-pill {
+  display: inline-flex;
+  padding: 6px 9px;
+  border: 1px solid #5a773f;
+  border-radius: 5px;
+  color: var(--lime);
+  background: #172315;
+  font-size: 10px;
+}
+.nova-site .copy-trading-page .inline-notice {
+  margin-bottom: 18px;
+}
+@media (max-width: 1000px) {
+  .nova-site .copy-control-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 650px) {
+  .nova-site .copy-trading-page .page-heading h1 {
+    font-size: 38px;
+  }
+  .nova-site .copy-hero-visual,
+  .nova-site .copy-hero-visual > img {
+    min-height: 300px;
+    height: 300px;
+  }
+  .nova-site .copy-hero-overlay {
+    padding: 24px 20px;
+    background: linear-gradient(0deg, #070a08f7 0%, #070a08a8 58%, transparent);
+  }
+  .nova-site .copy-hero-overlay h2 {
+    font-size: 31px;
+  }
+  .nova-site .copy-control-strip {
+    grid-template-columns: 1fr;
   }
 }
