@@ -9,7 +9,7 @@ export function TradingSections() {
         <div>
           <Icon name="layers" size={23} />
           <span>
-            <strong>Start free with GSP Bank Sniper.</strong>
+            <strong>Start free with GSP TRADEING.</strong>
             <small>Upgrade in Packages for a lower fee and higher limits.</small>
           </span>
         </div>
