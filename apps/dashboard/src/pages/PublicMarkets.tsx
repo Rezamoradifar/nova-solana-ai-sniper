@@ -68,7 +68,7 @@ export default function PublicMarkets() {
                 })
               : '—'}
           </strong>
-          <small>Automatic refresh every 30 seconds</small>
+          <small>Realtime price refresh every 2 seconds</small>
         </div>
       </div>
       <div className="panel market-panel">
@@ -143,7 +143,15 @@ export default function PublicMarkets() {
                       </span>
                     </button>
                   </td>
-                  <td className="number">{money(t.price)}</td>
+                  <td
+                    className={`number live-price ${t.tickDirection === 'up' ? 'tick-up' : t.tickDirection === 'down' ? 'tick-down' : ''}`}
+                  >
+                    <span>{money(t.price)}</span>
+                    <small>
+                      {t.tickDirection === 'up' ? '↑' : t.tickDirection === 'down' ? '↓' : '•'}{' '}
+                      {pct(t.tickChangePercent)}
+                    </small>
+                  </td>
                   <td
                     className={`number ${t.change != null && t.change < 0 ? 'negative' : 'positive'}`}
                   >
@@ -191,9 +199,9 @@ export default function PublicMarkets() {
           <span>
             {visible.length} of {tokens.length} assets
           </span>
-          <a href="https://dexscreener.com/solana" target="_blank" rel="noreferrer">
-            Data by DEX Screener ↗
-          </a>
+          <span className="market-live-note">
+            <i className="status-dot pulse" /> Repricing every 2s
+          </span>
         </div>
       </div>
       <section className="pool-section">
