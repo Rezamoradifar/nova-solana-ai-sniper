@@ -29,11 +29,6 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Show exact Prettier diff for copy-trading files
-        run: |
-          npx prettier --write             apps/api/src/routes/publicCopyTrading.ts             apps/api/src/trading/smartWalletTracker.ts             apps/dashboard/src/pages/PublicCopyTrading.tsx
-          git diff --             apps/api/src/routes/publicCopyTrading.ts             apps/api/src/trading/smartWalletTracker.ts             apps/dashboard/src/pages/PublicCopyTrading.tsx
-
       - name: Format check
         run: npm run format:check
 
