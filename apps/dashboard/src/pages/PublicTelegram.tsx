@@ -8,7 +8,7 @@ export default function PublicTelegram() {
     <div className="site-container interior-page telegram-page">
       <PageHeading
         eyebrow="TELEGRAM BOT"
-        title="GSP Bank Sniper. In Telegram."
+        title="GSP TRADING. In Telegram."
         text="Manage your bot account in one place: wallets, active snipe configs, open positions, and packages."
       >
         <a className="nova-button" href={BOT_URL} target="_blank" rel="noreferrer">
@@ -22,7 +22,7 @@ export default function PublicTelegram() {
         </div>
         <div>
           <span className="eyebrow">YOUR TELEGRAM WORKSPACE</span>
-          <h2>👋 GSP Bank Sniper</h2>
+          <h2>👋 GSP TRADING</h2>
           <p>Pick a section below, or open the bot and use the menu at the bottom of the chat.</p>
         </div>
         <span className="outline-tag">BOT ACCOUNT</span>
