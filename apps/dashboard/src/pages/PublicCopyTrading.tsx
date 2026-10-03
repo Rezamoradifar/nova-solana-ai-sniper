@@ -408,8 +408,8 @@ export default function PublicCopyTrading() {
               </thead>
               <tbody>
                 {data.gmgn.trades.slice(0, 30).map((trade, index) => (
-                <tr key={trade.transactionHash || `${trade.maker}-${trade.timestamp}-${index}`}>
-                  <td className="number">{short(trade.maker)}</td>
+                  <tr key={trade.transactionHash || `${trade.maker}-${trade.timestamp}-${index}`}>
+                    <td className="number">{short(trade.maker)}</td>
                     <td>
                       <span
                         className={
@@ -427,11 +427,9 @@ export default function PublicCopyTrading() {
                       <strong>{trade.tokenSymbol}</strong>
                       <small className="cell-subtext">{short(trade.tokenAddress)}</small>
                     </td>
-                  <td className="number">{usd(trade.amountUsd)}</td>
-                    <td className="number">
-                      {trade.priceUsd == null ? '—' : usd(trade.priceUsd)}
-                    </td>
-                  <td>{trade.tags.slice(0, 2).join(' · ') || '—'}</td>
+                    <td className="number">{usd(trade.amountUsd)}</td>
+                    <td className="number">{trade.priceUsd == null ? '—' : usd(trade.priceUsd)}</td>
+                    <td>{trade.tags.slice(0, 2).join(' · ') || '—'}</td>
                     <td className="muted">
                       {trade.timestamp
                         ? new Date(trade.timestamp * 1000).toLocaleTimeString()
