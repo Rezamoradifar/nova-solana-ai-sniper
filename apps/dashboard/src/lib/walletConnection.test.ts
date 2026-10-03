@@ -350,7 +350,6 @@ describe('address-only wallet connection', () => {
   });
 });
 
-
 describe('legacy injected wallet fallback', () => {
   it('registers an injected Phantom provider when Wallet Standard is absent', async () => {
     const registry = makeRegistry();
