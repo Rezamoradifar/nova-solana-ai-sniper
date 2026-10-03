@@ -10,15 +10,15 @@ export default function Landing() {
       <section className="nova-hero">
         <img
           className="hero-art"
-          src="/images/nova-hero.webp"
-          alt="Sculptural titanium orbits around a luminous green glass core"
+          src="/images/gsp-trading-hero.svg"
+          alt="GSP TRADEING Solana execution matrix with market routes and smart-wallet nodes"
           width="1536"
           height="1024"
           fetchPriority="high"
         />
         <div className="hero-shade" />
         <div className="site-container hero-content">
-          <div className="hero-brand-lockup" aria-label="GSP Trading platform">
+          <div className="hero-brand-lockup" aria-label="GSP TRADEING platform">
             <span>GSP</span>
             <strong>TRADING</strong>
             <i>GLOBAL SOLANA EXECUTION PLATFORM</i>
@@ -40,7 +40,7 @@ export default function Landing() {
               Open arbitrage terminal <Icon name="external" size={17} />
             </Link>
             <Link className="nova-button button-ghost" to="/tools">
-              Explore GSP TRADING
+              Explore GSP TRADEING
             </Link>
           </div>
           <div className="hero-system-strip" aria-label="Platform capabilities">
@@ -58,7 +58,7 @@ export default function Landing() {
             </div>
             <div>
               <span>PLATFORM</span>
-              <strong>GSP TRADING</strong>
+              <strong>GSP TRADEING</strong>
             </div>
           </div>
         </div>
@@ -270,7 +270,7 @@ export default function Landing() {
             <span className="muted">One informed view.</span>
           </h2>
           <p className="large-copy">
-            A spread is only the beginning. GSP TRADING brings both sides of the route,
+            A spread is only the beginning. GSP TRADEING brings both sides of the route,
             execution-cost assumptions, and quote freshness into the same frame.
           </p>
           <div className="check-list">
@@ -337,8 +337,8 @@ export default function Landing() {
       <section className="security-story site-container">
         <div className="security-art">
           <img
-            src="/images/nova-security.webp"
-            alt="Precision titanium vault sculpture with a narrow green light seam"
+            src="/images/gsp-risk-grid.svg"
+            alt="GSP TRADEING risk, simulation, and execution-gate visualization"
             width="1536"
             height="1024"
             loading="lazy"
@@ -364,7 +364,7 @@ export default function Landing() {
       </section>
       <section className="site-container closing-cta">
         <div className="eyebrow">
-          <span /> GSP TRADING · BUILT FOR EXECUTION
+          <span /> GSP TRADEING · BUILT FOR EXECUTION
         </div>
         <h2>
           The whole picture.
@@ -389,7 +389,7 @@ export default function Landing() {
           <Icon name="telegram" size={32} />
           <div>
             <span className="eyebrow">IN TELEGRAM</span>
-            <h2>GSP TRADING bot</h2>
+            <h2>GSP TRADEING bot</h2>
             <p>Wallets, snipe configs, open positions, and packages — in your Telegram account.</p>
           </div>
         </div>
