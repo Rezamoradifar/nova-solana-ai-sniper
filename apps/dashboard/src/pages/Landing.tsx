@@ -18,18 +18,22 @@ export default function Landing() {
         />
         <div className="hero-shade" />
         <div className="site-container hero-content">
+          <div className="hero-brand-lockup" aria-label="GSP Trading platform">
+            <span>GSP</span>
+            <strong>TRADING</strong>
+            <i>GLOBAL SOLANA EXECUTION PLATFORM</i>
+          </div>
           <div className="eyebrow">
-            <span /> INSTITUTIONAL-GRADE SOLANA INTELLIGENCE
+            <span /> INSTITUTIONAL MARKET INTELLIGENCE
           </div>
           <h1>
-            See the edge.
+            Trade the spread.
             <br />
-            <span>Make your move.</span>
+            <span>Control the execution.</span>
           </h1>
           <p>
-            Live markets. Cross-DEX intelligence.
-            <br className="desktop-break" /> Trading tools that put the bigger picture in your
-            hands.
+            Multi-venue Solana intelligence for market discovery, arbitrage analysis, and
+            simulation-gated execution workflows.
           </p>
           <div className="button-row">
             <Link className="nova-button" to="/arbitrage">
@@ -39,15 +43,23 @@ export default function Landing() {
               Explore GSP TRADING
             </Link>
           </div>
-          <div className="hero-caption">
-            <span className="orbital-symbol" aria-hidden="true">
-              ◎
-            </span>
-            <span>
-              Designed for clarity.
-              <br />
-              <strong>Built around Solana.</strong>
-            </span>
+          <div className="hero-system-strip" aria-label="Platform capabilities">
+            <div>
+              <span>NETWORK</span>
+              <strong>Solana Mainnet</strong>
+            </div>
+            <div>
+              <span>ROUTING</span>
+              <strong>Multi-venue</strong>
+            </div>
+            <div>
+              <span>RISK LAYER</span>
+              <strong>Simulation gated</strong>
+            </div>
+            <div>
+              <span>PLATFORM</span>
+              <strong>GSP TRADING</strong>
+            </div>
           </div>
         </div>
         <div className="site-container hero-bottom">
@@ -177,17 +189,17 @@ export default function Landing() {
           <div className="section-heading">
             <div>
               <div className="eyebrow">
-                <span /> YOUR NEXT ADVANTAGE
+                <span /> GSP EXECUTION STACK
               </div>
               <h2>
-                More perspective.
+                Intelligence first.
                 <br />
-                <span className="muted">Less friction.</span>
+                <span className="muted">Execution with context.</span>
               </h2>
             </div>
             <p className="section-intro">
-              One connected experience to discover markets, compare routes, and understand the
-              details that matter.
+              One institutional interface for market discovery, cross-venue route analysis,
+              execution assumptions, and risk-aware trading workflows.
             </p>
           </div>
           <div className="feature-grid">
