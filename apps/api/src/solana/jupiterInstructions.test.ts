@@ -55,18 +55,18 @@ describe('JupiterInstructionClient', () => {
     expect(fetchMock.mock.calls[0]?.[0]?.toString()).toBe(
       'https://example.test/swap/v1/swap-instructions',
     );
-    expect(
-      result.computeBudgetInstructions.map((instruction) => [...instruction.data]),
-    ).toEqual([[1]]);
+    expect(result.computeBudgetInstructions.map((instruction) => [...instruction.data])).toEqual([
+      [1],
+    ]);
     expect(result.instructions.map((instruction) => [...instruction.data])).toEqual([
       [2],
       [3],
       [4],
       [5],
     ]);
-    expect(
-      result.instructions.every((instruction) => instruction.programId.equals(PROGRAM)),
-    ).toBe(true);
+    expect(result.instructions.every((instruction) => instruction.programId.equals(PROGRAM))).toBe(
+      true,
+    );
     expect(result.addressLookupTableAddresses.map((address) => address.toBase58())).toEqual([
       LUT.toBase58(),
     ]);
@@ -75,17 +75,18 @@ describe('JupiterInstructionClient', () => {
   it('keeps cleanup optional and rejects malformed lookup tables', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            computeBudgetInstructions: [],
-            setupInstructions: [],
-            swapInstruction: ix(Buffer.from([9])),
-            cleanupInstruction: null,
-            addressLookupTableAddresses: ['not-a-public-key'],
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              computeBudgetInstructions: [],
+              setupInstructions: [],
+              swapInstruction: ix(Buffer.from([9])),
+              cleanupInstruction: null,
+              addressLookupTableAddresses: ['not-a-public-key'],
+            }),
+            { status: 200 },
+          ),
       ),
     );
 
@@ -100,17 +101,18 @@ describe('JupiterInstructionClient', () => {
   it('rejects malformed instruction data instead of silently decoding it', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            computeBudgetInstructions: [],
-            setupInstructions: [],
-            swapInstruction: { ...ix(Buffer.from([9])), data: '***' },
-            cleanupInstruction: null,
-            addressLookupTableAddresses: [],
-          }),
-          { status: 200 },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              computeBudgetInstructions: [],
+              setupInstructions: [],
+              swapInstruction: { ...ix(Buffer.from([9])), data: '***' },
+              cleanupInstruction: null,
+              addressLookupTableAddresses: [],
+            }),
+            { status: 200 },
+          ),
       ),
     );
 

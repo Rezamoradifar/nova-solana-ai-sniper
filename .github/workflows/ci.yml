@@ -29,11 +29,6 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Show exact Prettier diff for flash-arbitrage files
-        run: |
-          npx prettier --write             apps/api/src/solana/jupiterInstructions.ts             apps/api/src/solana/jupiterInstructions.test.ts             apps/api/src/trading/flashArbitrage.ts             apps/api/src/trading/flashArbitrage.test.ts
-          git diff --             apps/api/src/solana/jupiterInstructions.ts             apps/api/src/solana/jupiterInstructions.test.ts             apps/api/src/trading/flashArbitrage.ts             apps/api/src/trading/flashArbitrage.test.ts
-
       - name: Format check
         run: npm run format:check
 

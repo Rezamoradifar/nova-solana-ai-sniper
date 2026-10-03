@@ -123,8 +123,7 @@ export class JupiterInstructionClient {
     const response = await fetch(`${this.apiBase}/swap/v1/swap-instructions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal:
-        options.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs),
+      signal: options.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs),
       body: JSON.stringify({
         quoteResponse: quote,
         userPublicKey: userPublicKey.toBase58(),

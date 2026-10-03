@@ -29,9 +29,7 @@ function quote(
   } satisfies QuoteResponse;
 }
 
-function candidate(
-  overrides: Partial<FlashArbitrageCandidate> = {},
-): FlashArbitrageCandidate {
+function candidate(overrides: Partial<FlashArbitrageCandidate> = {}): FlashArbitrageCandidate {
   const borrow = 1_000_000_000n;
   const intermediate = 2_000_000_000n;
   const finalOut = 1_006_000_000n;

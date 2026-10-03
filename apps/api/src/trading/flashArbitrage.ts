@@ -99,7 +99,7 @@ export type FlashArbitrageExecutionResult =
     };
 
 function rawAmount(value: unknown): bigint | undefined {
-  if (typeof value !== 'string' || !/^\\d+$/.test(value)) return undefined;
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return undefined;
   try {
     const amount = BigInt(value);
     return amount >= 0n ? amount : undefined;
@@ -233,9 +233,7 @@ export class FlashArbitrageExecutor {
     if (!evaluation.accepted) return { status: 'REJECTED', evaluation };
 
     if (mode === 'LIVE' && !this.config.liveExecutionEnabled) {
-      throw new Error(
-        'Flash arbitrage LIVE execution is disabled by the independent safety gate.',
-      );
+      throw new Error('Flash arbitrage LIVE execution is disabled by the independent safety gate.');
     }
 
     const build = await this.runtime.buildAtomic(candidate);
