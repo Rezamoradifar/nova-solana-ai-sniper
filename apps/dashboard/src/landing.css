@@ -4202,9 +4202,7 @@
 .nova-site .website-tool {
   position: relative;
   overflow: hidden;
-  background:
-    linear-gradient(180deg, #ffffff05 0%, transparent 35%),
-    var(--panel);
+  background: linear-gradient(180deg, #ffffff05 0%, transparent 35%), var(--panel);
 }
 .nova-site .website-tool::after {
   content: '';
@@ -4219,14 +4217,11 @@
   opacity: 1;
 }
 .nova-site .panel {
-  background:
-    linear-gradient(180deg, #ffffff03 0%, transparent 22%),
-    var(--panel);
+  background: linear-gradient(180deg, #ffffff03 0%, transparent 22%), var(--panel);
   box-shadow: inset 0 1px #ffffff05;
 }
 .nova-site .market-ticker {
-  background:
-    linear-gradient(180deg, #111713 0%, #0b100d 100%);
+  background: linear-gradient(180deg, #111713 0%, #0b100d 100%);
 }
 @media (max-width: 900px) {
   .nova-site .hero-system-strip {
