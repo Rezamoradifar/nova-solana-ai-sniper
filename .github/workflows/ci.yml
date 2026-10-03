@@ -29,6 +29,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Show exact Prettier diff for flash-loan page
+        run: |
+          npx prettier --write apps/dashboard/src/pages/PublicFlashArbitrage.tsx
+          git diff -- apps/dashboard/src/pages/PublicFlashArbitrage.tsx
+
       - name: Format check
         run: npm run format:check
 
