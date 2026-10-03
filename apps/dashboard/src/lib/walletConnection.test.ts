@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Wallets } from '@wallet-standard/app';
 import type { Wallet, WalletAccount } from '@wallet-standard/base';
 import type { StandardEventsChangeProperties } from '@wallet-standard/features';
-import { WalletConnectionStore, type ConnectionWallet } from './walletConnection.js';
+import {
+  WalletConnectionStore,
+  registerLegacyInjectedWallets,
+  type ConnectionWallet,
+} from './walletConnection.js';
 
 const accountA: WalletAccount = {
   address: '11111111111111111111111111111111',
@@ -343,5 +347,59 @@ describe('address-only wallet connection', () => {
     expect(store.getSnapshot().account).toBeNull();
     expect(store.getSnapshot().available).toHaveLength(0);
     expect(wallet.events.size).toBe(0);
+  });
+});
+
+
+describe('legacy injected wallet fallback', () => {
+  it('registers an injected Phantom provider when Wallet Standard is absent', async () => {
+    const registry = makeRegistry();
+    const publicKey = {
+      toBase58: () => accountA.address,
+      toString: () => accountA.address,
+      toBytes: () => accountA.publicKey,
+    };
+    const listeners = new Map<string, Set<(value?: unknown) => void>>();
+    const provider = {
+      isPhantom: true,
+      publicKey: null as typeof publicKey | null,
+      connect: vi.fn(async () => {
+        provider.publicKey = publicKey;
+        return { publicKey };
+      }),
+      disconnect: vi.fn(async () => {
+        provider.publicKey = null;
+      }),
+      on: vi.fn((event: string, listener: (value?: unknown) => void) => {
+        const set = listeners.get(event) ?? new Set();
+        set.add(listener);
+        listeners.set(event, set);
+      }),
+      off: vi.fn((event: string, listener: (value?: unknown) => void) => {
+        listeners.get(event)?.delete(listener);
+      }),
+    };
+
+    const cleanups = registerLegacyInjectedWallets(registry, { phantom: { solana: provider } });
+    const store = start(registry);
+    expect(store.getSnapshot().available.map((wallet) => wallet.name)).toEqual(['Phantom']);
+
+    await store.connect(store.getSnapshot().available[0]!);
+    expect(provider.connect).toHaveBeenCalledOnce();
+    expect(store.getSnapshot().account?.address).toBe(accountA.address);
+
+    cleanups.forEach((off) => off());
+  });
+
+  it('does not duplicate Phantom when the wallet already registered Wallet Standard', () => {
+    const phantom = makeWallet('Phantom');
+    const registry = makeRegistry(phantom.wallet);
+    const provider = {
+      isPhantom: true,
+      connect: vi.fn(async () => {}),
+    };
+    const cleanups = registerLegacyInjectedWallets(registry, { phantom: { solana: provider } });
+    expect(cleanups).toHaveLength(0);
+    expect(registry.get()).toHaveLength(1);
   });
 });
