@@ -29,6 +29,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Show remaining Prettier diff
+        run: |
+          npx prettier --write apps/dashboard/src/pages/PublicCopyTrading.tsx
+          git diff -- apps/dashboard/src/pages/PublicCopyTrading.tsx
+
       - name: Format check
         run: npm run format:check
 
