@@ -587,8 +587,26 @@ export class NotificationService {
         }),
         'sendPhoto',
       );
+      return;
     } catch (err) {
       this.logger.error({ err, chatId }, 'failed to send telegram trade card');
+    }
+
+    // A completed trade must never disappear just because Telegram rejected the
+    // photo upload. Fall back to the exact same P/L caption as a text message.
+    try {
+      await withTimeout(
+        this.bot.api.sendMessage(chatId, caption, {
+          parse_mode: 'Markdown',
+          reply_markup: keyboard,
+        }),
+        'sendMessage',
+      );
+    } catch (fallbackErr) {
+      this.logger.error(
+        { err: fallbackErr, chatId },
+        'failed to send telegram trade card fallback',
+      );
     }
   }
 
@@ -647,15 +665,25 @@ export class NotificationService {
    * it onto the Position row for the 🔗 Share button to resend later.
    */
   async notifySellCard(data: SellCardData): Promise<string | undefined> {
-    if (this.tradesOnly && data.isPaperTrade !== false) return;
     try {
       const png = await renderSellCardPng(data);
       const botUsername = await this.getBotUsername();
       const caption = buildShareCaption(data, botUsername);
       const keyboard = buildSellCardKeyboard(data.token.mint, data.positionId);
-      if (this.dailyCardLimiter && !(await this.dailyCardLimiter.reserve(data.positionId))) {
-        // Keep the share caption usable even when automatic daily delivery is capped.
-        return caption;
+      if (this.dailyCardLimiter) {
+        try {
+          if (!(await this.dailyCardLimiter.reserve(data.positionId))) {
+            // Keep the share caption usable even when automatic daily delivery is capped.
+            return caption;
+          }
+        } catch (err) {
+          // The quota is an anti-spam guard, not a delivery dependency. If Redis
+          // is unavailable, fail open so a real completed trade is still visible.
+          this.logger.error(
+            { err, positionId: data.positionId },
+            'daily trade-card limiter unavailable — sending card without quota reservation',
+          );
+        }
       }
       await this.sendPhotoToActiveUsers(png, caption, keyboard);
       return caption;
