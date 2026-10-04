@@ -280,6 +280,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       app.config.TELEGRAM_CHAT_ID,
       app.prisma,
       app.log as never,
+      app.config.TELEGRAM_TRADES_ONLY,
     );
   } else {
     app.log.warn('TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — trade notifications disabled');

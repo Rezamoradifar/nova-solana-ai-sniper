@@ -318,6 +318,7 @@ export interface TradeCardTokenInfo {
 }
 
 export interface BuyCardData {
+  isPaperTrade?: boolean;
   token: TradeCardTokenInfo;
   entryPriceUsd: number;
   amountSol: number;

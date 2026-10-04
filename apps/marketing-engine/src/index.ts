@@ -26,6 +26,12 @@ async function main() {
 
   // TELEGRAM_CHAT_ID may list several admin ids (comma-separated); without a
   // dedicated channel, posts go to the first one.
+  if (env.TELEGRAM_TRADES_ONLY) {
+    logger.info('Telegram trades-only mode: automated marketing and market feeds disabled');
+    // Keep the compose service healthy without polling or publishing unrelated feeds.
+    setInterval(() => {}, 60_000);
+    return;
+  }
   const broadcastChatId =
     env.MARKETING_TELEGRAM_CHANNEL_ID ?? env.TELEGRAM_CHAT_ID?.split(',')[0]?.trim() ?? undefined;
   if (!env.TELEGRAM_BOT_TOKEN || !broadcastChatId) {

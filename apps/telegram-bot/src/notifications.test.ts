@@ -734,3 +734,69 @@ describe('NotificationService — trade cards (notifyBuyCard/notifySellCard)', (
     expect(cardChatIds).toEqual(alertChatIds);
   });
 });
+
+describe('Telegram trades-only mode', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('suppresses discovery, migration and operational alerts while logging errors', async () => {
+    const { bot, sendMessage, sendPhoto } = fakeBot();
+    const service = new NotificationService(
+      bot,
+      'OWNER_CHAT',
+      fakePrisma(['111']),
+      fakeLogger,
+      true,
+    );
+    await service.notifyNewToken({ mint: 'MintABC', dex: 'PUMPFUN' });
+    await service.notifyAiHighScore({ mint: 'MintABC', dex: 'PUMPFUN', aiScore: 99 });
+    await service.notifyMigration({ mint: 'MintABC', fromDex: 'PUMPFUN', toDex: 'RAYDIUM' });
+    await service.notifyError('RPC', '429');
+    await service.notifySocialMention('mention', '123');
+    await service.notifyMemberGrowth({} as never);
+    await service.notifySecurityGateSummary({} as never);
+    expect(await service.notifyLowWalletBalance('user1', { balanceSol: 0, requiredSol: 1 })).toBe(
+      false,
+    );
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendPhoto).not.toHaveBeenCalled();
+    expect(fakeLogger.error).toHaveBeenCalledWith(
+      { context: 'RPC', message: '429' },
+      expect.any(String),
+    );
+  });
+
+  it('sends real winning and losing execution cards and suppresses paper/unknown ones', async () => {
+    const { bot, sendPhoto, sendMessage } = fakeBot();
+    const service = new NotificationService(
+      bot,
+      'OWNER_CHAT',
+      fakePrisma(['111']),
+      fakeLogger,
+      true,
+    );
+    await service.notifyBuyCard({ ...buyCardData(), isPaperTrade: true });
+    await service.notifySellCard({ ...sellCardData(), isPaperTrade: true });
+    await service.notifySellCard(sellCardData());
+    expect(sendPhoto).not.toHaveBeenCalled();
+    await service.notifyBuyCard({ ...buyCardData(), isPaperTrade: false });
+    await service.notifySellCard({ ...sellCardData(), isPaperTrade: false });
+    await service.notifySellCard({
+      ...sellCardData(),
+      isPaperTrade: false,
+      pnlPercent: -23,
+      profitSol: -0.1,
+      exitReason: 'stop_loss',
+    });
+    expect(sendPhoto).toHaveBeenCalledTimes(6);
+    expect(sendPhoto.mock.calls[4]![2].caption).toContain('-23.0%');
+    await service.notifyTrade({
+      side: 'BUY',
+      symbol: 'ABC',
+      mint: 'MintABC',
+      amountSol: 1,
+      signature: 'sig',
+    });
+    await service.notifyExit({ symbol: 'ABC', reason: 'stop_loss', pnlPercent: -23 });
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+});

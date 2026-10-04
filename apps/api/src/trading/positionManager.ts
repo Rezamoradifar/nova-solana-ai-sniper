@@ -1386,6 +1386,7 @@ export class PositionManager {
         .getBestSolanaPair(params.mint)
         .catch(() => undefined);
       await this.notifier?.notifyBuyCard({
+        isPaperTrade: this.paperTrading,
         token: {
           mint: params.mint,
           name: token.name ?? undefined,
