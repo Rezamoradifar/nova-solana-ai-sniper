@@ -24,5 +24,8 @@ export function evaluateRealValueStop(input: {
   if (input.stopLossPercent == null || input.takeProfitStageReached) {
     return { breached: false, pnlPercent };
   }
-  return { breached: pnlPercent <= -Math.abs(input.stopLossPercent), pnlPercent };
+  return {
+    breached: exitValueSol <= costSol * (1 - Math.abs(input.stopLossPercent) / 100),
+    pnlPercent,
+  };
 }

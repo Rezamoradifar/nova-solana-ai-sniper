@@ -223,3 +223,20 @@ describe('buildSellCardSvg', () => {
     expect(svg).toMatch(/Locked Profit/i);
   });
 });
+
+describe('trade card authenticity', () => {
+  it('shows the real fill loss independently of the configured stop-loss trigger', () => {
+    const svg = buildSellCardSvg(
+      sellData({ isPaperTrade: false, stopLossPercent: 20, pnlPercent: -23.4 }),
+      undefined,
+    );
+    expect(svg).toContain('REAL TRADE');
+    expect(svg).toContain('SL 20%');
+    expect(svg).toContain('-23.4%');
+  });
+  it('marks paper trading explicitly on the image', () => {
+    const svg = buildSellCardSvg(sellData({ isPaperTrade: true }), undefined);
+    expect(svg).toContain('PAPER TRADE');
+    expect(svg).not.toContain('REAL TRADE');
+  });
+});

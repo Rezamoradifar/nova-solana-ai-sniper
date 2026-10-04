@@ -734,3 +734,112 @@ describe('NotificationService — trade cards (notifyBuyCard/notifySellCard)', (
     expect(cardChatIds).toEqual(alertChatIds);
   });
 });
+
+describe('Telegram trades-only mode', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('suppresses discovery, migration and operational alerts while logging errors', async () => {
+    const { bot, sendMessage, sendPhoto } = fakeBot();
+    const service = new NotificationService(
+      bot,
+      'OWNER_CHAT',
+      fakePrisma(['111']),
+      fakeLogger,
+      true,
+    );
+    await service.notifyNewToken({ mint: 'MintABC', dex: 'PUMPFUN' });
+    await service.notifyAiHighScore({ mint: 'MintABC', dex: 'PUMPFUN', aiScore: 99 });
+    await service.notifyMigration({ mint: 'MintABC', fromDex: 'PUMPFUN', toDex: 'RAYDIUM' });
+    await service.notifyError('RPC', '429');
+    await service.notifySocialMention('mention', '123');
+    await service.notifyMemberGrowth({} as never);
+    await service.notifySecurityGateSummary({} as never);
+    expect(await service.notifyLowWalletBalance('user1', { balanceSol: 0, requiredSol: 1 })).toBe(
+      false,
+    );
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendPhoto).not.toHaveBeenCalled();
+    expect(fakeLogger.error).toHaveBeenCalledWith(
+      { context: 'RPC', message: '429' },
+      expect.any(String),
+    );
+  });
+
+  it('sends real winning and losing execution cards and suppresses paper/unknown ones', async () => {
+    const { bot, sendPhoto, sendMessage } = fakeBot();
+    const service = new NotificationService(
+      bot,
+      'OWNER_CHAT',
+      fakePrisma(['111']),
+      fakeLogger,
+      true,
+    );
+    await service.notifyBuyCard({ ...buyCardData(), isPaperTrade: true });
+    await service.notifySellCard({ ...sellCardData(), isPaperTrade: true });
+    await service.notifySellCard(sellCardData());
+    expect(sendPhoto).not.toHaveBeenCalled();
+    await service.notifyBuyCard({ ...buyCardData(), isPaperTrade: false });
+    await service.notifySellCard({ ...sellCardData(), isPaperTrade: false });
+    await service.notifySellCard({
+      ...sellCardData(),
+      isPaperTrade: false,
+      pnlPercent: -23,
+      profitSol: -0.1,
+      exitReason: 'stop_loss',
+    });
+    expect(sendPhoto).toHaveBeenCalledTimes(6);
+    expect(sendPhoto.mock.calls[4]![2].caption).toContain('-23.0%');
+    await service.notifyTrade({
+      side: 'BUY',
+      symbol: 'ABC',
+      mint: 'MintABC',
+      amountSol: 1,
+      signature: 'sig',
+    });
+    await service.notifyExit({ symbol: 'ABC', reason: 'stop_loss', pnlPercent: -23 });
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+it('caps daily delivery at ten closed-trade cards and preserves share captions', async () => {
+  const { bot, sendPhoto } = fakeBot();
+  let reserved = 0;
+  const limiter = { reserve: vi.fn(async () => ++reserved <= 10) };
+  const service = new NotificationService(
+    bot,
+    'OWNER_CHAT',
+    fakePrisma(['111']),
+    fakeLogger,
+    true,
+    limiter,
+  );
+  await service.notifyBuyCard({ ...buyCardData(), isPaperTrade: false });
+  await service.notifySellCard({ ...sellCardData(), isPaperTrade: true });
+  expect(limiter.reserve).not.toHaveBeenCalled();
+  for (let i = 0; i < 12; i++) {
+    const caption = await service.notifySellCard({
+      ...sellCardData(),
+      isPaperTrade: false,
+      positionId: `pos-${i}`,
+    });
+    expect(caption).toContain('Real trade');
+  }
+  expect(sendPhoto).toHaveBeenCalledTimes(20); // ten cards to each of two recipients
+});
+
+it('does not bypass the daily quota when Redis fails', async () => {
+  const { bot, sendPhoto } = fakeBot();
+  const limiter = { reserve: vi.fn().mockRejectedValue(new Error('Redis unavailable')) };
+  const service = new NotificationService(
+    bot,
+    'OWNER_CHAT',
+    fakePrisma(['111']),
+    fakeLogger,
+    true,
+    limiter,
+  );
+  await expect(
+    service.notifySellCard({ ...sellCardData(), isPaperTrade: false }),
+  ).resolves.toBeUndefined();
+  expect(sendPhoto).not.toHaveBeenCalled();
+});

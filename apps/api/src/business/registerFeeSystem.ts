@@ -26,6 +26,7 @@ export interface FeeSystemDeps {
   config: {
     TELEGRAM_BOT_TOKEN?: string;
     TELEGRAM_CHAT_ID?: string;
+    TELEGRAM_TRADES_ONLY?: boolean;
     DEXSCREENER_API_BASE: string;
     // Real on-chain payout (2026-07-23) — see payoutExecutor.ts. Every field
     // here is already present on app.config (apiEnvSchema already picks all
@@ -128,7 +129,13 @@ function buildNotifier(deps: FeeSystemDeps): NotificationService | undefined {
   // only ever used to send a message, so this can't conflict with the real
   // bot process (apps/telegram-bot) also holding this token.
   const bot = createBot(deps.config.TELEGRAM_BOT_TOKEN, deps.log as never);
-  return new NotificationService(bot, deps.config.TELEGRAM_CHAT_ID, deps.prisma, deps.log as never);
+  return new NotificationService(
+    bot,
+    deps.config.TELEGRAM_CHAT_ID,
+    deps.prisma,
+    deps.log as never,
+    deps.config.TELEGRAM_TRADES_ONLY ?? true,
+  );
 }
 
 export async function processProfitableClose(

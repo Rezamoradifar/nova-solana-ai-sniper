@@ -8,6 +8,7 @@ import {
   type SellCardData,
 } from './cards/render.js';
 import { buildBuyCaption, buildShareCaption } from './cards/captions.js';
+import type { DailyTradeCardLimiter } from './cards/dailyLimit.js';
 import { buildBuyCardKeyboard, buildSellCardKeyboard } from './cards/keyboards.js';
 import { escapeMd, fmtDate } from './ui/format.js';
 import { resolveLocale, t, type Locale } from './i18n/index.js';
@@ -501,6 +502,8 @@ export class NotificationService {
     ownerChatId: string,
     private readonly prisma: PrismaClient,
     private readonly logger: Logger,
+    private readonly tradesOnly = false,
+    private readonly dailyCardLimiter?: DailyTradeCardLimiter,
   ) {
     this.ownerChatIds = [
       ...new Set(
@@ -621,6 +624,9 @@ export class NotificationService {
    * successful BUY — fans out identically to every active user (see class doc).
    */
   async notifyBuyCard(data: BuyCardData): Promise<void> {
+    // Daily P/L feed contains closed trades only, not entry cards.
+    if (this.tradesOnly && this.dailyCardLimiter) return;
+    if (this.tradesOnly && data.isPaperTrade !== false) return;
     try {
       const png = await renderBuyCardPng(data);
       const caption = buildBuyCaption(data);
@@ -641,11 +647,16 @@ export class NotificationService {
    * it onto the Position row for the 🔗 Share button to resend later.
    */
   async notifySellCard(data: SellCardData): Promise<string | undefined> {
+    if (this.tradesOnly && data.isPaperTrade !== false) return;
     try {
       const png = await renderSellCardPng(data);
       const botUsername = await this.getBotUsername();
       const caption = buildShareCaption(data, botUsername);
       const keyboard = buildSellCardKeyboard(data.token.mint, data.positionId);
+      if (this.dailyCardLimiter && !(await this.dailyCardLimiter.reserve(data.positionId))) {
+        // Keep the share caption usable even when automatic daily delivery is capped.
+        return caption;
+      }
       await this.sendPhotoToActiveUsers(png, caption, keyboard);
       return caption;
     } catch (err) {
@@ -658,27 +669,36 @@ export class NotificationService {
   }
 
   async notifyTrade(trade: TradeNotification): Promise<void> {
+    if (this.tradesOnly) return;
     await this.sendToActiveUsers((lang) => formatTradeMessage(trade, lang));
   }
 
   async notifyExit(exit: PositionExitNotification): Promise<void> {
+    if (this.tradesOnly) return;
     await this.sendToActiveUsers((lang) => formatExitMessage(exit, lang));
   }
 
   async notifyEmergencyExit(exit: EmergencyExitNotification): Promise<void> {
+    if (this.tradesOnly) return;
     await this.sendToActiveUsers((lang) => formatEmergencyExitMessage(exit, lang));
   }
 
   async notifyNewToken(token: NewTokenNotification): Promise<void> {
+    if (this.tradesOnly) return;
     await this.sendToActiveUsers((lang) => formatNewTokenMessage(token, lang));
   }
 
   /** Distinct alert type, fired in addition to the regular New Launch alert when aiScore crosses AI_HIGH_SCORE_THRESHOLD. */
   async notifyAiHighScore(token: AiHighScoreNotification): Promise<void> {
+    if (this.tradesOnly) return;
     await this.sendToActiveUsers((lang) => formatAiHighScoreMessage(token, lang));
   }
 
   async notifyError(context: string, message: string): Promise<void> {
+    if (this.tradesOnly) {
+      this.logger.error({ context, message }, 'operational error (Telegram trades-only mode)');
+      return;
+    }
     // `message` is an arbitrary caught error/exception message from anywhere in the
     // app — stack traces and error text routinely contain "_"/"*"/"`", which would
     // otherwise break Telegram's legacy Markdown parser and silently swallow the
@@ -690,21 +710,25 @@ export class NotificationService {
    * operational/ops signal, not a per-user trading alert. See
    * securityGateSummaryReporter.ts, which calls this on a fixed interval. */
   async notifySecurityGateSummary(report: SecurityGateSummaryReport): Promise<void> {
+    if (this.tradesOnly) return;
     await this.sendToOwner(formatSecurityGateSummaryMessage(report));
   }
 
   /** Owner-only, same convention as notifySecurityGateSummary. See
    * memberGrowthReporter.ts, which polls and calls this on a fixed interval. */
   async notifyMemberGrowth(data: MemberGrowthNotification): Promise<void> {
+    if (this.tradesOnly) return;
     await this.sendToOwner(formatMemberGrowthMessage(data));
   }
 
   /** Owner-only, same convention as notifyMemberGrowth. */
   async notifyMemberMilestone(data: MemberMilestoneNotification): Promise<void> {
+    if (this.tradesOnly) return;
     await this.sendToOwner(formatMemberMilestoneMessage(data));
   }
 
   async notifySocialMention(text: string, tweetId: string): Promise<void> {
+    if (this.tradesOnly) return;
     await this.sendToOwner(
       `🐦 *X mention*\n${escapeMd(text.slice(0, 300))}\n` +
         `[View](https://x.com/i/web/status/${tweetId})`,
@@ -720,6 +744,7 @@ export class NotificationService {
    * arrive via this exact path, not a fresh launch on that DEX.
    */
   async notifyMigration(migration: MigrationNotification): Promise<void> {
+    if (this.tradesOnly) return;
     const label = migration.symbol ?? migration.mint.slice(0, 8);
     await this.sendToActiveUsers(
       (lang) =>
@@ -762,6 +787,7 @@ export class NotificationService {
     userId: string,
     data: { balanceSol: number; requiredSol: number },
   ): Promise<boolean> {
+    if (this.tradesOnly) return false;
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { telegramId: true, language: true },
@@ -798,6 +824,7 @@ export class NotificationService {
     referrerUserId: string,
     data: ReferralEarnedNotification,
   ): Promise<void> {
+    if (this.tradesOnly) return;
     const user = await this.prisma.user.findUnique({
       where: { id: referrerUserId },
       select: { telegramId: true, language: true },
