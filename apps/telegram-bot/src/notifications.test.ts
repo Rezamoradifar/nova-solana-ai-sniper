@@ -800,3 +800,46 @@ describe('Telegram trades-only mode', () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 });
+
+it('caps daily delivery at ten closed-trade cards and preserves share captions', async () => {
+  const { bot, sendPhoto } = fakeBot();
+  let reserved = 0;
+  const limiter = { reserve: vi.fn(async () => ++reserved <= 10) };
+  const service = new NotificationService(
+    bot,
+    'OWNER_CHAT',
+    fakePrisma(['111']),
+    fakeLogger,
+    true,
+    limiter,
+  );
+  await service.notifyBuyCard({ ...buyCardData(), isPaperTrade: false });
+  await service.notifySellCard({ ...sellCardData(), isPaperTrade: true });
+  expect(limiter.reserve).not.toHaveBeenCalled();
+  for (let i = 0; i < 12; i++) {
+    const caption = await service.notifySellCard({
+      ...sellCardData(),
+      isPaperTrade: false,
+      positionId: `pos-${i}`,
+    });
+    expect(caption).toContain('Real trade');
+  }
+  expect(sendPhoto).toHaveBeenCalledTimes(20); // ten cards to each of two recipients
+});
+
+it('does not bypass the daily quota when Redis fails', async () => {
+  const { bot, sendPhoto } = fakeBot();
+  const limiter = { reserve: vi.fn().mockRejectedValue(new Error('Redis unavailable')) };
+  const service = new NotificationService(
+    bot,
+    'OWNER_CHAT',
+    fakePrisma(['111']),
+    fakeLogger,
+    true,
+    limiter,
+  );
+  await expect(
+    service.notifySellCard({ ...sellCardData(), isPaperTrade: false }),
+  ).resolves.toBeUndefined();
+  expect(sendPhoto).not.toHaveBeenCalled();
+});

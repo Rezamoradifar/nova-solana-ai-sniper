@@ -237,6 +237,7 @@ export const envSchema = z.object({
   TELEGRAM_CHAT_ID: z.string().optional(),
   // Only confirmed real execution cards and realized trade reports in Telegram.
   TELEGRAM_TRADES_ONLY: booleanFlag(true),
+  TELEGRAM_DAILY_TRADE_CARD_LIMIT: z.coerce.number().int().min(1).max(10).default(10),
   TELEGRAM_ADMIN_IDS: z.string().optional(),
   // When true, only senders in TELEGRAM_ADMIN_IDS may use the bot at all -
   // every other update (including /start) is dropped before any handler

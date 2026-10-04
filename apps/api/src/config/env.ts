@@ -67,6 +67,7 @@ export const apiEnvSchema = envSchema.pick({
   TELEGRAM_ADMIN_IDS: true,
   TELEGRAM_CHAT_ID: true,
   TELEGRAM_TRADES_ONLY: true,
+  TELEGRAM_DAILY_TRADE_CARD_LIMIT: true,
   TWITTER_BEARER_TOKEN: true,
   TWITTER_SEARCH_QUERY: true,
   TWITTER_POLL_INTERVAL_MS: true,

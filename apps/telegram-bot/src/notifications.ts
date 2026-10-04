@@ -8,6 +8,7 @@ import {
   type SellCardData,
 } from './cards/render.js';
 import { buildBuyCaption, buildShareCaption } from './cards/captions.js';
+import type { DailyTradeCardLimiter } from './cards/dailyLimit.js';
 import { buildBuyCardKeyboard, buildSellCardKeyboard } from './cards/keyboards.js';
 import { escapeMd, fmtDate } from './ui/format.js';
 import { resolveLocale, t, type Locale } from './i18n/index.js';
@@ -502,6 +503,7 @@ export class NotificationService {
     private readonly prisma: PrismaClient,
     private readonly logger: Logger,
     private readonly tradesOnly = false,
+    private readonly dailyCardLimiter?: DailyTradeCardLimiter,
   ) {
     this.ownerChatIds = [
       ...new Set(
@@ -622,6 +624,8 @@ export class NotificationService {
    * successful BUY — fans out identically to every active user (see class doc).
    */
   async notifyBuyCard(data: BuyCardData): Promise<void> {
+    // Daily P/L feed contains closed trades only, not entry cards.
+    if (this.tradesOnly && this.dailyCardLimiter) return;
     if (this.tradesOnly && data.isPaperTrade !== false) return;
     try {
       const png = await renderBuyCardPng(data);
@@ -649,6 +653,10 @@ export class NotificationService {
       const botUsername = await this.getBotUsername();
       const caption = buildShareCaption(data, botUsername);
       const keyboard = buildSellCardKeyboard(data.token.mint, data.positionId);
+      if (this.dailyCardLimiter && !(await this.dailyCardLimiter.reserve(data.positionId))) {
+        // Keep the share caption usable even when automatic daily delivery is capped.
+        return caption;
+      }
       await this.sendPhotoToActiveUsers(png, caption, keyboard);
       return caption;
     } catch (err) {
