@@ -697,6 +697,24 @@ describe('NotificationService — trade cards (notifyBuyCard/notifySellCard)', (
     expect(sentCaptions).toEqual(new Set([caption]));
   });
 
+  it('falls back to the same P/L caption as text when Telegram rejects the photo upload', async () => {
+    const sendPhoto = vi.fn().mockRejectedValue(new Error('photo rejected'));
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const getMe = vi.fn().mockResolvedValue({ username: 'YourBot' });
+    const bot = { api: { sendPhoto, sendMessage, getMe } } as unknown as Bot;
+    const service = new NotificationService(bot, 'OWNER_CHAT', fakePrisma([]), fakeLogger);
+
+    const caption = await service.notifySellCard(sellCardData());
+
+    expect(caption).toBeDefined();
+    expect(sendPhoto).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(
+      'OWNER_CHAT',
+      caption,
+      expect.objectContaining({ parse_mode: 'Markdown' }),
+    );
+  });
+
   it('notifySellCard returns undefined (and logs) instead of throwing when the bot API fails', async () => {
     const sendPhoto = vi.fn().mockRejectedValue(new Error('blocked'));
     const getMe = vi.fn().mockResolvedValue({ username: 'YourBot' });
@@ -765,7 +783,7 @@ describe('Telegram trades-only mode', () => {
     );
   });
 
-  it('sends real winning and losing execution cards and suppresses paper/unknown ones', async () => {
+  it('sends winning and losing closed-trade cards for both paper and real executions', async () => {
     const { bot, sendPhoto, sendMessage } = fakeBot();
     const service = new NotificationService(
       bot,
@@ -777,7 +795,8 @@ describe('Telegram trades-only mode', () => {
     await service.notifyBuyCard({ ...buyCardData(), isPaperTrade: true });
     await service.notifySellCard({ ...sellCardData(), isPaperTrade: true });
     await service.notifySellCard(sellCardData());
-    expect(sendPhoto).not.toHaveBeenCalled();
+    expect(sendPhoto).toHaveBeenCalledTimes(4); // two closed-trade cards × two recipients
+    expect(sendPhoto.mock.calls[0]![2].caption).toContain('Paper trade');
     await service.notifyBuyCard({ ...buyCardData(), isPaperTrade: false });
     await service.notifySellCard({ ...sellCardData(), isPaperTrade: false });
     await service.notifySellCard({
@@ -787,8 +806,8 @@ describe('Telegram trades-only mode', () => {
       profitSol: -0.1,
       exitReason: 'stop_loss',
     });
-    expect(sendPhoto).toHaveBeenCalledTimes(6);
-    expect(sendPhoto.mock.calls[4]![2].caption).toContain('-23.0%');
+    expect(sendPhoto).toHaveBeenCalledTimes(8);
+    expect(sendPhoto.mock.calls[6]![2].caption).toContain('-23.0%');
     await service.notifyTrade({
       side: 'BUY',
       symbol: 'ABC',
@@ -814,8 +833,8 @@ it('caps daily delivery at ten closed-trade cards and preserves share captions',
     limiter,
   );
   await service.notifyBuyCard({ ...buyCardData(), isPaperTrade: false });
-  await service.notifySellCard({ ...sellCardData(), isPaperTrade: true });
-  expect(limiter.reserve).not.toHaveBeenCalled();
+  await service.notifySellCard({ ...sellCardData(), isPaperTrade: true, positionId: 'paper-pos' });
+  expect(limiter.reserve).toHaveBeenCalledWith('paper-pos');
   for (let i = 0; i < 12; i++) {
     const caption = await service.notifySellCard({
       ...sellCardData(),
@@ -824,10 +843,10 @@ it('caps daily delivery at ten closed-trade cards and preserves share captions',
     });
     expect(caption).toContain('Real trade');
   }
-  expect(sendPhoto).toHaveBeenCalledTimes(20); // ten cards to each of two recipients
+  expect(sendPhoto).toHaveBeenCalledTimes(20); // first ten reservations, two recipients each
 });
 
-it('does not bypass the daily quota when Redis fails', async () => {
+it('fails open and still sends the closed-trade card when Redis quota storage is unavailable', async () => {
   const { bot, sendPhoto } = fakeBot();
   const limiter = { reserve: vi.fn().mockRejectedValue(new Error('Redis unavailable')) };
   const service = new NotificationService(
@@ -838,8 +857,11 @@ it('does not bypass the daily quota when Redis fails', async () => {
     true,
     limiter,
   );
-  await expect(
-    service.notifySellCard({ ...sellCardData(), isPaperTrade: false }),
-  ).resolves.toBeUndefined();
-  expect(sendPhoto).not.toHaveBeenCalled();
+  const caption = await service.notifySellCard({ ...sellCardData(), isPaperTrade: false });
+  expect(caption).toContain('Real trade');
+  expect(sendPhoto).toHaveBeenCalledTimes(2);
+  expect(fakeLogger.error).toHaveBeenCalledWith(
+    expect.objectContaining({ positionId: 'pos_123' }),
+    'daily trade-card limiter unavailable — sending card without quota reservation',
+  );
 });
