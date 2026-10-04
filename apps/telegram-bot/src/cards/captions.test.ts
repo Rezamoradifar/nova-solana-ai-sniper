@@ -135,3 +135,33 @@ describe('buildShareCaption', () => {
     expect(caption).toContain('$RAGE\\_GUY\\*');
   });
 });
+
+describe('real trade evidence', () => {
+  it('shows the trigger separately from realized loss and links actual transactions', () => {
+    const caption = buildShareCaption(
+      sellData({
+        isPaperTrade: false,
+        stopLossPercent: 20,
+        pnlPercent: -23.4,
+        profitSol: -0.117,
+        buySignature: '1'.repeat(88),
+        sellSignature: '2'.repeat(88),
+      }),
+      'YourBot',
+    );
+    expect(caption).toContain('✅ Real trade');
+    expect(caption).toContain('Stop-loss trigger: 20%');
+    expect(caption).toContain('Profit: -23.4%');
+    expect(caption).toContain(`https://solscan.io/tx/${'1'.repeat(88)}`);
+    expect(caption).toContain(`https://solscan.io/tx/${'2'.repeat(88)}`);
+  });
+  it('labels simulation and never offers simulated signatures as chain evidence', () => {
+    const caption = buildShareCaption(
+      sellData({ isPaperTrade: true, stopLossPercent: 20 }),
+      undefined,
+    );
+    expect(caption).toContain('🧪 Paper trade');
+    expect(caption).not.toContain('✅ Real trade');
+    expect(caption).not.toContain('solscan.io/tx/');
+  });
+});

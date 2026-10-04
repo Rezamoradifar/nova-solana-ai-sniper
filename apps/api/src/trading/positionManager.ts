@@ -1541,7 +1541,8 @@ export class PositionManager {
       currentPriceUsd,
       highWaterMarkUsd: position.highWaterMarkUsd ?? position.entryPriceUsd,
       takeProfitPercent: position.takeProfitPercent,
-      stopLossPercent: position.stopLossPercent,
+      stopLossPercent: resolveEffectiveStopLossPercent(position.stopLossPercent)
+        .effectiveStopLossPercent,
       trailingStopPercent: position.trailingStopPercent,
     });
     this.logger.debug(
@@ -1635,7 +1636,11 @@ export class PositionManager {
       currentPriceUsd,
       highWaterMarkUsd: position.highWaterMarkUsd ?? entryPriceUsd,
       takeProfitPercent: undefined,
-      stopLossPercent: inMoonbagOnlyMode ? undefined : INSTITUTIONAL_STOP_LOSS_PERCENT,
+      stopLossPercent: inMoonbagOnlyMode
+        ? undefined
+        : resolveEffectiveStopLossPercent(
+            position.stopLossPercent ?? INSTITUTIONAL_STOP_LOSS_PERCENT,
+          ).effectiveStopLossPercent,
       trailingStopPercent: undefined,
     });
 
@@ -1703,7 +1708,9 @@ export class PositionManager {
       entryPriceUsd: position.entryPriceUsd,
       currentPriceUsd,
       highWaterMarkUsd: position.highWaterMarkUsd ?? position.entryPriceUsd,
-      initialStopLossPercent: position.stopLossPercent ?? this.exitV2Config.initialStopLossPercent,
+      initialStopLossPercent: resolveEffectiveStopLossPercent(
+        position.stopLossPercent ?? this.exitV2Config.initialStopLossPercent,
+      ).effectiveStopLossPercent,
       breakevenStopLossPercent: this.exitV2Config.breakevenStopLossPercent,
       tp1RoiPercent: this.exitV2Config.tp1RoiPercent,
       tp1SellFraction: this.exitV2Config.tp1SellFraction,
@@ -2652,6 +2659,9 @@ export class PositionManager {
           trailingStopPercent: position.trailingStopPercent,
         });
         const cardCaption = await this.notifier.notifySellCard({
+          isPaperTrade: simulate,
+          stopLossPercent: resolveEffectiveStopLossPercent(position.stopLossPercent)
+            .effectiveStopLossPercent,
           token: {
             mint: position.token.mint,
             name: position.token.name ?? undefined,

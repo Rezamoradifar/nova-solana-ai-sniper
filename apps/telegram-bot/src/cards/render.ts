@@ -422,6 +422,8 @@ export async function renderBuyCardPng(data: BuyCardData): Promise<Buffer> {
 // --- Sell card -----------------------------------------------------------
 
 export interface SellCardData {
+  isPaperTrade?: boolean;
+  stopLossPercent?: number;
   token: TradeCardTokenInfo;
   entryPriceUsd: number;
   exitPriceUsd: number;
@@ -516,6 +518,9 @@ export function buildSellCardSvg(data: SellCardData, logoDataUri: string | undef
   body += pillRow(CARD_WIDTH / 2, 690, [
     { label: EXIT_REASON_LABELS[data.exitReason], color: theme.accent },
     { label: `Held ${formatHoldingTime(data.holdingTimeMs)}`, color: MUTED },
+    ...(data.stopLossPercent !== undefined
+      ? [{ label: `SL ${data.stopLossPercent}%`, color: MUTED }]
+      : []),
   ]);
 
   body += glassPanel(64, 740, CARD_WIDTH - 128, 230);
@@ -540,10 +545,19 @@ export function buildSellCardSvg(data: SellCardData, logoDataUri: string | undef
     <text x="${CARD_WIDTH / 2}" y="1178" text-anchor="middle" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">AI SCORE <tspan font-family="${MONO}" font-size="22" fill="${TEXT}">${t.aiScore !== undefined ? `${t.aiScore.toFixed(0)}/100` : '—'}</tspan></text>
     <text x="${CARD_WIDTH - 100}" y="1178" text-anchor="end" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">RISK <tspan font-size="22" fill="${risk.color}">${risk.label}</tspan></text>`;
 
-  return cardShell(theme, 'POSITION CLOSED', body, [
-    `Wallet ${shortAddr(data.walletPublicKey)}  ·  Buy ${shortAddr(data.buySignature)}`,
-    `Sell ${shortAddr(data.sellSignature)}`,
-  ]);
+  return cardShell(
+    theme,
+    data.isPaperTrade === true
+      ? 'PAPER TRADE'
+      : data.isPaperTrade === false
+        ? 'REAL TRADE'
+        : 'POSITION CLOSED',
+    body,
+    [
+      `Wallet ${shortAddr(data.walletPublicKey)}  ·  Buy ${shortAddr(data.buySignature)}`,
+      `Sell ${shortAddr(data.sellSignature)}`,
+    ],
+  );
 }
 
 export async function renderSellCardPng(data: SellCardData): Promise<Buffer> {

@@ -333,7 +333,7 @@ export class PriceMonitor {
         const hardLoss = evaluateHardLossCeiling(
           position.entryPriceUsd,
           currentPriceUsd,
-          position.stopLossPercent ?? DEFAULT_MAX_LOSS_PERCENT, // defensive fallback — Step 3 means this is always populated
+          Math.min(position.stopLossPercent ?? DEFAULT_MAX_LOSS_PERCENT, DEFAULT_MAX_LOSS_PERCENT),
         );
         if (hardLoss.breached) {
           const reconciliation = await this.probeAndReconcile(
@@ -476,7 +476,10 @@ export class PriceMonitor {
       originalAmountToken: position.originalAmountToken ?? position.amountToken,
       remainingAmountToken: remaining,
       exitValueSol,
-      stopLossPercent: position.stopLossPercent,
+      stopLossPercent: Math.min(
+        position.stopLossPercent ?? DEFAULT_MAX_LOSS_PERCENT,
+        DEFAULT_MAX_LOSS_PERCENT,
+      ),
       takeProfitStageReached: position.trailingActivatedAt != null,
     });
     if (!decision.breached) return false;
@@ -488,7 +491,10 @@ export class PriceMonitor {
         exitValueSol,
         investedSol: position.amountSolInvested,
         pnlPercent: decision.pnlPercent,
-        stopLossPercent: position.stopLossPercent,
+        stopLossPercent: Math.min(
+          position.stopLossPercent ?? DEFAULT_MAX_LOSS_PERCENT,
+          DEFAULT_MAX_LOSS_PERCENT,
+        ),
       },
       'REAL-VALUE STOP-LOSS: sellable value crossed the stop-loss — selling now',
     );

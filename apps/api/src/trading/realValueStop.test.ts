@@ -37,3 +37,16 @@ describe('evaluateRealValueStop', () => {
     );
   });
 });
+
+it('fires at exactly the 20% sellable-value threshold', () => {
+  expect(
+    evaluateRealValueStop({
+      investedSol: 1,
+      originalAmountToken: 100,
+      remainingAmountToken: 100,
+      exitValueSol: 0.8,
+      stopLossPercent: 20,
+      takeProfitStageReached: false,
+    }).breached,
+  ).toBe(true);
+});

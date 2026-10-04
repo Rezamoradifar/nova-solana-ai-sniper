@@ -38,12 +38,27 @@ export function buildShareCaption(data: SellCardData, botUsername: string | unde
   const botLine = botUsername ? `https://t.me/${escapeMd(botUsername)}` : '';
   return (
     `🚀 Trade completed with GSP Bank Sniper\n\n` +
+    (data.isPaperTrade !== undefined
+      ? `${data.isPaperTrade ? '🧪 Paper trade' : '✅ Real trade'}\n\n`
+      : '') +
+    (data.stopLossPercent !== undefined
+      ? `🛑 Stop-loss trigger: ${data.stopLossPercent}%\n\n`
+      : '') +
     `💰 Profit: ${signedFixed(data.pnlPercent, 1)}%\n\n` +
     `💎 ${signedFixed(data.profitSol, 4)} SOL\n\n` +
     (data.token.aiScore !== undefined
       ? `🤖 AI Score: ${data.token.aiScore.toFixed(0)}/100\n\n`
       : '') +
     `${tokenLabel} on ${escapeMd(data.token.dex)}\n\n` +
+    (data.isPaperTrade === false
+      ? [
+          ['Buy transaction', data.buySignature],
+          ['Sell transaction', data.sellSignature],
+        ]
+          .filter(([, signature]) => /^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(signature!))
+          .map(([label, signature]) => `[${label}](https://solscan.io/tx/${signature})\n`)
+          .join('') + '\n'
+      : '') +
     `Trade faster with GSP Bank Sniper.\n` +
     botLine
   ).trim();
