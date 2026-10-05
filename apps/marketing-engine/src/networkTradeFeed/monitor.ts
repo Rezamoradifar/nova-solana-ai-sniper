@@ -182,13 +182,12 @@ export class NetworkTradeFeedMonitor {
       return false;
     }
 
-    // Quality gate (2026-08-05 spec: "prefer profitable trades, small losses
-    // are acceptable, skip spam, rugs and duplicate wallets") — real losses
-    // are never excluded just for being losses; see data.ts's
-    // isNetworkTradeCandidateEligible doc comment for the actual bars.
+    // User-acquisition quality gate: only verified completed PROFIT trades
+    // from external wallets are eligible. Rugs/Sybil clusters remain excluded.
     const qualityEligible = candidates.filter((c) =>
       isNetworkTradeCandidateEligible({
         realizedRoiPercent: c.realizedRoiPercent,
+        realizedPnlUsd: c.realizedPnlUsd,
         walletRugExposureRatePct: c.walletRugExposureRatePct,
         walletSybilConfidencePct: c.walletSybilConfidencePct,
       }),
