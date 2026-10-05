@@ -436,7 +436,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // SMART_MONEY_ANALYSIS_ENABLED — this is a marketing-content source, not a
   // buy-decision input. Off by default; adds real, bounded RPC load.
   let networkTradeScanner: NetworkTradeScannerService | undefined;
-  if (app.config.NETWORK_TRADE_SCANNER_ENABLED) {
+  if (app.config.NETWORK_TRADE_SCANNER_ENABLED || app.config.TELEGRAM_TRADES_ONLY) {
     networkTradeScanner = new NetworkTradeScannerService({
       prisma: app.prisma,
       dexScreener,
