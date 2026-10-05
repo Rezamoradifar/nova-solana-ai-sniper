@@ -797,7 +797,6 @@ describe('Telegram trades-only mode', () => {
     await service.notifySellCard(sellCardData());
     expect(sendPhoto).toHaveBeenCalledTimes(4); // two closed-trade cards × two recipients
     expect(sendPhoto.mock.calls[0]![2].caption).toContain('Paper trade');
-    await service.notifyBuyCard({ ...buyCardData(), isPaperTrade: false });
     await service.notifySellCard({ ...sellCardData(), isPaperTrade: false });
     await service.notifySellCard({
       ...sellCardData(),
