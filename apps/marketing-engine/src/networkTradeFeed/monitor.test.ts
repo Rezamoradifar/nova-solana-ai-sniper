@@ -30,6 +30,7 @@ function fakeRow(overrides: Record<string, unknown> = {}) {
 function fakePrisma(overrides: Record<string, unknown> = {}) {
   return {
     smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([]) },
+    wallet: { findMany: vi.fn().mockResolvedValue([]) },
     activityFeedPost: {
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn().mockResolvedValue(undefined),
