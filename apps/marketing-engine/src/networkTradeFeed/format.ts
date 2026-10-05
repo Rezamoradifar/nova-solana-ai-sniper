@@ -122,6 +122,8 @@ export function buildNetworkTradeCaptionHtml(
     `🧾 Buy tx: <a href="https://solscan.io/tx/${encodeURIComponent(c.entrySignature)}">${escapeHtml(shortKey(c.entrySignature))}</a>`,
     `🧾 Sell tx: <a href="https://solscan.io/tx/${encodeURIComponent(c.exitSignature)}">${escapeHtml(shortKey(c.exitSignature))}</a>`,
     `🕐 ${escapeHtml(fmtDate(now))} UTC`,
+    '',
+    'ℹ️ External wallet · selected real network trade · not bot performance',
   ];
 
   return truncateForPhotoCaption(lines.join('\n') + NOVA_BRAND_FOOTER_HTML);
