@@ -14,6 +14,7 @@ const DEPLOYED_AT = new Date('2020-01-01T00:00:00Z');
 function fakePrisma(overrides: Record<string, unknown> = {}) {
   return {
     smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([]) },
+    wallet: { findMany: vi.fn().mockResolvedValue([]) },
     activityFeedPost: {
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn().mockResolvedValue(undefined),
@@ -82,6 +83,22 @@ describe('fetchNetworkTradeCandidates', () => {
     expect(where.status).toBe('EXITED');
     expect(where.entryAmountSol).toEqual({ not: null });
     expect(where.exitAmountSol).toEqual({ not: null });
+  });
+
+  it('excludes Nova custodial wallets so network cards are always external trades', async () => {
+    const row = fakeRow({ walletAddress: 'InternalNovaWallet111111111111111111111111' });
+    const prisma = fakePrisma({
+      smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([row]) },
+      wallet: {
+        findMany: vi.fn().mockResolvedValue([
+          { publicKey: 'InternalNovaWallet111111111111111111111111' },
+        ]),
+      },
+    });
+
+    const result = await fetchNetworkTradeCandidates(prisma, 30, DEPLOYED_AT);
+
+    expect(result).toEqual([]);
   });
 
   it('excludes an entry already posted under the network-trade dedup namespace', async () => {
