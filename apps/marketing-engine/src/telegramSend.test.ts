@@ -105,6 +105,20 @@ describe('sendBrandedPhotoHtml', () => {
     });
   });
 
+  it('falls back to the same HTML caption when Telegram rejects the photo upload', async () => {
+    const sendPhoto = vi.fn().mockRejectedValue(new Error('photo rejected'));
+    const sendMessage = vi.fn().mockResolvedValue({ message_id: 2 });
+    const bot = { api: { sendPhoto, sendMessage } } as never;
+
+    await sendBrandedPhotoHtml(bot, '@chat', Buffer.from('fake-png'), '<b>profit</b>');
+
+    expect(sendPhoto).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith('@chat', '<b>profit</b>', {
+      parse_mode: 'HTML',
+      reply_markup: undefined,
+    });
+  });
+
   it('sends a fileId photo directly without wrapping it in InputFile', async () => {
     const { bot, sendPhoto } = fakeBot();
 
