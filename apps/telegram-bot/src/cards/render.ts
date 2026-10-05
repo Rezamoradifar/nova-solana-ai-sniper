@@ -566,7 +566,11 @@ function buildSellCardFallbackSvg(data: SellCardData): string {
   const accent = isProfit ? PROFIT_THEME.accent : LOSS_THEME.accent;
   const label = data.token.symbol ?? data.token.name ?? data.token.mint.slice(0, 8);
   const mode =
-    data.isPaperTrade === true ? 'PAPER TRADE' : data.isPaperTrade === false ? 'REAL TRADE' : 'TRADE';
+    data.isPaperTrade === true
+      ? 'PAPER TRADE'
+      : data.isPaperTrade === false
+        ? 'REAL TRADE'
+        : 'TRADE';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">
     <rect width="1080" height="1080" fill="#07090f"/>
     <rect x="48" y="48" width="984" height="984" rx="42" fill="#0f1420" stroke="${accent}" stroke-width="4"/>
