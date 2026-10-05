@@ -121,7 +121,8 @@ export function buildNetworkTradeCaptionHtml(
     `👛 Wallet: <a href="https://solscan.io/account/${encodeURIComponent(c.walletAddress)}">${escapeHtml(shortKey(c.walletAddress))}</a>`,
     `🧾 Buy tx: <a href="https://solscan.io/tx/${encodeURIComponent(c.entrySignature)}">${escapeHtml(shortKey(c.entrySignature))}</a>`,
     `🧾 Sell tx: <a href="https://solscan.io/tx/${encodeURIComponent(c.exitSignature)}">${escapeHtml(shortKey(c.exitSignature))}</a>`,
-    `🕐 ${escapeHtml(fmtDate(now))} UTC`,
+    `🕐 Closed: ${escapeHtml(fmtDate(c.exitAt))} UTC`,
+    `📣 Posted: ${escapeHtml(fmtDate(now))} UTC`,
     '',
     'ℹ️ External wallet · selected real network trade · not bot performance',
   ];
