@@ -93,12 +93,25 @@ export async function fetchNetworkTradeCandidates(
     include: { token: true, wallet: true },
   });
 
+  // Defense-in-depth: this feed is explicitly about OTHER wallets.
+  // Exclude every custodial/internal Nova wallet by public key before dedup
+  // and formatting, even if smart-wallet discovery happened to observe it.
+  const internalWalletRows =
+    rows.length === 0
+      ? []
+      : await prisma.wallet.findMany({
+          where: { publicKey: { in: rows.map((r) => r.walletAddress) } },
+          select: { publicKey: true },
+        });
+  const internalWallets = new Set(internalWalletRows.map((w) => w.publicKey));
+
+  const externalRows = rows.filter((r) => !internalWallets.has(r.walletAddress));
   const unposted = await filterUnposted(
     prisma,
-    rows.map((r) => r.id),
+    externalRows.map((r) => r.id),
   );
 
-  return rows
+  return externalRows
     .filter((r) => unposted.has(r.id))
     .map((r) => ({
       entryId: r.id,
