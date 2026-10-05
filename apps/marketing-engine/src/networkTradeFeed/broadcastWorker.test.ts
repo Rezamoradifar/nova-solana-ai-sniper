@@ -140,7 +140,22 @@ describe('NetworkTradeBroadcastWorker', () => {
         ),
       );
     const deps = fakeDeps({ deliveries: [fakeDelivery({ id: 'd1' })] });
-    (deps as { bot: { api: { sendPhoto: unknown } } }).bot.api.sendPhoto = sendPhoto;
+    const blocked = new GrammyError(
+      'Forbidden',
+      { error_code: 403, description: 'Forbidden: bot was blocked by the user' } as never,
+      'sendMessage',
+      {} as never,
+    );
+    (
+      deps as {
+        bot: { api: { sendPhoto: unknown; sendMessage: ReturnType<typeof vi.fn> } };
+      }
+    ).bot.api.sendPhoto = sendPhoto;
+    (
+      deps as {
+        bot: { api: { sendMessage: ReturnType<typeof vi.fn> } };
+      }
+    ).bot.api.sendMessage.mockRejectedValue(blocked);
     const worker = new NetworkTradeBroadcastWorker(deps);
 
     await worker.tick();
