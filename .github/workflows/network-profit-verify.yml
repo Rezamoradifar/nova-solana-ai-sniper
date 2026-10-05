@@ -19,4 +19,4 @@ jobs:
       - name: TypeScript build
         run: npx tsc -b packages/shared packages/ai apps/telegram-bot apps/api apps/marketing-engine
       - name: Network profit tests
-        run: npx vitest run apps/marketing-engine/src/networkTradeFeed apps/telegram-bot/src/cards/render.test.ts apps/telegram-bot/src/notifications.test.ts
+        run: npx vitest run apps/marketing-engine/src/networkTradeFeed apps/marketing-engine/src/telegramSend.test.ts apps/telegram-bot/src/cards/render.test.ts apps/telegram-bot/src/notifications.test.ts
