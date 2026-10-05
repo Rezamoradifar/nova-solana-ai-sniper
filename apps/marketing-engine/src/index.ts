@@ -232,7 +232,7 @@ async function main() {
   // best-scored unposted trade per tick rather than every real backlog item.
   let networkTradeFeed: NetworkTradeFeedMonitor | undefined;
   let networkTradeBroadcastWorker: NetworkTradeBroadcastWorker | undefined;
-  if (env.NETWORK_TRADE_FEED_ENABLED) {
+  if (env.NETWORK_TRADE_FEED_ENABLED || networkProfitOnlyMode) {
     networkTradeFeed = new NetworkTradeFeedMonitor({
       prisma,
       bot,
