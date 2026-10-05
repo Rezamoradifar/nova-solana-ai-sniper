@@ -177,14 +177,10 @@ export function categorizeNetworkTrade(inputs: NetworkTradeCategoryInputs): Netw
   return inputs.realizedPnlUsd >= 0 ? 'NETWORK_PROFIT' : 'NETWORK_LOSS';
 }
 
-/**
- * Real losses read as natural, honest content ("not every trade wins") —
- * only a loss steep enough to look like a rug gets excluded outright, never
- * any loss at all (2026-08-05 spec: "prefer profitable trades, small losses
- * are acceptable"). -30% is the cutoff: worse than that reads as a rug/
- * dump, not a normal losing trade.
- */
-const MIN_ACCEPTABLE_ROI_PERCENT = -30;
+/** User-acquisition network feed: only completed, genuinely profitable
+ * external-wallet trades are eligible. Zero/negative outcomes stay in the
+ * database for analytics but are never turned into promotional P/L cards. */
+const MIN_PROFIT_ROI_PERCENT = 0;
 
 /** A wallet whose own historical trades have rugged this often is a spam/
  * low-quality signal on the WALLET, independent of whether this specific
@@ -198,20 +194,20 @@ const MAX_ACCEPTABLE_SYBIL_CONFIDENCE_PCT = 70;
 
 export interface NetworkTradeQualityInputs {
   realizedRoiPercent: number;
+  realizedPnlUsd: number;
   walletRugExposureRatePct: number | undefined;
   walletSybilConfidencePct: number | undefined;
 }
 
 /**
- * The "skip spam, rugs and duplicate wallets" quality gate (2026-08-05 spec)
- * — the duplicate-wallet cooldown itself lives in monitor.ts instead, since
- * it needs recent-post history rather than a property of the candidate
- * alone. A real loss is never excluded just for being a loss; only a loss
- * steep enough to look like a rug, or a wallet with its own bad track
- * record, reads as noise rather than a legitimate completed trade.
+ * Promotional network-profit quality gate. Every posted result must be a
+ * completed real trade with positive ROI AND positive realized USD P/L.
+ * Wallet-quality checks remain in force so a large-looking win from a likely
+ * rug/Sybil cluster is never showcased.
  */
 export function isNetworkTradeCandidateEligible(inputs: NetworkTradeQualityInputs): boolean {
-  if (inputs.realizedRoiPercent < MIN_ACCEPTABLE_ROI_PERCENT) return false;
+  if (inputs.realizedRoiPercent <= MIN_PROFIT_ROI_PERCENT) return false;
+  if (inputs.realizedPnlUsd <= 0) return false;
   if ((inputs.walletRugExposureRatePct ?? 0) > MAX_ACCEPTABLE_RUG_EXPOSURE_PCT) return false;
   if ((inputs.walletSybilConfidencePct ?? 0) > MAX_ACCEPTABLE_SYBIL_CONFIDENCE_PCT) return false;
   return true;
