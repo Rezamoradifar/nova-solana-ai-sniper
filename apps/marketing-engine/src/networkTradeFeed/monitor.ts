@@ -90,6 +90,11 @@ export class NetworkTradeFeedMonitor {
 
   start(): void {
     if (this.timer) return;
+    // Try immediately on boot so a verified profitable backlog item can prove
+    // the feed is alive without waiting for the first random posting window.
+    // The normal random cadence is scheduled after this first tick.
+    this.nextPostDueAt = Date.now();
+    void this.tick();
     this.timer = setInterval(() => void this.tick(), CHECK_INTERVAL_MS);
     this.timer.unref?.();
   }
