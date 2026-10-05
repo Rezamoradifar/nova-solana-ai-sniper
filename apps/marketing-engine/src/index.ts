@@ -26,11 +26,16 @@ async function main() {
 
   // TELEGRAM_CHAT_ID may list several admin ids (comma-separated); without a
   // dedicated channel, posts go to the first one.
-  if (env.TELEGRAM_TRADES_ONLY) {
-    logger.info('Telegram trades-only mode: automated marketing and market feeds disabled');
-    // Keep the compose service healthy without polling or publishing unrelated feeds.
-    setInterval(() => {}, 60_000);
-    return;
+  //
+  // In trades-only mode the marketing engine is intentionally narrowed to the
+  // curated Network Trade Feed instead of being shut down entirely. That feed
+  // shows verified completed trades from OTHER wallets and is the one external
+  // P/L surface operators use for user-acquisition content.
+  const networkProfitOnlyMode = env.TELEGRAM_TRADES_ONLY;
+  if (networkProfitOnlyMode) {
+    logger.info(
+      'Telegram trades-only mode: only verified external-wallet network profit cards are enabled',
+    );
   }
   const broadcastChatId =
     env.MARKETING_TELEGRAM_CHANNEL_ID ?? env.TELEGRAM_CHAT_ID?.split(',')[0]?.trim() ?? undefined;
@@ -55,8 +60,9 @@ async function main() {
   );
   // Only the daily AI-written posts need a content generator; the real-data
   // feeds (network trades, showcase, activity) run without one.
-  const dailyPostsEnabled = env.MARKETING_DAILY_POSTS_ENABLED && provider !== undefined;
-  if (env.MARKETING_DAILY_POSTS_ENABLED && !provider) {
+  const dailyPostsEnabled =
+    !networkProfitOnlyMode && env.MARKETING_DAILY_POSTS_ENABLED && provider !== undefined;
+  if (!networkProfitOnlyMode && env.MARKETING_DAILY_POSTS_ENABLED && !provider) {
     logger.warn(
       'GEMINI_API_KEY/OPENROUTER_API_KEY not set — daily AI marketing posts are off; data feeds still run.',
     );
@@ -112,7 +118,7 @@ async function main() {
   // comment.
   let tradeShowcase: TradeShowcaseMonitor | undefined;
   let broadcastWorker: BroadcastWorker | undefined;
-  if (env.TRADE_SHOWCASE_ENABLED) {
+  if (!networkProfitOnlyMode && env.TRADE_SHOWCASE_ENABLED) {
     tradeShowcase = new TradeShowcaseMonitor({
       prisma,
       bot,
@@ -149,7 +155,7 @@ async function main() {
   // comment) — never simulated content, so there is no separate "demo mode"
   // toggle to configure.
   let activityFeed: ActivityFeedMonitor | undefined;
-  if (env.ACTIVITY_FEED_ENABLED) {
+  if (!networkProfitOnlyMode && env.ACTIVITY_FEED_ENABLED) {
     activityFeed = new ActivityFeedMonitor({
       prisma,
       bot,
@@ -184,7 +190,7 @@ async function main() {
   // same SOLANA_RPC_URL/HELIUS_API_KEY as live trading, but a fully separate
   // client instance/quota consumer.
   let ecosystemFeed: EcosystemFeedMonitor | undefined;
-  if (env.ECOSYSTEM_FEED_ENABLED) {
+  if (!networkProfitOnlyMode && env.ECOSYSTEM_FEED_ENABLED) {
     const connection = createEcosystemConnection({
       rpcUrl: env.SOLANA_RPC_URL,
       heliusApiKey: env.HELIUS_API_KEY,
