@@ -233,24 +233,37 @@ async function main() {
   let networkTradeFeed: NetworkTradeFeedMonitor | undefined;
   let networkTradeBroadcastWorker: NetworkTradeBroadcastWorker | undefined;
   if (env.NETWORK_TRADE_FEED_ENABLED || networkProfitOnlyMode) {
+    const networkFeedDeployedAt = networkProfitOnlyMode
+      ? new Date(Date.now() - 7 * 24 * 60 * 60_000)
+      : env.NETWORK_TRADE_FEED_DEPLOYED_AT;
+    const networkFeedMinIntervalMinutes = networkProfitOnlyMode
+      ? 90
+      : env.NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES;
+    const networkFeedMaxIntervalMinutes = networkProfitOnlyMode
+      ? 180
+      : env.NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES;
+    const networkFeedMaxPostsPerDay = networkProfitOnlyMode
+      ? 10
+      : env.NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY;
+
     networkTradeFeed = new NetworkTradeFeedMonitor({
       prisma,
       bot,
       chatId: broadcastChatId,
       logger,
       marketData,
-      deployedAt: env.NETWORK_TRADE_FEED_DEPLOYED_AT,
-      minIntervalMinutes: env.NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES,
-      maxIntervalMinutes: env.NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES,
-      maxPostsPerDay: env.NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY,
+      deployedAt: networkFeedDeployedAt,
+      minIntervalMinutes: networkFeedMinIntervalMinutes,
+      maxIntervalMinutes: networkFeedMaxIntervalMinutes,
+      maxPostsPerDay: networkFeedMaxPostsPerDay,
     });
     networkTradeFeed.start();
     logger.info(
       {
-        minIntervalMinutes: env.NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES,
-        maxIntervalMinutes: env.NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES,
-        maxPostsPerDay: env.NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY,
-        deployedAt: env.NETWORK_TRADE_FEED_DEPLOYED_AT.toISOString(),
+        minIntervalMinutes: networkFeedMinIntervalMinutes,
+        maxIntervalMinutes: networkFeedMaxIntervalMinutes,
+        maxPostsPerDay: networkFeedMaxPostsPerDay,
+        deployedAt: networkFeedDeployedAt.toISOString(),
       },
       'network trade feed monitor started',
     );
