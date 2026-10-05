@@ -434,14 +434,14 @@ export const envSchema = z.object({
   // same "never fabricate to hit a target" convention as the rest of this
   // codebase.
   NETWORK_TRADE_FEED_ENABLED: booleanFlag(true),
-  // 20-40 minutes (avg 30min == 2/hour) — random within that range so
+  // 30-60 minutes (avg 45min) — random within that range so
   // consecutive posts never land at a fixed cadence (reads as natural, not a
   // bot timer), never exactly the same time twice.
-  NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES: z.coerce.number().positive().default(90),
-  NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES: z.coerce.number().positive().default(180),
-  // ~48/day to match "about 2 posts/hour" — a ceiling only (see this
+  NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES: z.coerce.number().positive().default(30),
+  NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES: z.coerce.number().positive().default(60),
+  // Up to 30/day — a ceiling only (see this
   // section's own doc comment above).
-  NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY: z.coerce.number().int().positive().default(10),
+  NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY: z.coerce.number().int().positive().default(30),
   NETWORK_TRADE_FEED_DEPLOYED_AT: z.coerce.date().default(() => new Date()),
 
   // Network Trade Scanner (2026-08-02) — broadens WHICH mints

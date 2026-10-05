@@ -236,15 +236,10 @@ async function main() {
     const networkFeedDeployedAt = networkProfitOnlyMode
       ? new Date(Date.now() - 7 * 24 * 60 * 60_000)
       : env.NETWORK_TRADE_FEED_DEPLOYED_AT;
-    const networkFeedMinIntervalMinutes = networkProfitOnlyMode
-      ? 90
-      : env.NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES;
-    const networkFeedMaxIntervalMinutes = networkProfitOnlyMode
-      ? 180
-      : env.NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES;
-    const networkFeedMaxPostsPerDay = networkProfitOnlyMode
-      ? 10
-      : env.NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY;
+    // Honor operator cadence settings in trades-only mode too.
+    const networkFeedMinIntervalMinutes = env.NETWORK_TRADE_FEED_MIN_INTERVAL_MINUTES;
+    const networkFeedMaxIntervalMinutes = env.NETWORK_TRADE_FEED_MAX_INTERVAL_MINUTES;
+    const networkFeedMaxPostsPerDay = env.NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY;
 
     networkTradeFeed = new NetworkTradeFeedMonitor({
       prisma,
