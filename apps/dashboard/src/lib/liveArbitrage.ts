@@ -1,4 +1,4 @@
-import { SOL_MINT } from './publicMarket.js';
+import { PUBLIC_API_BASE, SOL_MINT } from './publicMarket.js';
 
 export const ARB_TOKENS = [
   {
@@ -160,11 +160,9 @@ async function getQuote(
     outputMint,
     amount: amount.toString(),
     slippageBps: '50',
-    dexes: dex,
-    onlyDirectRoutes: 'true',
-    restrictIntermediateTokens: 'true',
+    dex,
   });
-  const response = await fetch(`https://api.jup.ag/swap/v1/quote?${query}`, {
+  const response = await fetch(`${PUBLIC_API_BASE}/public/arbitrage/quote?${query}`, {
     signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
   });
   if (!response.ok) {
