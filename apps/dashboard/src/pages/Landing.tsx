@@ -98,7 +98,7 @@ const T = {
     badge: 'Smart Solana trading bot',
     heroTitle: ['Automated memecoin trading,', 'with a security gate and a real stop-loss'],
     heroSub:
-      'GSP Bank Sniper spots new tokens within seconds, checks their safety before buying, and protects your capital with automatic take-profit, stop-loss and trailing stops. All inside Telegram.',
+      'GSP TRADING spots new tokens within seconds, checks their safety before buying, and protects your capital with automatic take-profit, stop-loss and trailing stops. All inside Telegram.',
     heroCta: 'Start free on Telegram',
     heroCta2: 'Open dashboard',
     heroNote: 'No install · Encrypted wallet · Risk-free paper mode',
@@ -250,7 +250,7 @@ function CardPreview({ label }: { label: string }) {
     <figure className="lp-card" aria-label={label}>
       <div className="lp-card-top">
         <span className="lp-card-brand">
-          <Logo size={26} /> GSP BANK SNIPER
+          <Logo size={26} /> GSP TRADING
         </span>
         <span className="lp-pill lp-pill-green">● POSITION CLOSED</span>
       </div>
@@ -314,7 +314,7 @@ export function Landing() {
   const featured = plans.length >= 3 ? plans[1]!.key : plans[plans.length - 1]?.key;
 
   useEffect(() => {
-    document.title = 'GSP Bank Sniper';
+    document.title = 'GSP TRADING';
   }, []);
 
   const navItems: [string, string][] = [
@@ -332,7 +332,7 @@ export function Landing() {
       <header className="lp-nav">
         <div className="lp-wrap lp-nav-inner">
           <a href="#top" className="lp-brand">
-            <Logo /> <span>GSP Bank Sniper</span>
+            <Logo /> <span>GSP TRADING</span>
           </a>
           <nav className={`lp-links ${menu ? 'lp-links-open' : ''}`}>
             {navItems.map(([href, label]) => (
@@ -567,10 +567,10 @@ export function Landing() {
           <p className="lp-risk">{t.risk}</p>
           <div className="lp-foot-row">
             <span className="lp-brand">
-              <Logo size={28} /> <span>GSP Bank Sniper</span>
+              <Logo size={28} /> <span>GSP TRADING</span>
             </span>
             <span>
-              © {new Date().getFullYear()} GSP Bank Sniper · {t.rights}
+              © {new Date().getFullYear()} GSP TRADING · {t.rights}
             </span>
           </div>
         </div>
