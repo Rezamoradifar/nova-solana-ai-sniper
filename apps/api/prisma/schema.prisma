@@ -1716,3 +1716,17 @@ model Subscription {
   @@index([createdAt])
   @@map("subscriptions")
 }
+
+
+/// Admin-selected startup feature state. These values are intentionally
+/// separate from secrets and numeric risk limits: the control center may
+/// enable/disable approved feature gates, while credentials stay in env.
+model AdminFeatureOverride {
+  key             String   @id
+  enabled         Boolean
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("admin_feature_overrides")
+}
