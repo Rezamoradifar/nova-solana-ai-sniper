@@ -15,8 +15,19 @@ const RATE_LIMIT_PATTERNS = [
   'rate limits exceeded',
 ];
 
+const PROVIDER_REJECTION_PATTERNS = [
+  '401',
+  '403',
+  'unauthorized',
+  'forbidden',
+  'invalid api key',
+  'invalid api-key',
+  'api key is invalid',
+];
+
 const RETRYABLE_PATTERNS = [
   ...RATE_LIMIT_PATTERNS,
+  ...PROVIDER_REJECTION_PATTERNS,
   'timeout',
   'timed out',
   'econnreset',
@@ -50,6 +61,10 @@ function isRetryable(err: unknown): boolean {
 
 function isRateLimited(err: unknown): boolean {
   return matches(err, RATE_LIMIT_PATTERNS);
+}
+
+function isProviderRejected(err: unknown): boolean {
+  return matches(err, PROVIDER_REJECTION_PATTERNS);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -533,11 +548,9 @@ export function wrapWithMultiProviderFailover(
         lastErr = firstErr;
         if (!isRetryable(firstErr)) throw firstErr;
 
-        if (isRateLimited(firstErr)) {
-          // Retrying the same provider that just said "too many requests"
-          // only adds load to an endpoint already over its limit — rotate
-          // immediately instead of sleeping+retrying in place.
-          rpcRequestCounters.recordRateLimited(provider.label);
+        if (isRateLimited(firstErr) || isProviderRejected(firstErr)) {
+          const rateLimited = isRateLimited(firstErr);
+          if (rateLimited) rpcRequestCounters.recordRateLimited(provider.label);
           rpcRequestCounters.recordRetry(provider.label);
           failAndCooldown(provider);
           logger.warn(
@@ -548,8 +561,12 @@ export function wrapWithMultiProviderFailover(
               cooldownUntil: st.cooldownUntil,
             },
             hasMore
-              ? 'RPC call rate-limited — rotating to the next provider immediately'
-              : 'RPC call rate-limited — no more providers left to try',
+              ? rateLimited
+                ? 'RPC call rate-limited — rotating to the next provider immediately'
+                : 'RPC provider rejected credentials/authorization — rotating immediately'
+              : rateLimited
+                ? 'RPC call rate-limited — no more providers left to try'
+                : 'RPC provider rejected credentials/authorization — no more providers left to try',
           );
           options.onFailover?.({ method: prop, attempt: 1, provider: provider.label });
           continue;
