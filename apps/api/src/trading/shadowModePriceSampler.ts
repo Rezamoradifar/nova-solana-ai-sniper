@@ -72,6 +72,8 @@ export interface ShadowModePriceSamplerDeps {
 
 export class ShadowModePriceSampler {
   private timer?: ReturnType<typeof setInterval>;
+  private ticking = false;
+  private lastWalletEntryId: string | undefined;
 
   constructor(private readonly deps: ShadowModePriceSamplerDeps) {}
 
@@ -86,7 +88,13 @@ export class ShadowModePriceSampler {
   }
 
   async tick(): Promise<void> {
-    await Promise.allSettled([this.sampleShadowLogs(), this.sampleWalletEntries()]);
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      await Promise.allSettled([this.sampleShadowLogs(), this.sampleWalletEntries()]);
+    } finally {
+      this.ticking = false;
+    }
   }
 
   private async sampleShadowLogs(): Promise<void> {
@@ -128,12 +136,23 @@ export class ShadowModePriceSampler {
 
   private async sampleWalletEntries(): Promise<void> {
     const rows = await this.deps.prisma.smartWalletTokenEntry.findMany({
-      where: { status: 'OPEN' },
+      where: {
+        status: 'OPEN',
+        ...(this.lastWalletEntryId ? { id: { gt: this.lastWalletEntryId } } : {}),
+      },
+      orderBy: { id: 'asc' },
       take: BATCH_SIZE,
     });
+    if (rows.length === 0) {
+      this.lastWalletEntryId = undefined;
+      return;
+    }
     const expiryCutoff = Date.now() - WALLET_ENTRY_EVALUATION_WINDOW_MS;
 
     for (const row of rows) {
+      // Rotate even when a wallet stays OPEN or its RPC lookup fails. A
+      // permanent first page must not hide later wallets' completed sells.
+      this.lastWalletEntryId = row.id;
       try {
         const exited = await this.deps.smartWalletTracker.checkAndRecordExit({
           id: row.id,

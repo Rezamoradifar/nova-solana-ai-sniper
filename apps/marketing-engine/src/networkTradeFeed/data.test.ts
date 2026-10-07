@@ -45,6 +45,38 @@ function fakeRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe('fetchNetworkTradeCandidates', () => {
+  it('walks past a full posted page to find an older unposted trade', async () => {
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([fakeRow({ id: 'new2' }), fakeRow({ id: 'new1' })])
+      .mockResolvedValueOnce([fakeRow({ id: 'older' })]);
+    const activityFindMany = vi.fn()
+      .mockResolvedValueOnce([{ refId: 'new2' }, { refId: 'new1' }])
+      .mockResolvedValueOnce([]);
+    const prisma = fakePrisma({
+      smartWalletTokenEntry: { findMany },
+      activityFeedPost: { findMany: activityFindMany },
+    });
+    const result = await fetchNetworkTradeCandidates(prisma, 2, DEPLOYED_AT);
+    expect(result.map((r) => r.entryId)).toEqual(['older']);
+    expect(findMany.mock.calls[1]![0].cursor).toEqual({ id: 'new1' });
+    expect(findMany.mock.calls[1]![0].skip).toBe(1);
+  });
+
+  it('limits unposted results and does not repeat tied exit timestamps', async () => {
+    const findMany = vi.fn()
+      .mockResolvedValueOnce([fakeRow({ id: '3' }), fakeRow({ id: '2' })])
+      .mockResolvedValueOnce([fakeRow({ id: '1' }), fakeRow({ id: '0' })]);
+    const prisma = fakePrisma({
+      smartWalletTokenEntry: { findMany },
+      activityFeedPost: { findMany: vi.fn()
+        .mockResolvedValueOnce([{ refId: '3' }])
+        .mockResolvedValueOnce([]) },
+    });
+    const result = await fetchNetworkTradeCandidates(prisma, 2, DEPLOYED_AT);
+    expect(result.map((r) => r.entryId)).toEqual(['2', '1']);
+    expect(findMany.mock.calls[0]![0].orderBy).toEqual([{ exitAt: 'desc' }, { id: 'desc' }]);
+  });
+
   it('maps a real, fully-resolved EXITED row into a candidate', async () => {
     const findMany = vi.fn().mockResolvedValue([fakeRow()]);
     const prisma = fakePrisma({ smartWalletTokenEntry: { findMany } });
