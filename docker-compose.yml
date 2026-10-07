@@ -51,7 +51,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://nova:nova@postgres:5432/nova_sniper}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     ports:
-      - '4000:4000'
+      - '${GSP_API_PORT:-4088}:4000'
     depends_on:
       postgres:
         condition: service_healthy
@@ -116,14 +116,9 @@ services:
       dockerfile: apps/dashboard/Dockerfile
     restart: unless-stopped
     ports:
-      - '80:80'
-      - '443:443'
-    environment:
-      DOMAIN: ${DOMAIN:-localhost}
+      - '${GSP_WEB_PORT:-8088}:80'
     volumes:
-      - ./docker/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
-      - ./data/certbot/www:/var/www/certbot:ro
-      - ./data/certbot/conf:/etc/letsencrypt:ro
+      - ./docker/nginx/gsp-port.conf.template:/etc/nginx/templates/default.conf.template:ro
     depends_on:
       - api
     networks: [nova]
