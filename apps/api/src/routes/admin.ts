@@ -353,6 +353,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         { key: 'exitV2', label: 'TP1 / breakeven / trailing', enabled: config.EXIT_STRATEGY_V2_ENABLED, source: 'env', restartRequired: true },
         { key: 'arbitrage', label: 'Arbitrage radar', enabled: config.ARBITRAGE_SCANNER_ENABLED, source: 'env', restartRequired: true },
         { key: 'networkTradeScanner', label: 'External network trade scanner', enabled: config.NETWORK_TRADE_SCANNER_ENABLED || config.TELEGRAM_TRADES_ONLY, source: 'env', restartRequired: true },
+        { key: 'copyTrading', label: 'Copy-trade watcher', enabled: config.COPY_TRADING_EXECUTION_ENABLED, source: 'env', restartRequired: true },
         { key: 'telegramTrend', label: 'Telegram trend source', enabled: config.TELEGRAM_TREND_SOURCE_ENABLED, source: 'env', restartRequired: true },
         { key: 'depositMonitor', label: 'Deposit monitor', enabled: config.DEPOSIT_MONITOR_ENABLED, source: 'env', restartRequired: true },
       ],
