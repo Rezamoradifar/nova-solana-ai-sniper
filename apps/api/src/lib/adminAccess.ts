@@ -26,9 +26,14 @@ export async function requireAdminUser(req: FastifyRequest, reply: FastifyReply)
   }
   const user = await req.server.prisma.user.findUnique({
     where: { id: req.user.userId },
-    select: { role: true, telegramId: true },
+    select: { role: true, telegramId: true, isSuspended: true, deletedAt: true },
   });
-  if (!user || !isAdminUser(user, req.server.config.TELEGRAM_ADMIN_IDS)) {
+  if (
+    !user ||
+    user.isSuspended ||
+    user.deletedAt ||
+    !isAdminUser(user, req.server.config.TELEGRAM_ADMIN_IDS)
+  ) {
     await reply.code(403).send({ error: 'Forbidden' });
   }
 }
