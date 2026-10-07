@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1536 1024" role="img" aria-labelledby="t d">
+<title id="t">GSP TRADING risk controls</title><desc id="d">Security and risk-control visualization with shield, network routes, safety gates and live market telemetry.</desc>
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#070a08"/><stop offset="1" stop-color="#0d1710"/></linearGradient><radialGradient id="rg"><stop stop-color="#bdfb72" stop-opacity=".20"/><stop offset="1" stop-color="#bdfb72" stop-opacity="0"/></radialGradient></defs>
+<rect width="1536" height="1024" fill="url(#bg)"/>
+<circle cx="768" cy="480" r="430" fill="url(#rg)"/>
+<g stroke="#bdfb72" stroke-opacity=".07"><path d="M0 170h1536M0 340h1536M0 510h1536M0 680h1536M0 850h1536"/><path d="M220 0v1024M440 0v1024M660 0v1024M880 0v1024M1100 0v1024M1320 0v1024"/></g>
+<g transform="translate(500 210)" fill="none" stroke="#c9f7a5">
+<path d="M268 0 500 88v180c0 190-232 338-232 338S36 458 36 268V88L268 0Z" stroke-width="5" opacity=".65"/>
+<path d="m155 288 76 76 155-177" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g fill="#101812" stroke="#bdfb72" stroke-width="2"><circle cx="275" cy="330" r="28"/><circle cx="1260" cy="350" r="28"/><circle cx="250" cy="690" r="28"/><circle cx="1265" cy="700" r="28"/></g>
+<g stroke="#bdfb72" stroke-width="2" opacity=".34"><path d="M303 330H515M1021 350h211M278 690h250M1005 700h232"/></g>
+<g fill="#dce6dc" font-family="Arial,sans-serif"><text x="100" y="110" font-size="18" letter-spacing="6" opacity=".6">RISK · SIMULATION · EXECUTION GATES</text><text x="1035" y="895" font-size="14" letter-spacing="4" opacity=".38">GSP TRADING</text></g>
+</svg>
