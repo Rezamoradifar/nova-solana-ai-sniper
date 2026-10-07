@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1536 720" role="img" aria-labelledby="t d">
+<title id="t">GSP smart wallet copy network</title><desc id="d">Dark Solana trading network with wallet nodes, transaction paths and candlesticks.</desc>
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07100b"/><stop offset="1" stop-color="#0c1510"/></linearGradient><radialGradient id="glow"><stop stop-color="#bdfb72" stop-opacity=".22"/><stop offset="1" stop-color="#bdfb72" stop-opacity="0"/></radialGradient><filter id="blur"><feGaussianBlur stdDeviation="8"/></filter></defs>
+<rect width="1536" height="720" fill="url(#bg)"/>
+<g stroke="#bdfb72" stroke-opacity=".08"><path d="M0 120h1536M0 240h1536M0 360h1536M0 480h1536M0 600h1536"/><path d="M128 0v720M256 0v720M384 0v720M512 0v720M640 0v720M768 0v720M896 0v720M1024 0v720M1152 0v720M1280 0v720M1408 0v720"/></g>
+<circle cx="1060" cy="330" r="300" fill="url(#glow)"/>
+<g fill="none" stroke="#bdfb72" stroke-width="2"><path d="M280 460C520 180 740 600 1015 315S1300 220 1420 315" opacity=".55"/><path d="M250 520C530 360 720 420 930 250s330 160 480 50" opacity=".22"/></g>
+<g fill="#101c14" stroke="#bdfb72"><circle cx="280" cy="460" r="34"/><circle cx="620" cy="360" r="46"/><circle cx="1015" cy="315" r="56"/><circle cx="1285" cy="245" r="37"/><circle cx="1420" cy="315" r="29"/></g>
+<g fill="#bdfb72"><circle cx="280" cy="460" r="5"/><circle cx="620" cy="360" r="6"/><circle cx="1015" cy="315" r="7"/><circle cx="1285" cy="245" r="5"/><circle cx="1420" cy="315" r="4"/></g>
+<g stroke="#dbe8d7" stroke-width="3" opacity=".72"><path d="M102 500v-82M90 446h24v35H90z"/><path d="M146 420v-120M134 332h24v59h-24z"/><path d="M190 365v-92M178 296h24v42h-24z"/><path d="M234 390v-130M222 285h24v74h-24z"/></g>
+<g fill="#dce6dc" font-family="Arial,sans-serif"><text x="70" y="95" font-size="18" letter-spacing="5" opacity=".7">SOLANA SMART MONEY NETWORK</text><text x="970" y="405" font-size="15" opacity=".65">COPY SIGNAL</text><text x="1205" y="490" font-size="14" opacity=".45">ON-CHAIN FLOW</text></g>
+</svg>
