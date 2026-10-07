@@ -412,7 +412,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // Shadow-mode price sampling — independent of priceMonitor.ts (scoped to
   // OPEN positions only). See shadowModePriceSampler.ts's doc comment.
   let shadowModePriceSampler: ShadowModePriceSampler | undefined;
-  if (app.config.SHADOW_MODE_ENABLED) {
+  // The network feed needs verified exits even when shadow analysis is off.
+  if (app.config.SHADOW_MODE_ENABLED || app.config.NETWORK_TRADE_SCANNER_ENABLED) {
     shadowModePriceSampler = new ShadowModePriceSampler({
       prisma: app.prisma,
       dexScreener,

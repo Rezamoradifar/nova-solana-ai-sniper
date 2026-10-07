@@ -79,27 +79,33 @@ export async function fetchNetworkTradeCandidates(
   limit: number,
   deployedAt: Date,
 ): Promise<NetworkTradeCandidate[]> {
-  const rows = await prisma.smartWalletTokenEntry.findMany({
-    where: {
-      status: 'EXITED',
-      exitAt: { gte: deployedAt },
-      entryAmountSol: { not: null },
-      exitAmountSol: { not: null },
-      realizedPnlUsd: { not: null },
-      realizedRoiPercent: { not: null },
-    },
-    orderBy: { exitAt: 'desc' },
-    take: limit,
-    include: { token: true, wallet: true },
-  });
+  if (limit <= 0) return [];
+  const candidates = [];
+  let lastId: string | undefined;
+  // Apply the post limit after deduplication, walking past full pages of
+  // already-posted trades instead of getting stuck on the newest page.
+  for (;;) {
+    const rows = await prisma.smartWalletTokenEntry.findMany({
+      where: {
+        status: 'EXITED',
+        exitAt: { gte: deployedAt },
+        entryAmountSol: { not: null },
+        exitAmountSol: { not: null },
+        realizedPnlUsd: { not: null },
+        realizedRoiPercent: { not: null },
+      },
+      orderBy: [{ exitAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+      ...(lastId ? { cursor: { id: lastId }, skip: 1 } : {}),
+      include: { token: true, wallet: true },
+    });
+    const unposted = await filterUnposted(prisma, rows.map((r) => r.id));
+    candidates.push(...rows.filter((r) => unposted.has(r.id)));
+    if (candidates.length >= limit || rows.length < limit) break;
+    lastId = rows[rows.length - 1]!.id;
+  }
 
-  const unposted = await filterUnposted(
-    prisma,
-    rows.map((r) => r.id),
-  );
-
-  return rows
-    .filter((r) => unposted.has(r.id))
+  return candidates.slice(0, limit)
     .map((r) => ({
       entryId: r.id,
       mint: r.mint,
@@ -273,3 +279,4 @@ export function compareNetworkTradeCandidatesByPriority(
   }
   return b.realizedPnlUsd - a.realizedPnlUsd;
 }
+
