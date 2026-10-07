@@ -124,6 +124,7 @@ services:
     networks: [nova]
 
   certbot:
+    profiles: ['tls']
     image: certbot/certbot:latest
     volumes:
       - ./data/certbot/www:/var/www/certbot
