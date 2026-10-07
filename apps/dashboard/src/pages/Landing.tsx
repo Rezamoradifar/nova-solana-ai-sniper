@@ -1,580 +1,402 @@
-import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import '../landing.css';
+import { Icon, MarketTicker, TokenMark, useMarkets } from '../components/public/PublicLayout.js';
+import { money, pct } from '../lib/publicMarket.js';
+import { WebsiteTools } from '../components/public/WebsiteTools.js';
 
-const BOT_URL = import.meta.env.VITE_BOT_URL ?? 'https://t.me/GSPBankSniperBot';
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
-
-interface PublicPlan {
-  key: string;
-  name: string;
-  priceSol: number;
-  durationDays: number;
-  feeBps: number | null;
-  maxBuySol: number | null;
-  maxOpenPositions: number | null;
-  features: string[];
-}
-
-/** Shown until the live list loads (or if the API is unreachable); mirrors the seeded packages. */
-const FALLBACK_PLANS: PublicPlan[] = [
-  {
-    key: 'free',
-    name: 'Free',
-    priceSol: 0,
-    durationDays: 3650,
-    feeBps: null,
-    maxBuySol: null,
-    maxOpenPositions: null,
-    features: [
-      'Auto-buy on new launches',
-      'Security gate and real-value stop-loss',
-      'Trade cards in Telegram',
-    ],
-  },
-  {
-    key: 'pro',
-    name: 'Pro',
-    priceSol: 1.5,
-    durationDays: 30,
-    feeBps: 1500,
-    maxBuySol: 2,
-    maxOpenPositions: 5,
-    features: [
-      'Everything in Free',
-      'Lower fee: 15% of profit',
-      'Up to 2 SOL per buy, 5 open positions',
-      'Network trade feed',
-    ],
-  },
-  {
-    key: 'elite',
-    name: 'Elite',
-    priceSol: 4,
-    durationDays: 30,
-    feeBps: 1000,
-    maxBuySol: 10,
-    maxOpenPositions: 15,
-    features: [
-      'Everything in Pro',
-      'Lowest fee: 10% of profit',
-      'Up to 10 SOL per buy, 15 open positions',
-      'Arbitrage scanner reports',
-    ],
-  },
-];
-
-function usePlans(): { plans: PublicPlan[]; defaultFeeBps: number } {
-  const [plans, setPlans] = useState<PublicPlan[]>(FALLBACK_PLANS);
-  const [defaultFeeBps, setDefaultFeeBps] = useState(2000);
-  useEffect(() => {
-    let alive = true;
-    fetch(`${API_BASE}/public/plans`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((d: { plans: PublicPlan[]; defaultFeeBps?: number }) => {
-        if (alive && Array.isArray(d.plans) && d.plans.length > 0) setPlans(d.plans);
-        if (alive && typeof d.defaultFeeBps === 'number') setDefaultFeeBps(d.defaultFeeBps);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
-  return { plans, defaultFeeBps };
-}
-
-const T = {
-  en: {
-    nav: {
-      features: 'Features',
-      how: 'How it works',
-      network: 'Network trades',
-      arb: 'Arbitrage',
-      fees: 'Pricing',
-      faq: 'FAQ',
-      dashboard: 'Dashboard',
-      start: 'Start on Telegram',
-    },
-    badge: 'Smart Solana trading bot',
-    heroTitle: ['Automated memecoin trading,', 'with a security gate and a real stop-loss'],
-    heroSub:
-      'GSP TRADING spots new tokens within seconds, checks their safety before buying, and protects your capital with automatic take-profit, stop-loss and trailing stops. All inside Telegram.',
-    heroCta: 'Start free on Telegram',
-    heroCta2: 'Open dashboard',
-    heroNote: 'No install · Encrypted wallet · Risk-free paper mode',
-    stats: [
-      ['5', 'DEXes monitored live'],
-      ['5s', 'price & stop-loss checks'],
-      ['10+', 'safety checks before a buy'],
-      ['24/7', 'running on our servers'],
-    ],
-    featuresTitle: 'Everything a Solana trader needs',
-    features: [
-      [
-        '⚡',
-        'Real-time launch detection',
-        'pump.fun, PumpSwap, Raydium, Orca and Meteora are watched live; new tokens are found within seconds.',
-      ],
-      [
-        '🛡️',
-        'Security gate',
-        'Honeypots, live mint/freeze authority, holder concentration and thin liquidity are rejected before any buy.',
-      ],
-      [
-        '🎯',
-        'Entry confirmation',
-        'Waits a few minutes before buying and skips tokens whose price or liquidity has collapsed.',
-      ],
-      [
-        '📉',
-        'Real-value stop-loss',
-        'Stops trigger on the real sellable quote, not a lagging price feed.',
-      ],
-      [
-        '📈',
-        'Staged exits',
-        'Sells half at the first target, moves the stop to breakeven and trails the rest.',
-      ],
-      [
-        '🚀',
-        'Fast execution',
-        'Every order goes to several RPCs and Jito at once so it lands sooner.',
-      ],
-      [
-        '🔐',
-        'Wallet security',
-        'Keys are stored encrypted. A kill switch and daily loss cap are always on.',
-      ],
-      [
-        '📱',
-        'Telegram Mini App',
-        'Positions, PnL, settings and performance reports in a full app inside Telegram.',
-      ],
-    ],
-    howTitle: 'From detection to exit, in four steps',
-    how: [
-      ['Detect', 'Every new token or pool on Solana’s five main DEXes is found within seconds.'],
-      [
-        'Analyze',
-        'Contract safety, liquidity, holders, volume and buy/sell ratio are checked and scored.',
-      ],
-      ['Buy', 'Only if every filter passes, with the amount and risk you configured.'],
-      [
-        'Manage & sell',
-        'Positions are watched continuously and closed by take-profit, stop-loss or time limit.',
-      ],
-    ],
-    cardCaption: 'Every trade is reported in Telegram with its own card and transaction links',
-    networkTitle: 'Real network trades, verifiable on Solscan',
-    networkSub:
-      'The bot tracks active wallets across the network and publishes their best completed trades. Profit comes from the wallet’s real SOL balance change, and every post links the wallet, the buy and the sell transaction.',
-    networkPoints: [
-      'Only fully completed, verified buy + sell pairs',
-      'Direct Solscan link for every transaction',
-      'Clearly labelled: another wallet, not a bot trade',
-    ],
-    arbTitle: 'DEX-to-DEX arbitrage',
-    arbSub:
-      'The arbitrage module scans price gaps for the same token across Solana DEXes with a SOL → token → SOL round trip, and computes profit after network fees, tips and slippage.',
-    arbPoints: [
-      'Continuous scan of liquid pairs',
-      'Net profit after every cost',
-      'Runs in paper mode; live only when net profit is positive',
-    ],
-    arbBadge: 'Running · paper mode',
-    feesTitle: 'Choose your package',
-    feesSub:
-      'Start free. Upgrade for a lower profit fee and higher limits. Fees are only ever taken from profitable trades, never from losses.',
-    fees: [
-      ['10%', 'Level-1 referral reward', 'from your direct referrals’ fees'],
-      ['5%', 'Level-2 referral reward', 'from second-level referrals’ fees'],
-    ],
-    feesNote:
-      'Packages are paid in SOL from your bot wallet, directly on-chain. Prices shown are live from the bot.',
-    faqTitle: 'FAQ',
-    faq: [
-      [
-        'Are profits guaranteed?',
-        'No. Memecoin trading is high-risk; the bot reduces losses, it does not remove them. We recommend starting in paper mode.',
-      ],
-      [
-        'Is my wallet safe?',
-        'Your private key is stored encrypted and only used to sign your own trades. You can back it up at any time.',
-      ],
-      [
-        'What is paper mode?',
-        'The bot runs every step on real prices without spending real funds, so you can see results before going live.',
-      ],
-      [
-        'What is the minimum capital?',
-        'You set the size of each buy. Because of network fees, very small amounts reduce returns.',
-      ],
-      [
-        'How do I start?',
-        'Open the bot in Telegram, press /start, create or import a wallet and set your buy settings.',
-      ],
-    ],
-    ctaTitle: 'Ready to start?',
-    ctaSub: 'Get going in under a minute, right inside Telegram.',
-    risk: 'Risk warning: trading crypto, and newly launched tokens in particular, is highly risky and you may lose all of your capital. Nothing on this site is financial advice or a promise of profit. Past performance does not guarantee future results.',
-    rights: 'All rights reserved.',
-  },
-} as const;
-
-function Logo({ size = 36 }: { size?: number }) {
+export default function Landing() {
+  const { tokens, loading, error } = useMarkets();
   return (
-    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden>
-      <defs>
-        <linearGradient id="lg-mark" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#a6f7cf" />
-          <stop offset="100%" stopColor="#22d97a" />
-        </linearGradient>
-      </defs>
-      <rect width="48" height="48" rx="13" fill="url(#lg-mark)" />
-      <polyline
-        points="11,33 20,24 27,29 37,15"
-        fill="none"
-        stroke="#07090f"
-        strokeWidth="4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="37" cy="15" r="3.5" fill="#07090f" />
-    </svg>
-  );
-}
-
-/** HTML replica of the bot's sell card, for illustration. */
-function CardPreview({ label }: { label: string }) {
-  return (
-    <figure className="lp-card" aria-label={label}>
-      <div className="lp-card-top">
-        <span className="lp-card-brand">
-          <Logo size={26} /> GSP TRADING
-        </span>
-        <span className="lp-pill lp-pill-green">● POSITION CLOSED</span>
-      </div>
-      <div className="lp-card-token">
-        <span className="lp-card-avatar">S</span>
-        <div>
-          <div className="lp-card-name">Sample Token</div>
-          <div className="lp-card-sym">
-            $SAMPLE <span className="lp-pill lp-pill-muted">PUMPSWAP</span>
+    <>
+      <section className="nova-hero">
+        <img
+          className="hero-art"
+          src="/images/gsp-trading-hero.svg"
+          alt="GSP TRADING Solana execution matrix with market routes and smart-wallet nodes"
+          width="1536"
+          height="1024"
+          fetchPriority="high"
+        />
+        <div className="hero-shade" />
+        <div className="site-container hero-content">
+          <div className="hero-brand-lockup" aria-label="GSP TRADING platform">
+            <span>GSP</span>
+            <strong>TRADEING</strong>
+            <i>GLOBAL SOLANA EXECUTION PLATFORM</i>
           </div>
-        </div>
-      </div>
-      <div className="lp-card-label">PROFIT / LOSS</div>
-      <div className="lp-card-hero">+64.2%</div>
-      <div className="lp-card-sub">
-        +0.0642 SOL · <span>+$10.27</span>
-      </div>
-      <svg className="lp-card-chart" viewBox="0 0 300 90" preserveAspectRatio="none" aria-hidden>
-        <defs>
-          <linearGradient id="lg-area" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#22d97a" stopOpacity="0.35" />
-            <stop offset="100%" stopColor="#22d97a" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path
-          d="M10 76 C 70 76, 90 18, 180 14 C 230 12, 250 34, 290 30 L 290 90 L 10 90 Z"
-          fill="url(#lg-area)"
-        />
-        <path
-          d="M10 76 C 70 76, 90 18, 180 14 C 230 12, 250 34, 290 30"
-          fill="none"
-          stroke="#22d97a"
-          strokeWidth="3"
-          strokeLinecap="round"
-        />
-        <circle cx="10" cy="76" r="4" fill="#07090f" stroke="#f2f4fa" strokeWidth="2" />
-        <circle cx="180" cy="14" r="4" fill="#07090f" stroke="#f2f4fa" strokeWidth="2" />
-        <circle cx="290" cy="30" r="4" fill="#07090f" stroke="#f2f4fa" strokeWidth="2" />
-      </svg>
-      <div className="lp-card-grid">
-        <div>
-          <span>INVESTED</span>0.1000 SOL
-        </div>
-        <div>
-          <span>RETURNED</span>0.1642 SOL
-        </div>
-        <div>
-          <span>EXIT</span>Trailing Stop
-        </div>
-      </div>
-      <figcaption>{label} · sample</figcaption>
-    </figure>
-  );
-}
-
-export function Landing() {
-  const [open, setOpen] = useState<number | null>(0);
-  const [menu, setMenu] = useState(false);
-  const t = T.en;
-  const { plans, defaultFeeBps } = usePlans();
-  const featured = plans.length >= 3 ? plans[1]!.key : plans[plans.length - 1]?.key;
-
-  useEffect(() => {
-    document.title = 'GSP TRADING';
-  }, []);
-
-  const navItems: [string, string][] = [
-    ['#features', t.nav.features],
-    ['#how', t.nav.how],
-    ['#network', t.nav.network],
-    ['#arbitrage', t.nav.arb],
-    ['#fees', t.nav.fees],
-    ['#faq', t.nav.faq],
-  ];
-
-  return (
-    <div className="lp lp-en" dir="ltr">
-      <div className="lp-glow" aria-hidden />
-      <header className="lp-nav">
-        <div className="lp-wrap lp-nav-inner">
-          <a href="#top" className="lp-brand">
-            <Logo /> <span>GSP TRADING</span>
-          </a>
-          <nav className={`lp-links ${menu ? 'lp-links-open' : ''}`}>
-            {navItems.map(([href, label]) => (
-              <a key={href} href={href} onClick={() => setMenu(false)}>
-                {label}
-              </a>
-            ))}
-          </nav>
-          <div className="lp-nav-actions">
-            <Link to="/dashboard" className="lp-btn lp-btn-ghost lp-hide-sm">
-              {t.nav.dashboard}
+          <div className="eyebrow">
+            <span /> INSTITUTIONAL MARKET INTELLIGENCE
+          </div>
+          <h1>
+            Trade the spread.
+            <br />
+            <span>Control the execution.</span>
+          </h1>
+          <p>
+            Multi-venue Solana intelligence for market discovery, arbitrage analysis, and
+            simulation-gated execution workflows.
+          </p>
+          <div className="button-row">
+            <Link className="nova-button" to="/arbitrage">
+              Open arbitrage terminal <Icon name="external" size={17} />
             </Link>
-            <a
-              href={BOT_URL}
-              className="lp-btn lp-btn-primary lp-hide-xs"
-              target="_blank"
-              rel="noreferrer"
-            >
-              {t.nav.start}
-            </a>
-            <button className="lp-burger" aria-label="menu" onClick={() => setMenu(!menu)}>
-              ☰
-            </button>
+            <Link className="nova-button button-ghost" to="/tools">
+              Explore GSP TRADING
+            </Link>
+          </div>
+          <div className="hero-system-strip" aria-label="Platform capabilities">
+            <div>
+              <span>NETWORK</span>
+              <strong>Solana Mainnet</strong>
+            </div>
+            <div>
+              <span>ROUTING</span>
+              <strong>Multi-venue</strong>
+            </div>
+            <div>
+              <span>RISK LAYER</span>
+              <strong>Simulation gated</strong>
+            </div>
+            <div>
+              <span>PLATFORM</span>
+              <strong>GSP TRADING</strong>
+            </div>
           </div>
         </div>
-      </header>
-
-      <main id="top">
-        <section className="lp-wrap lp-hero">
-          <div className="lp-hero-text">
-            <span className="lp-badge">● {t.badge}</span>
-            <h1>
-              {t.heroTitle[0]}
-              <br />
-              <em>{t.heroTitle[1]}</em>
-            </h1>
-            <p>{t.heroSub}</p>
-            <div className="lp-hero-ctas">
-              <a
-                href={BOT_URL}
-                className="lp-btn lp-btn-primary lp-btn-lg"
-                target="_blank"
-                rel="noreferrer"
-              >
-                {t.heroCta}
-              </a>
-              <Link to="/dashboard" className="lp-btn lp-btn-ghost lp-btn-lg">
-                {t.heroCta2}
-              </Link>
-            </div>
-            <small>{t.heroNote}</small>
-          </div>
-          <CardPreview label={t.cardCaption} />
-        </section>
-
-        <section className="lp-wrap lp-stats">
-          {t.stats.map(([v, l]) => (
-            <div key={l}>
-              <strong>{v}</strong>
-              <span>{l}</span>
-            </div>
-          ))}
-        </section>
-
-        <section id="features" className="lp-wrap lp-section">
-          <h2>{t.featuresTitle}</h2>
-          <div className="lp-grid4">
-            {t.features.map(([icon, title, body]) => (
-              <article key={title} className="lp-feature">
-                <span className="lp-icon">{icon}</span>
-                <h3>{title}</h3>
-                <p>{body}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section id="how" className="lp-wrap lp-section">
-          <h2>{t.howTitle}</h2>
-          <ol className="lp-steps">
-            {t.how.map(([title, body], i) => (
-              <li key={title}>
-                <span className="lp-step-n">{i + 1}</span>
-                <h3>{title}</h3>
-                <p>{body}</p>
-              </li>
-            ))}
-          </ol>
-        </section>
-
-        <section id="network" className="lp-wrap lp-section lp-split">
-          <div>
-            <h2>{t.networkTitle}</h2>
-            <p className="lp-lead">{t.networkSub}</p>
-            <ul className="lp-checks">
-              {t.networkPoints.map((x) => (
-                <li key={x}>{x}</li>
-              ))}
-            </ul>
-          </div>
-          <div className="lp-panel lp-tx">
-            <div className="lp-tx-row">
-              <span>👛 Wallet</span>
-              <code>9WzD…AWWM ↗</code>
-            </div>
-            <div className="lp-tx-row">
-              <span>🧾 Buy tx</span>
-              <code>5h2k…2pQ3 ↗</code>
-            </div>
-            <div className="lp-tx-row">
-              <span>🧾 Sell tx</span>
-              <code>3aB4…7bC8 ↗</code>
-            </div>
-            <div className="lp-tx-foot">solscan.io · NETWORK TRADE · sample</div>
-          </div>
-        </section>
-
-        <section id="arbitrage" className="lp-wrap lp-section lp-split lp-split-rev">
-          <div className="lp-panel lp-arb">
-            <div className="lp-arb-route">
-              <span>SOL</span>
-              <i>→</i>
-              <span>TOKEN</span>
-              <i>→</i>
-              <span>SOL</span>
-            </div>
-            <div className="lp-arb-dex">
-              <span>Raydium</span>
-              <span>Orca</span>
-              <span>Meteora</span>
-              <span>PumpSwap</span>
-            </div>
-            <div className="lp-arb-line">
-              <span>gross gap</span>
-              <span>fees + tip + slippage</span>
-              <span>net</span>
-            </div>
-          </div>
-          <div>
-            <span className="lp-badge lp-badge-blue">● {t.arbBadge}</span>
-            <h2>{t.arbTitle}</h2>
-            <p className="lp-lead">{t.arbSub}</p>
-            <ul className="lp-checks">
-              {t.arbPoints.map((x) => (
-                <li key={x}>{x}</li>
-              ))}
-            </ul>
-          </div>
-        </section>
-
-        <section id="fees" className="lp-wrap lp-section">
-          <h2>{t.feesTitle}</h2>
-          <p className="lp-lead lp-center">{t.feesSub}</p>
-          <div className="lp-plans">
-            {plans.map((p) => (
-              <div
-                key={p.key}
-                className={`lp-plan ${p.key === featured ? 'lp-plan-featured' : ''}`}
-              >
-                {p.key === featured && <span className="lp-plan-tag">Most popular</span>}
-                <h3>{p.name}</h3>
-                <div className="lp-plan-price">
-                  {p.priceSol > 0 ? (
-                    <>
-                      <strong>{p.priceSol}</strong>
-                      <span>SOL / {p.durationDays} days</span>
-                    </>
-                  ) : (
-                    <strong>Free</strong>
-                  )}
-                </div>
-                <div className="lp-plan-fee">
-                  {`${(p.feeBps ?? defaultFeeBps) / 100}%`} <span>fee on profit only</span>
-                </div>
-                <ul className="lp-checks">
-                  {p.features.map((f) => (
-                    <li key={f}>{f}</li>
-                  ))}
-                </ul>
-                <a
-                  href={BOT_URL}
-                  className={`lp-btn ${p.key === featured ? 'lp-btn-primary' : 'lp-btn-ghost'} lp-plan-cta`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {p.priceSol > 0 ? `Get ${p.name}` : 'Start free'}
-                </a>
-              </div>
-            ))}
-          </div>
-          <div className="lp-grid3 lp-ref">
-            {t.fees.map(([v, title, note]) => (
-              <div key={title} className="lp-price">
-                <strong>{v}</strong>
-                <h3>{title}</h3>
-                <p>{note}</p>
-              </div>
-            ))}
-          </div>
-          <p className="lp-note lp-center">{t.feesNote}</p>
-        </section>
-
-        <section id="faq" className="lp-wrap lp-section lp-faq">
-          <h2>{t.faqTitle}</h2>
-          {t.faq.map(([q, a], i) => (
-            <div key={q} className={`lp-q ${open === i ? 'lp-q-open' : ''}`}>
-              <button onClick={() => setOpen(open === i ? null : i)}>
-                <span>{q}</span>
-                <b>{open === i ? '−' : '+'}</b>
-              </button>
-              {open === i && <p>{a}</p>}
-            </div>
-          ))}
-        </section>
-
-        <section className="lp-wrap lp-cta">
-          <h2>{t.ctaTitle}</h2>
-          <p>{t.ctaSub}</p>
-          <a
-            href={BOT_URL}
-            className="lp-btn lp-btn-primary lp-btn-lg"
-            target="_blank"
-            rel="noreferrer"
-          >
-            {t.heroCta}
+        <div className="site-container hero-bottom">
+          <span>01 / THE NEXT PERSPECTIVE</span>
+          <a href="#market-watch">
+            SCROLL TO EXPLORE <span aria-hidden="true">↓</span>
           </a>
-        </section>
-      </main>
-
-      <footer className="lp-footer">
-        <div className="lp-wrap">
-          <p className="lp-risk">{t.risk}</p>
-          <div className="lp-foot-row">
-            <span className="lp-brand">
-              <Logo size={28} /> <span>GSP TRADING</span>
-            </span>
-            <span>
-              © {new Date().getFullYear()} GSP TRADING · {t.rights}
-            </span>
+        </div>
+      </section>
+      <MarketTicker />
+      <div className="site-container venue-strip">
+        <span>
+          Market & quote
+          <br />
+          sources
+        </span>
+        <div>Raydium</div>
+        <div className="venue-orca">orca</div>
+        <div>
+          Meteora<span className="brand-period">✳</span>
+        </div>
+        <div className="venue-jupiter">Jupiter</div>
+        <a href="/tools#questions" aria-label="Read about data sources">
+          <Icon name="external" size={18} />
+        </a>
+      </div>
+      <section className="site-section site-container" id="market-watch">
+        <div className="workspace-intro">
+          <div>
+            <span className="eyebrow">ON THE WEBSITE</span>
+            <h2>Your tools. Ready to open.</h2>
+          </div>
+          <Link className="text-link" to="/tools">
+            All website tools
+          </Link>
+        </div>
+        <WebsiteTools />
+        <div className="section-heading">
+          <div>
+            <div className="eyebrow">
+              <span /> THE MARKET, IN FOCUS
+            </div>
+            <h2>
+              A wider lens.
+              <br />
+              <span className="muted">A sharper view.</span>
+            </h2>
+          </div>
+          <div className="section-heading-aside">
+            <p>
+              Follow the assets and liquidity shaping Solana. See current prices, then look closer.
+            </p>
+            <Link className="text-link" to="/markets">
+              Explore all markets <span aria-hidden="true">↗</span>
+            </Link>
           </div>
         </div>
-      </footer>
-    </div>
+        <div className="market-preview panel">
+          <div className="panel-label">
+            <span>
+              <Icon name="activity" size={16} /> Market watch
+            </span>
+            <span className="subtle-label">DEX SCREENER · 30 SEC REFRESH</span>
+          </div>
+          <div className="table-scroll">
+            <table className="nova-table">
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Price</th>
+                  <th>24h change</th>
+                  <th>Observed liquidity</th>
+                  <th>24h pool volume</th>
+                  <th>
+                    <span className="sr-only">View</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {tokens.slice(0, 4).map((t) => (
+                  <tr key={t.mint}>
+                    <td>
+                      <Link className="asset-cell" to="/markets">
+                        <TokenMark symbol={t.symbol} color={t.color} />
+                        <span>
+                          <strong>{t.name}</strong>
+                          <small>{t.symbol}</small>
+                        </span>
+                      </Link>
+                    </td>
+                    <td className="number">{money(t.price)}</td>
+                    <td
+                      className={`number ${t.change != null && t.change < 0 ? 'negative' : 'positive'}`}
+                    >
+                      {pct(t.change)}
+                    </td>
+                    <td className="number muted">{money(t.liquidity, true)}</td>
+                    <td className="number muted">{money(t.volume, true)}</td>
+                    <td>
+                      <Link className="table-link" to="/markets" aria-label={`Explore ${t.name}`}>
+                        ↗
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!tokens.length && (
+              <div className="empty-state">
+                <Icon name={loading ? 'refresh' : 'globe'} size={30} />
+                <h3>{loading ? 'Connecting to the market' : 'Market feed unavailable'}</h3>
+                <p>{error ?? 'Current prices will appear here as soon as the source responds.'}</p>
+                <Link className="text-link" to="/markets">
+                  Open markets ↗
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+        <p className="source-note">
+          Prices reflect selected pools. Observed liquidity and volume cover returned pools, not the
+          entire market.
+        </p>
+      </section>
+      <section className="toolkit-section">
+        <div className="site-container site-section">
+          <div className="section-heading">
+            <div>
+              <div className="eyebrow">
+                <span /> GSP EXECUTION STACK
+              </div>
+              <h2>
+                Intelligence first.
+                <br />
+                <span className="muted">Execution with context.</span>
+              </h2>
+            </div>
+            <p className="section-intro">
+              One institutional interface for market discovery, cross-venue route analysis,
+              execution assumptions, and risk-aware trading workflows.
+            </p>
+          </div>
+          <div className="feature-grid">
+            <Link className="feature-card feature-main" to="/arbitrage">
+              <img
+                src="/images/nova-execution.webp"
+                alt="Two titanium arcs linked by a bright green stream"
+                width="1536"
+                height="1024"
+                loading="lazy"
+              />
+              <div className="feature-top">
+                <span className="outline-tag">01 / ARBITRAGE INTELLIGENCE</span>
+                <span className="round-arrow">↗</span>
+              </div>
+              <div className="feature-copy">
+                <h3>
+                  A different angle
+                  <br />
+                  on every route.
+                </h3>
+                <p>
+                  Compare direct routes across venues. See the return, cost assumptions, and age of
+                  every observation.
+                </p>
+                <span className="text-link">Enter the terminal ↗</span>
+              </div>
+            </Link>
+            <Link className="feature-card feature-markets" to="/markets">
+              <div className="feature-top">
+                <span className="outline-tag">02 / MARKET EXPLORER</span>
+                <span className="round-arrow">↗</span>
+              </div>
+              <div className="token-orbit" aria-hidden="true">
+                <TokenMark symbol="SOL" />
+                <TokenMark symbol="JUP" color="#b7f080" />
+                <TokenMark symbol="RAY" color="#baa0ff" />
+                <TokenMark symbol="WIF" color="#caa779" />
+              </div>
+              <div className="feature-copy">
+                <h3>Follow the flow.</h3>
+                <p>Search assets. Compare liquidity. Find the pools behind the price.</p>
+              </div>
+            </Link>
+            <Link className="feature-card feature-controls" to="/security">
+              <Icon name="shield" size={33} />
+              <div>
+                <span className="eyebrow">03 / INFORMED CONTROL</span>
+                <h3>
+                  Confidence starts
+                  <br />
+                  with understanding.
+                </h3>
+              </div>
+              <span className="round-arrow">↗</span>
+            </Link>
+          </div>
+        </div>
+      </section>
+      <section className="site-container site-section split-section">
+        <div>
+          <div className="eyebrow">
+            <span /> INSIDE THE TERMINAL
+          </div>
+          <h2>
+            Two venues.
+            <br />
+            <span className="muted">One informed view.</span>
+          </h2>
+          <p className="large-copy">
+            A spread is only the beginning. GSP TRADING brings both sides of the route,
+            execution-cost assumptions, and quote freshness into the same frame.
+          </p>
+          <div className="check-list">
+            <div>
+              <Icon name="check" /> Every ordered pair across three venues
+            </div>
+            <div>
+              <Icon name="check" /> Minimum quote outputs and adjustable buffers
+            </div>
+            <div>
+              <Icon name="check" /> Real observations you can inspect and export
+            </div>
+          </div>
+          <Link className="nova-button button-outline" to="/arbitrage">
+            See the live terminal <span aria-hidden="true">↗</span>
+          </Link>
+        </div>
+        <div className="route-illustration">
+          <div className="panel-label">
+            <span>
+              <Icon name="scan" size={17} /> A round trip, unpacked
+            </span>
+            <span className="outline-tag">ILLUSTRATION</span>
+          </div>
+          <div className="route-flow">
+            <div className="route-flow-node">
+              <TokenMark symbol="SOL" />
+              <strong>SOL</strong>
+              <small>Starting asset</small>
+            </div>
+            <div className="route-connector">
+              <span>VENUE A</span>
+              <i />
+              <small>Buy quote</small>
+            </div>
+            <div className="route-flow-node">
+              <TokenMark symbol="USDC" color="#7fa8f2" />
+              <strong>USDC</strong>
+              <small>Intermediate asset</small>
+            </div>
+            <div className="route-connector">
+              <span>VENUE B</span>
+              <i />
+              <small>Sell quote</small>
+            </div>
+            <div className="route-flow-node">
+              <TokenMark symbol="SOL" />
+              <strong>SOL</strong>
+              <small>Return asset</small>
+            </div>
+          </div>
+          <div className="formula">
+            <span>Minimum return</span>
+            <span>− Starting amount</span>
+            <span>− Cost budget & buffer</span>
+            <strong>= Estimated net result</strong>
+          </div>
+          <p className="source-note">
+            Sequential quotes are observations. They do not reserve liquidity or create an atomic
+            transaction.
+          </p>
+        </div>
+      </section>
+      <section className="security-story site-container">
+        <div className="security-art">
+          <img
+            src="/images/gsp-risk-grid.svg"
+            alt="GSP TRADING risk, simulation, and execution-gate visualization"
+            width="1536"
+            height="1024"
+            loading="lazy"
+          />
+        </div>
+        <div className="security-copy">
+          <div className="eyebrow">
+            <span /> CLARITY BEFORE EXECUTION
+          </div>
+          <h2>
+            Your decisions.
+            <br />
+            <span className="muted">Made with context.</span>
+          </h2>
+          <p>
+            Understand the custody model, market risks, and limits of quoted returns before you
+            commit capital.
+          </p>
+          <Link className="text-link" to="/security">
+            Explore risk & security ↗
+          </Link>
+        </div>
+      </section>
+      <section className="site-container closing-cta">
+        <div className="eyebrow">
+          <span /> GSP TRADING · BUILT FOR EXECUTION
+        </div>
+        <h2>
+          The whole picture.
+          <br />
+          <span>Within reach.</span>
+        </h2>
+        <p>Open the market, inspect the route, and act only when the numbers justify it.</p>
+        <div className="button-row">
+          <Link className="nova-button" to="/arbitrage">
+            Open the terminal <Icon name="external" size={17} />
+          </Link>
+          <Link className="nova-button button-ghost" to="/wallet">
+            Connect wallet
+          </Link>
+        </div>
+        <span className="cta-orbit" aria-hidden="true">
+          ◎
+        </span>
+      </section>
+      <section className="site-container telegram-entry">
+        <div className="telegram-entry-title">
+          <Icon name="telegram" size={32} />
+          <div>
+            <span className="eyebrow">IN TELEGRAM</span>
+            <h2>GSP TRADING bot</h2>
+            <p>Wallets, snipe configs, open positions, and packages — in your Telegram account.</p>
+          </div>
+        </div>
+        <Link className="nova-button button-outline" to="/telegram">
+          Explore Telegram bot
+        </Link>
+      </section>
+    </>
   );
 }
