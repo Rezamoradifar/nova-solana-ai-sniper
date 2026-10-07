@@ -4,7 +4,7 @@ import { api, ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.js';
 import { usePolling } from '../lib/usePolling.js';
 
-type Tab = 'control' | 'users' | 'trades' | 'positions' | 'plans' | 'money' | 'audit';
+type Tab = 'control' | 'users' | 'trades' | 'positions' | 'copy' | 'plans' | 'money' | 'audit';
 type Page<T> = { total: number; rows: T[] };
 
 type Control = {
@@ -86,7 +86,7 @@ export function Admin() {
 
   if (!(user?.isAdmin || user?.role === 'ADMIN')) return <div className="card text-slate-300">Admin access required.</div>;
   const c = control.data;
-  const tabs: Array<[Tab, string]> = [['control','Control'],['users','Users'],['trades','Trades'],['positions','Positions'],['plans','Plans & Revenue'],['money','Money'],['audit','Audit']];
+  const tabs: Array<[Tab, string]> = [['control','Control'],['users','Users'],['trades','Trades'],['positions','Positions'],['copy','Copy Configs'],['plans','Plans & Revenue'],['money','Money'],['audit','Audit']];
 
   return <div className="space-y-6">
     <div><div className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">GSP Operations</div><h1 className="mt-1 text-2xl font-semibold text-white">Admin Control Center</h1><p className="mt-1 text-sm text-slate-400">Trading, risk, users, money flows and infrastructure. Secrets are never exposed.</p></div>
@@ -130,6 +130,7 @@ export function Admin() {
     {tab === 'users' && <Users />}
     {tab === 'trades' && <Trades />}
     {tab === 'positions' && <Positions />}
+    {tab === 'copy' && <CopyConfigs />}
     {tab === 'plans' && <Plans />}
     {tab === 'money' && <Money />}
     {tab === 'audit' && <Audit />}
@@ -152,6 +153,50 @@ function Positions() {
   const [r, setR] = useState(0); const q = usePolling(() => api.get<Page<PositionRow>>('/admin/positions?limit=100'), 15000, r);
   const close = async (x: PositionRow) => { if (!window.confirm('Force-close this position? LIVE positions can move real funds.')) return; try { await api.post('/admin/positions/' + x.id + '/close'); setR((v) => v + 1); } catch (e) { window.alert(err(e)); } };
   return <section className="card overflow-x-auto"><h2 className="mb-4 text-lg font-semibold text-white">All positions</h2><table className="table-base min-w-[900px]"><thead><tr><th>Mode</th><th>Token</th><th>User</th><th>Invested</th><th>TP / SL</th><th>PnL</th><th>Status</th><th /></tr></thead><tbody>{(q.data?.rows ?? []).map((x) => <tr key={x.id}><td>{x.isPaperTrade ? 'PAPER' : 'LIVE'}</td><td>{x.token.symbol ?? short(x.token.mint)}</td><td>{x.wallet.user.email ?? x.wallet.user.telegramId ?? short(x.wallet.user.id)}</td><td>{x.amountSolInvested.toFixed(4)} SOL</td><td>{x.takeProfitPercent ?? '—'}% / {x.stopLossPercent ?? '—'}%</td><td>{x.realizedPnlUsd == null ? '—' : money(x.realizedPnlUsd)}</td><td>{x.status}</td><td>{x.status === 'OPEN' && <button className="text-xs text-loss" onClick={() => void close(x)}>Force close</button>}</td></tr>)}</tbody></table></section>;
+}
+
+
+type CopyConfigRow = {
+  id: string;
+  userId: string;
+  targetAddress: string;
+  isActive: boolean;
+  copyPercentSize: number;
+  maxAmountSol: number | null;
+  createdAt: string;
+  user: { email: string | null; telegramId: string | null };
+};
+function CopyConfigs() {
+  const [refresh, setRefresh] = useState(0);
+  const q = usePolling(() => api.get<Page<CopyConfigRow>>('/admin/copy-trades?limit=100'), 20000, refresh);
+  async function toggle(row: CopyConfigRow) {
+    try {
+      await api.put('/admin/copy-trades/' + row.id, { enabled: !row.isActive });
+      setRefresh((v) => v + 1);
+    } catch (e) {
+      window.alert(err(e));
+    }
+  }
+  return <div className="space-y-4">
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+      Copy-trade configuration records are visible here. Live external-wallet signal execution is not claimed as active until its worker wiring is enabled and verified.
+    </div>
+    <section className="card overflow-x-auto">
+      <h2 className="mb-4 text-lg font-semibold text-white">Copy configurations · {q.data?.total ?? 0}</h2>
+      <table className="table-base min-w-[850px]">
+        <thead><tr><th>User</th><th>Target wallet</th><th>Size</th><th>Max amount</th><th>Status</th><th>Created</th><th /></tr></thead>
+        <tbody>{(q.data?.rows ?? []).map((row) => <tr key={row.id}>
+          <td>{row.user.email ?? row.user.telegramId ?? short(row.userId)}</td>
+          <td><a className="text-violet-300 hover:underline" target="_blank" rel="noreferrer" href={'https://solscan.io/account/' + row.targetAddress}>{short(row.targetAddress)}</a></td>
+          <td>{row.copyPercentSize}%</td>
+          <td>{row.maxAmountSol == null ? 'Plan/default' : row.maxAmountSol + ' SOL'}</td>
+          <td className={row.isActive ? 'text-profit' : 'text-slate-500'}>{row.isActive ? 'Configured ON' : 'Paused'}</td>
+          <td>{new Date(row.createdAt).toLocaleDateString()}</td>
+          <td><button className="text-xs text-violet-300" onClick={() => void toggle(row)}>{row.isActive ? 'Pause' : 'Resume config'}</button></td>
+        </tr>)}</tbody>
+      </table>
+    </section>
+  </div>;
 }
 
 type PlanRow = {
