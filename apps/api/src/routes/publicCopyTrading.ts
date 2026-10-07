@@ -107,11 +107,20 @@ export default async function publicCopyTradingRoutes(fastify: FastifyInstance) 
         }
       }
 
+      const watcherReady = fastify.copyTradingExecutionReady === true;
+      const executionMode = !watcherReady
+        ? 'disabled'
+        : fastify.tradingMode === 'LIVE'
+          ? 'live'
+          : 'paper';
+
       return {
         chain: 'solana',
         mode: 'signal_only',
         copyConfigEnabled: true,
-        liveExecutionEnabled: fastify.tradingMode === 'LIVE',
+        copyWatcherReady: watcherReady,
+        executionMode,
+        liveExecutionEnabled: executionMode === 'live',
         updatedAt: Date.now(),
         localWallets,
         gmgn,
