@@ -164,7 +164,7 @@ export function PublicSecurity() {
       />
       <div className="security-banner">
         <img
-          src="/images/nova-security.webp"
+          src="/images/gsp-risk-grid.svg"
           alt="Sculptural titanium enclosure with a thin luminous green seam"
           width="1536"
           height="1024"
