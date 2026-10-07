@@ -154,7 +154,7 @@ export function NovaMark({ small = false }: { small?: boolean }) {
         />
       </svg>
       <span className="brand-word">
-        GSP<span>TRADEING</span>
+        GSP<span>TRADING</span>
       </span>
     </span>
   );
