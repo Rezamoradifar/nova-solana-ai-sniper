@@ -472,6 +472,7 @@ export const envSchema = z.object({
   TWITTER_API_SECRET: z.string().optional(),
   TWITTER_ACCESS_TOKEN: z.string().optional(),
   TWITTER_ACCESS_SECRET: z.string().optional(),
+  GMGN_API_KEY: z.string().optional(),
   TWITTER_BEARER_TOKEN: z.string().optional(),
   TWITTER_SEARCH_QUERY: z
     .string()
