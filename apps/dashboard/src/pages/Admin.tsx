@@ -8,7 +8,7 @@ type Tab = 'control' | 'users' | 'trades' | 'positions' | 'plans' | 'money' | 'a
 type Page<T> = { total: number; rows: T[] };
 
 type Control = {
-  runtime: { tradingMode: 'LIVE' | 'PAPER' | null; backgroundWorkersReady: boolean; killSwitch: boolean; autoBuyPaused: boolean };
+  runtime: { tradingMode: 'LIVE' | 'PAPER' | null; backgroundWorkersReady: boolean; killSwitch: boolean; autoBuyPaused: boolean; scanner: { state?: string; activeProviderLabel?: string } | null };
   safety: { maxTradeSol: number; maxDailyLossUsd: number; maxOpenPositions: number; minWalletReserveSol: number; maxStopLossPercent: number };
   features: { key: string; label: string; enabled: boolean; restartRequired: boolean }[];
   integrations: { key: string; label: string; configured: boolean }[];
@@ -77,8 +77,8 @@ export function Admin() {
 
     {tab === 'control' && (!c ? <div className="card text-slate-400">Loading…</div> : <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Mode" value={c.runtime.tradingMode ?? 'OFFLINE'} tone={c.runtime.tradingMode === 'LIVE' ? 'text-loss' : 'text-violet-300'} />
-        <Stat label="Users" value={String(c.counters.users)} sub={String(c.counters.activeWallets) + ' wallets'} />
+        <Stat label="Mode" value={c.runtime.tradingMode ?? 'OFFLINE'} tone={c.runtime.tradingMode === 'LIVE' ? 'text-loss' : 'text-violet-300'} sub={c.runtime.backgroundWorkersReady ? 'workers ready' : 'workers not ready'} />
+        <Stat label="Scanner" value={c.runtime.scanner?.state ?? 'UNKNOWN'} sub={c.runtime.scanner?.activeProviderLabel ?? 'provider unresolved'} /><Stat label="Users" value={String(c.counters.users)} sub={String(c.counters.activeWallets) + ' wallets'} />
         <Stat label="Open positions" value={String(c.counters.openPositions)} />
         <Stat label="Net profit / 24h" value={money(c.profit.netProfitUsd24h)} tone={c.profit.netProfitUsd24h >= 0 ? 'text-profit' : 'text-loss'} />
         <Stat label="Live trades / 24h" value={String(c.counters.liveTrades24h)} sub={String(c.counters.paperTrades24h) + ' paper'} />
