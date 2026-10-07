@@ -3,8 +3,25 @@ import { useEffect, useState } from 'react';
 import { api, ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.js';
 import { usePolling } from '../lib/usePolling.js';
+import { UserManagement } from '../admin/UserManagement.js';
+import { WalletManagement } from '../admin/WalletManagement.js';
+import { CopyTradingManagement } from '../admin/CopyTradingManagement.js';
+import { BlacklistManagement } from '../admin/BlacklistManagement.js';
+import { BroadcastManagement } from '../admin/BroadcastManagement.js';
+import { WithdrawalManagement } from '../admin/WithdrawalManagement.js';
 
-type Tab = 'control' | 'users' | 'trades' | 'positions' | 'copy' | 'plans' | 'money' | 'audit';
+type Tab =
+  | 'control'
+  | 'users'
+  | 'wallets'
+  | 'trades'
+  | 'positions'
+  | 'copy'
+  | 'blacklist'
+  | 'broadcast'
+  | 'plans'
+  | 'money'
+  | 'audit';
 type Page<T> = { total: number; rows: T[] };
 
 type Control = {
@@ -86,7 +103,19 @@ export function Admin() {
 
   if (!(user?.isAdmin || user?.role === 'ADMIN')) return <div className="card text-slate-300">Admin access required.</div>;
   const c = control.data;
-  const tabs: Array<[Tab, string]> = [['control','Control'],['users','Users'],['trades','Trades'],['positions','Positions'],['copy','Copy Configs'],['plans','Plans & Revenue'],['money','Money'],['audit','Audit']];
+  const tabs: Array<[Tab, string]> = [
+    ['control', 'Control'],
+    ['users', 'Users'],
+    ['wallets', 'Wallets'],
+    ['trades', 'Trades'],
+    ['positions', 'Positions'],
+    ['copy', 'Copy Trading'],
+    ['blacklist', 'Blacklist'],
+    ['broadcast', 'Broadcast'],
+    ['plans', 'Plans & Revenue'],
+    ['money', 'Withdrawals & Payouts'],
+    ['audit', 'Audit'],
+  ];
 
   return <div className="space-y-6">
     <div><div className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">GSP Operations</div><h1 className="mt-1 text-2xl font-semibold text-white">Admin Control Center</h1><p className="mt-1 text-sm text-slate-400">Trading, risk, users, money flows and infrastructure. Secrets are never exposed.</p></div>
@@ -127,12 +156,15 @@ export function Admin() {
       </div>
     </div>)}
 
-    {tab === 'users' && <Users />}
+    {tab === 'users' && <UserManagement />}
+    {tab === 'wallets' && <WalletManagement />}
     {tab === 'trades' && <Trades />}
     {tab === 'positions' && <Positions />}
-    {tab === 'copy' && <CopyConfigs />}
+    {tab === 'copy' && <CopyTradingManagement />}
+    {tab === 'blacklist' && <BlacklistManagement />}
+    {tab === 'broadcast' && <BroadcastManagement />}
     {tab === 'plans' && <Plans />}
-    {tab === 'money' && <Money />}
+    {tab === 'money' && <WithdrawalManagement />}
     {tab === 'audit' && <Audit />}
   </div>;
 }
