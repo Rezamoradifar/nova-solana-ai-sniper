@@ -118,7 +118,7 @@ export function Admin() {
   ];
 
   return <div className="space-y-6">
-    <div><div className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">GSP Operations</div><h1 className="mt-1 text-2xl font-semibold text-white">Admin Control Center</h1><p className="mt-1 text-sm text-slate-400">Trading, risk, users, money flows and infrastructure. Secrets are never exposed.</p></div>
+    <div><div className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">GSP TRADING Operations</div><h1 className="mt-1 text-2xl font-semibold text-white">Admin Control Center</h1><p className="mt-1 text-sm text-slate-400">Trading, risk, users, money flows and infrastructure. Secrets are never exposed.</p></div>
     <div className="flex gap-2 overflow-x-auto">{tabs.map(([k,l]) => <button key={k} onClick={() => setTab(k)} className={'rounded-lg px-4 py-2 text-sm ' + (tab === k ? 'bg-accent text-white' : 'border border-surface-border bg-surface-raised text-slate-400')}>{l}</button>)}</div>
     {message && <div className="rounded-lg border border-profit/30 bg-profit/10 p-3 text-sm text-green-300">{message}</div>}
     {failure && <div className="rounded-lg border border-loss/30 bg-loss/10 p-3 text-sm text-red-300">{failure}</div>}
