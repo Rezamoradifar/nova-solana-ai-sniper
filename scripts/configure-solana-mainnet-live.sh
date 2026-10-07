@@ -65,8 +65,23 @@ set_env PAPER_TRADING "false"
 # Real-time network intelligence / marketing feed.
 set_env NETWORK_TRADE_SCANNER_ENABLED "true"
 set_env NETWORK_TRADE_FEED_ENABLED "true"
+set_env NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY "10"
 set_env TELEGRAM_TRADES_ONLY "true"
 set_env TELEGRAM_DAILY_TRADE_CARD_LIMIT "10"
+
+# Real copy-trading signal watcher: fresh confirmed buys only, normal GSP
+# PositionManager/safety checks always apply.
+set_env COPY_TRADING_EXECUTION_ENABLED "true"
+set_env COPY_TRADING_POLL_INTERVAL_MS "15000"
+set_env COPY_TRADING_MAX_SIGNAL_AGE_SECONDS "120"
+set_env COPY_TRADING_MIN_SOURCE_BUY_SOL "0.01"
+
+# Quote intelligence. Scanner remains observation-only; it does not fabricate
+# an atomic arbitrage executor.
+set_env ARBITRAGE_SCANNER_ENABLED "true"
+
+# Standalone institutional GSP TRADING frontend.
+set_env GSP_WEB_PORT "8088"
 
 # Keep core safety controls enabled/conservative.
 set_env REAL_VALUE_STOP_ENABLED "true"
@@ -87,11 +102,11 @@ unset HELIUS_KEY
 echo "Applying database migrations..."
 docker compose up -d postgres redis
 docker compose build migrate
-docker compose run --rm migrate
+docker compose run -T --rm migrate
 
 echo "Rebuilding Solana-connected services..."
-docker compose build --no-cache api telegram-bot marketing-engine nginx
-docker compose up -d --force-recreate api telegram-bot marketing-engine nginx
+docker compose build --no-cache api telegram-bot marketing-engine gsp-web
+docker compose up -d --force-recreate api telegram-bot marketing-engine gsp-web
 
 echo
 echo "=== SERVICES ==="
