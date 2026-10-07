@@ -4,7 +4,7 @@ import { api, ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.js';
 import { usePolling } from '../lib/usePolling.js';
 
-type Tab = 'control' | 'users' | 'trades' | 'positions' | 'money' | 'audit';
+type Tab = 'control' | 'users' | 'trades' | 'positions' | 'plans' | 'money' | 'audit';
 type Page<T> = { total: number; rows: T[] };
 
 type Control = {
@@ -58,7 +58,7 @@ export function Admin() {
 
   if (!(user?.isAdmin || user?.role === 'ADMIN')) return <div className="card text-slate-300">Admin access required.</div>;
   const c = control.data;
-  const tabs: Array<[Tab, string]> = [['control','Control'],['users','Users'],['trades','Trades'],['positions','Positions'],['money','Money'],['audit','Audit']];
+  const tabs: Array<[Tab, string]> = [['control','Control'],['users','Users'],['trades','Trades'],['positions','Positions'],['plans','Plans & Revenue'],['money','Money'],['audit','Audit']];
 
   return <div className="space-y-6">
     <div><div className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">GSP Operations</div><h1 className="mt-1 text-2xl font-semibold text-white">Admin Control Center</h1><p className="mt-1 text-sm text-slate-400">Trading, risk, users, money flows and infrastructure. Secrets are never exposed.</p></div>
@@ -102,6 +102,7 @@ export function Admin() {
     {tab === 'users' && <Users />}
     {tab === 'trades' && <Trades />}
     {tab === 'positions' && <Positions />}
+    {tab === 'plans' && <Plans />}
     {tab === 'money' && <Money />}
     {tab === 'audit' && <Audit />}
   </div>;
@@ -124,6 +125,84 @@ function Positions() {
   const close = async (x: PositionRow) => { if (!window.confirm('Force-close this position? LIVE positions can move real funds.')) return; try { await api.post('/admin/positions/' + x.id + '/close'); setR((v) => v + 1); } catch (e) { window.alert(err(e)); } };
   return <section className="card overflow-x-auto"><h2 className="mb-4 text-lg font-semibold text-white">All positions</h2><table className="table-base min-w-[900px]"><thead><tr><th>Mode</th><th>Token</th><th>User</th><th>Invested</th><th>TP / SL</th><th>PnL</th><th>Status</th><th /></tr></thead><tbody>{(q.data?.rows ?? []).map((x) => <tr key={x.id}><td>{x.isPaperTrade ? 'PAPER' : 'LIVE'}</td><td>{x.token.symbol ?? short(x.token.mint)}</td><td>{x.wallet.user.email ?? x.wallet.user.telegramId ?? short(x.wallet.user.id)}</td><td>{x.amountSolInvested.toFixed(4)} SOL</td><td>{x.takeProfitPercent ?? '—'}% / {x.stopLossPercent ?? '—'}%</td><td>{x.realizedPnlUsd == null ? '—' : usd(x.realizedPnlUsd)}</td><td>{x.status}</td><td>{x.status === 'OPEN' && <button className="text-xs text-loss" onClick={() => void close(x)}>Force close</button>}</td></tr>)}</tbody></table></section>;
 }
+
+type PlanRow = {
+  key: string; name: string; priceSol: number; durationDays: number; feeBps: number | null;
+  maxBuySol: number | null; maxOpenPositions: number | null; autoBuyEnabled: boolean; active: boolean;
+  activeSubscribers: number; sales: number; revenueSol: number; sales30d: number; revenue30dSol: number;
+};
+type PlansResponse = {
+  totals: { users: number; paidSubscribers: number; freeUsers: number; revenueSol: number; revenue30dSol: number; sales: number };
+  plans: PlanRow[];
+};
+
+function Plans() {
+  const [refresh, setRefresh] = useState(0);
+  const q = usePolling(() => api.get<PlansResponse>('/admin/plans'), 30000, refresh);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ priceSol: '', feePercent: '', maxBuySol: '', maxOpenPositions: '', active: true, autoBuyEnabled: true });
+  const [busy, setBusy] = useState(false);
+
+  function edit(p: PlanRow) {
+    setEditing(p.key);
+    setDraft({
+      priceSol: String(p.priceSol),
+      feePercent: p.feeBps == null ? '' : String(p.feeBps / 100),
+      maxBuySol: p.maxBuySol == null ? '' : String(p.maxBuySol),
+      maxOpenPositions: p.maxOpenPositions == null ? '' : String(p.maxOpenPositions),
+      active: p.active,
+      autoBuyEnabled: p.autoBuyEnabled,
+    });
+  }
+
+  async function save(key: string) {
+    setBusy(true);
+    try {
+      await api.put('/admin/plans/' + key, {
+        priceSol: Number(draft.priceSol),
+        feePercent: draft.feePercent === '' ? null : Number(draft.feePercent),
+        maxBuySol: draft.maxBuySol === '' ? null : Number(draft.maxBuySol),
+        maxOpenPositions: draft.maxOpenPositions === '' ? null : Number(draft.maxOpenPositions),
+        active: draft.active,
+        autoBuyEnabled: draft.autoBuyEnabled,
+      });
+      setEditing(null);
+      setRefresh((v) => v + 1);
+    } catch (e) {
+      window.alert(err(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const totals = q.data?.totals;
+  return <div className="space-y-5">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <Stat label="Total revenue" value={(totals?.revenueSol ?? 0).toFixed(3) + ' SOL'} tone="text-profit" />
+      <Stat label="Revenue / 30d" value={(totals?.revenue30dSol ?? 0).toFixed(3) + ' SOL'} />
+      <Stat label="Paid subscribers" value={String(totals?.paidSubscribers ?? 0)} sub={(totals?.users ?? 0) + ' total users'} />
+      <Stat label="Plan sales" value={String(totals?.sales ?? 0)} />
+    </div>
+    <section className="card overflow-x-auto">
+      <h2 className="mb-4 text-lg font-semibold text-white">Packages</h2>
+      <table className="table-base min-w-[1000px]">
+        <thead><tr><th>Plan</th><th>Price</th><th>Fee</th><th>Max buy</th><th>Max open</th><th>Subscribers</th><th>Revenue</th><th>Status</th><th /></tr></thead>
+        <tbody>{(q.data?.plans ?? []).map((p) => <tr key={p.key}>
+          <td><div className="font-medium text-slate-200">{p.name}</div><div className="text-[11px] text-slate-500">{p.key} · {p.durationDays} days</div></td>
+          <td>{editing === p.key ? <input className="input-field w-24" value={draft.priceSol} onChange={(e) => setDraft({...draft, priceSol:e.target.value})} /> : p.priceSol + ' SOL'}</td>
+          <td>{editing === p.key ? <input className="input-field w-20" value={draft.feePercent} placeholder="global" onChange={(e) => setDraft({...draft, feePercent:e.target.value})} /> : (p.feeBps == null ? 'Global' : p.feeBps / 100 + '%')}</td>
+          <td>{editing === p.key ? <input className="input-field w-20" value={draft.maxBuySol} placeholder="∞" onChange={(e) => setDraft({...draft, maxBuySol:e.target.value})} /> : (p.maxBuySol ?? '∞')}</td>
+          <td>{editing === p.key ? <input className="input-field w-20" value={draft.maxOpenPositions} placeholder="∞" onChange={(e) => setDraft({...draft, maxOpenPositions:e.target.value})} /> : (p.maxOpenPositions ?? '∞')}</td>
+          <td>{p.activeSubscribers}</td>
+          <td>{p.revenueSol.toFixed(3)} SOL</td>
+          <td>{editing === p.key ? <div className="space-y-1 text-xs"><label className="flex gap-2"><input type="checkbox" checked={draft.active} onChange={(e)=>setDraft({...draft,active:e.target.checked})}/> Visible</label><label className="flex gap-2"><input type="checkbox" checked={draft.autoBuyEnabled} onChange={(e)=>setDraft({...draft,autoBuyEnabled:e.target.checked})}/> Auto-buy</label></div> : (p.active ? 'Active' : 'Hidden')}</td>
+          <td>{editing === p.key ? <div className="space-x-2"><button disabled={busy} className="text-xs text-profit" onClick={() => void save(p.key)}>Save</button><button className="text-xs text-slate-400" onClick={() => setEditing(null)}>Cancel</button></div> : <button className="text-xs text-violet-300" onClick={() => edit(p)}>Edit</button>}</td>
+        </tr>)}</tbody>
+      </table>
+    </section>
+  </div>;
+}
+
 type Withdrawal = { id: string; userId: string; amountUsd: number; destinationAddress: string; status: string; riskScore: number; requestedAt: string };
 type Payout = { id: string; positionId: string; status: string; totalLamports: string; txSignature: string | null; failureReason: string | null; createdAt: string };
 function Money() {
