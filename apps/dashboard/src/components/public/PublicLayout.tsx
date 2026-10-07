@@ -8,7 +8,14 @@ import {
   type ReactNode,
 } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
-import { BOT_URL, fetchMarkets, money, pct, type MarketToken } from '../../lib/publicMarket.js';
+import {
+  BOT_URL,
+  PUBLIC_API_BASE,
+  fetchMarkets,
+  money,
+  pct,
+  type MarketToken,
+} from '../../lib/publicMarket.js';
 import { useWalletConnection } from '../../lib/WalletContext.js';
 import '../../landing.css';
 import '../../workspace.css';
@@ -318,8 +325,19 @@ export function PageHeading({
   );
 }
 
+interface PublicNetworkStatus {
+  chain: 'solana';
+  cluster: 'mainnet-beta';
+  status: 'ready' | 'degraded' | 'not_ready';
+  tradingMode: 'LIVE' | 'PAPER';
+  workersReady: boolean;
+  slot: number | null;
+  checkedAt: number;
+}
+
 export function PublicLayout() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [network, setNetwork] = useState<PublicNetworkStatus | null>(null);
   const { state: wallet } = useWalletConnection();
   const location = useLocation();
   useEffect(() => {
@@ -345,6 +363,38 @@ export function PublicLayout() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const response = await fetch(`${PUBLIC_API_BASE}/public/network/status`, {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(8_000),
+        });
+        const body = (await response.json()) as PublicNetworkStatus;
+        if (active) setNetwork(body);
+      } catch {
+        if (active) {
+          setNetwork({
+            chain: 'solana',
+            cluster: 'mainnet-beta',
+            status: 'degraded',
+            tradingMode: 'PAPER',
+            workersReady: false,
+            slot: null,
+            checkedAt: Date.now(),
+          });
+        }
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), 15_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, []);
   return (
     <MarketProvider>
@@ -376,6 +426,16 @@ export function PublicLayout() {
               <NavLink to="/pricing">Bot packages</NavLink>
             </nav>
             <div className="header-actions">
+              <span
+                className={`status-pill network-header-status ${
+                  network?.status === 'ready' ? '' : 'is-offline'
+                }`}
+                title={network?.slot ? `Solana slot ${network.slot.toLocaleString()}` : 'Solana network status'}
+              >
+                <span className={`status-dot ${network?.status === 'ready' ? '' : 'offline'}`} />
+                MAINNET · {network?.status === 'ready' ? 'ONLINE' : 'DEGRADED'} ·{' '}
+                {network?.tradingMode ?? 'PAPER'}
+              </span>
               <Link to="/wallet" className="nova-button button-sm wallet-header-link">
                 <Icon name="wallet" size={17} />
                 {wallet.account
@@ -410,7 +470,9 @@ export function PublicLayout() {
                   Built for disciplined execution.
                 </p>
                 <span className="footer-network">
-                  <Icon name="globe" size={15} /> Built around Solana
+                  <Icon name="globe" size={15} /> Solana Mainnet ·{' '}
+                  {network?.status === 'ready' ? 'RPC online' : 'RPC degraded'} ·{' '}
+                  {network?.tradingMode ?? 'PAPER'}
                 </span>
               </div>
               <div className="footer-column">
