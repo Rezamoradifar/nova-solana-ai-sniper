@@ -18,6 +18,14 @@ type Control = {
 };
 
 type Overview = { settings: { performanceFeeBps: number; referralProgramEnabled: boolean } };
+type FeatureSetting = {
+  key: string;
+  label: string;
+  effectiveEnabled: boolean;
+  desiredEnabled: boolean;
+  restartRequired: boolean;
+  pendingRestart: boolean;
+};
 
 const money = (n: number) => (n < 0 ? '-' : '') + '$' + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
 const short = (v: string | null | undefined) => !v ? '—' : v.length > 16 ? v.slice(0, 8) + '…' + v.slice(-5) : v;
@@ -43,6 +51,7 @@ export function Admin() {
   const [failure, setFailure] = useState<string | null>(null);
   const control = usePolling(() => api.get<Control>('/admin/control-center'), 10000, refresh);
   const overview = usePolling(() => api.get<Overview>('/admin/overview'), 15000, refresh);
+  const featureSettings = usePolling(() => api.get<FeatureSetting[]>('/admin/features'), 15000, refresh);
   const [fee, setFee] = useState('');
 
   useEffect(() => {
@@ -89,7 +98,7 @@ export function Admin() {
       <section className="card"><h2 className="font-semibold text-white">Global strategy presets</h2><p className="mt-1 text-xs text-slate-500">Applies to active Snipe Configs. These are not profit guarantees.</p><div className="mt-4 grid gap-3 md:grid-cols-3">{PRESETS.map(([name, body]) => <button key={name} className="rounded-xl border border-surface-border bg-surface p-4 text-left hover:border-accent/50" onClick={() => { if (window.confirm('Apply ' + name + ' to all active configs?')) void put('/admin/snipes/bulk', body, name + ' preset applied.'); }}><div className="font-semibold text-white">{name}</div><div className="mt-2 text-xs text-slate-500">Click to apply with the 20% hard loss ceiling preserved.</div></button>)}</div></section>
 
       <div className="grid gap-4 xl:grid-cols-3">
-        <section className="card xl:col-span-2"><h2 className="font-semibold text-white">Feature gates</h2><div className="mt-4 grid gap-2 sm:grid-cols-2">{c.features.map((f) => <div key={f.key} className="flex items-center gap-3 rounded-lg border border-surface-border p-3"><Dot on={f.enabled} /><div><div className="text-sm text-slate-200">{f.label}</div><div className="text-[11px] text-slate-500">{f.enabled ? 'Enabled' : 'Disabled'}{f.restartRequired ? ' · restart required to change' : ''}</div></div></div>)}</div></section>
+        <section className="card xl:col-span-2"><h2 className="font-semibold text-white">Feature gates</h2><p className="mt-1 text-xs text-slate-500">Desired state is persisted. Startup-sensitive features apply after service restart.</p><div className="mt-4 grid gap-2 sm:grid-cols-2">{(featureSettings.data ?? c.features.map((f) => ({ key:f.key, label:f.label, effectiveEnabled:f.enabled, desiredEnabled:f.enabled, restartRequired:f.restartRequired, pendingRestart:false }))).map((f) => <div key={f.key} className="flex items-center gap-3 rounded-lg border border-surface-border p-3"><Dot on={f.effectiveEnabled} /><div className="min-w-0 flex-1"><div className="text-sm text-slate-200">{f.label}</div><div className="text-[11px] text-slate-500">Running: {f.effectiveEnabled ? 'ON' : 'OFF'} · Desired: {f.desiredEnabled ? 'ON' : 'OFF'}{f.pendingRestart ? ' · pending restart' : ''}</div></div><button disabled={busy} className="rounded-md border border-surface-border px-2 py-1 text-xs text-violet-300 hover:border-accent/60" onClick={() => void put('/admin/features/' + f.key, { enabled: !f.desiredEnabled }, 'Feature desired state saved; restart is required to apply it.')}>{f.desiredEnabled ? 'Set OFF' : 'Set ON'}</button></div>)}</div></section>
         <section className="card"><h2 className="font-semibold text-white">Safety</h2><div className="mt-4 space-y-2 text-sm"><div className="flex justify-between"><span className="text-slate-500">Max trade</span><span>{c.safety.maxTradeSol} SOL</span></div><div className="flex justify-between"><span className="text-slate-500">Daily loss</span><span>{money(c.safety.maxDailyLossUsd)}</span></div><div className="flex justify-between"><span className="text-slate-500">Max positions</span><span>{c.safety.maxOpenPositions}</span></div><div className="flex justify-between"><span className="text-slate-500">SL ceiling</span><span>{c.safety.maxStopLossPercent}%</span></div></div></section>
       </div>
 
