@@ -132,7 +132,7 @@ export default async function adminOperationsRoutes(fastify: FastifyInstance) {
         logger: fastify.log as never,
       },
       id,
-      { ip: req.ip, source: 'admin_refresh_endpoint' },
+      { ip: req.ip, source: 'refresh_endpoint' },
     );
     if (!result) return reply.code(404).send({ error: 'Wallet not found or inactive' });
     return reply.send({
