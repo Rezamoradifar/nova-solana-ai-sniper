@@ -467,6 +467,15 @@ export const envSchema = z.object({
   // behind and 48h leaves too few real candidates to seed the feed from.
   NETWORK_TRADE_SCANNER_LOOKBACK_HOURS: z.coerce.number().positive().default(48),
 
+  // Copy Trading live signal watcher. Off by default in generic deployments:
+  // when explicitly enabled it watches configured target wallets for fresh,
+  // confirmed Solana buys and routes them through the same PositionManager /
+  // safety rails as every normal trade.
+  COPY_TRADING_EXECUTION_ENABLED: booleanFlag(false),
+  COPY_TRADING_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).default(15000),
+  COPY_TRADING_MAX_SIGNAL_AGE_SECONDS: z.coerce.number().int().min(15).max(600).default(120),
+  COPY_TRADING_MIN_SOURCE_BUY_SOL: z.coerce.number().positive().default(0.01),
+
   // Twitter / X
   TWITTER_API_KEY: z.string().optional(),
   TWITTER_API_SECRET: z.string().optional(),
