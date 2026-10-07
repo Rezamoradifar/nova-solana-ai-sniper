@@ -12,6 +12,7 @@ import healthRoutes from './routes/health.js';
 import metricsRoutes from './routes/metrics.js';
 import publicArbitrageRoutes from './routes/publicArbitrage.js';
 import publicCopyTradingRoutes from './routes/publicCopyTrading.js';
+import publicNetworkRoutes from './routes/publicNetwork.js';
 import authRoutes from './routes/auth.js';
 import tokenRoutes from './routes/tokens.js';
 import tradeRoutes from './routes/trades.js';
@@ -62,6 +63,7 @@ export async function buildApp() {
   await app.register(metricsRoutes);
   await app.register(publicArbitrageRoutes);
   await app.register(publicCopyTradingRoutes);
+  await app.register(publicNetworkRoutes);
   await app.register(authRoutes);
   await app.register(tokenRoutes);
   await app.register(tradeRoutes);
