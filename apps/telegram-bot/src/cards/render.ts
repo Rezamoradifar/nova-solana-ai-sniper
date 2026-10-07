@@ -318,6 +318,7 @@ export interface TradeCardTokenInfo {
 }
 
 export interface BuyCardData {
+  isPaperTrade?: boolean;
   token: TradeCardTokenInfo;
   entryPriceUsd: number;
   amountSol: number;
@@ -422,6 +423,8 @@ export async function renderBuyCardPng(data: BuyCardData): Promise<Buffer> {
 // --- Sell card -----------------------------------------------------------
 
 export interface SellCardData {
+  isPaperTrade?: boolean;
+  stopLossPercent?: number;
   token: TradeCardTokenInfo;
   entryPriceUsd: number;
   exitPriceUsd: number;
@@ -516,6 +519,9 @@ export function buildSellCardSvg(data: SellCardData, logoDataUri: string | undef
   body += pillRow(CARD_WIDTH / 2, 690, [
     { label: EXIT_REASON_LABELS[data.exitReason], color: theme.accent },
     { label: `Held ${formatHoldingTime(data.holdingTimeMs)}`, color: MUTED },
+    ...(data.stopLossPercent !== undefined
+      ? [{ label: `SL ${data.stopLossPercent}%`, color: MUTED }]
+      : []),
   ]);
 
   body += glassPanel(64, 740, CARD_WIDTH - 128, 230);
@@ -540,17 +546,60 @@ export function buildSellCardSvg(data: SellCardData, logoDataUri: string | undef
     <text x="${CARD_WIDTH / 2}" y="1178" text-anchor="middle" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">AI SCORE <tspan font-family="${MONO}" font-size="22" fill="${TEXT}">${t.aiScore !== undefined ? `${t.aiScore.toFixed(0)}/100` : '—'}</tspan></text>
     <text x="${CARD_WIDTH - 100}" y="1178" text-anchor="end" font-family="${SANS}" font-size="17" font-weight="600" letter-spacing="1.5" fill="${MUTED}">RISK <tspan font-size="22" fill="${risk.color}">${risk.label}</tspan></text>`;
 
-  return cardShell(theme, 'POSITION CLOSED', body, [
-    `Wallet ${shortAddr(data.walletPublicKey)}  ·  Buy ${shortAddr(data.buySignature)}`,
-    `Sell ${shortAddr(data.sellSignature)}`,
-  ]);
+  return cardShell(
+    theme,
+    data.isPaperTrade === true
+      ? 'PAPER TRADE'
+      : data.isPaperTrade === false
+        ? 'REAL TRADE'
+        : 'POSITION CLOSED',
+    body,
+    [
+      `Wallet ${shortAddr(data.walletPublicKey)}  ·  Buy ${shortAddr(data.buySignature)}`,
+      `Sell ${shortAddr(data.sellSignature)}`,
+    ],
+  );
+}
+
+function buildSellCardFallbackSvg(data: SellCardData): string {
+  const isProfit = data.pnlPercent >= 0;
+  const accent = isProfit ? PROFIT_THEME.accent : LOSS_THEME.accent;
+  const label = data.token.symbol ?? data.token.name ?? data.token.mint.slice(0, 8);
+  const mode =
+    data.isPaperTrade === true
+      ? 'PAPER TRADE'
+      : data.isPaperTrade === false
+        ? 'REAL TRADE'
+        : 'TRADE';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">
+    <rect width="1080" height="1080" fill="#07090f"/>
+    <rect x="48" y="48" width="984" height="984" rx="42" fill="#0f1420" stroke="${accent}" stroke-width="4"/>
+    <text x="90" y="130" font-family="${SANS}" font-size="34" font-weight="700" fill="#f2f4fa">GSP BANK SNIPER</text>
+    <text x="990" y="130" text-anchor="end" font-family="${MONO}" font-size="26" font-weight="700" fill="${accent}">${escapeXml(mode)}</text>
+    <text x="540" y="300" text-anchor="middle" font-family="${SANS}" font-size="54" font-weight="700" fill="#f2f4fa">${escapeXml(label)}</text>
+    <text x="540" y="390" text-anchor="middle" font-family="${SANS}" font-size="26" fill="#7d879e">PROFIT / LOSS</text>
+    <text x="540" y="560" text-anchor="middle" font-family="${MONO}" font-size="150" font-weight="700" fill="${accent}">${escapeXml(signed(data.pnlPercent, 1, '%'))}</text>
+    <text x="540" y="650" text-anchor="middle" font-family="${MONO}" font-size="48" font-weight="600" fill="#f2f4fa">${escapeXml(signed(data.profitSol, 4, ' SOL'))}</text>
+    <text x="540" y="720" text-anchor="middle" font-family="${MONO}" font-size="34" fill="#aab3c5">${escapeXml(signedUsd(data.profitUsd))}</text>
+    <text x="110" y="850" font-family="${SANS}" font-size="26" fill="#7d879e">ENTRY</text>
+    <text x="110" y="900" font-family="${MONO}" font-size="30" fill="#f2f4fa">${escapeXml(fmtPrice(data.entryPriceUsd))}</text>
+    <text x="970" y="850" text-anchor="end" font-family="${SANS}" font-size="26" fill="#7d879e">EXIT</text>
+    <text x="970" y="900" text-anchor="end" font-family="${MONO}" font-size="30" fill="#f2f4fa">${escapeXml(fmtPrice(data.exitPriceUsd))}</text>
+    <text x="540" y="990" text-anchor="middle" font-family="${SANS}" font-size="24" fill="#7d879e">Fallback trade card · completed position</text>
+  </svg>`;
 }
 
 export async function renderSellCardPng(data: SellCardData): Promise<Buffer> {
-  const logoDataUri = await fetchLogoDataUri(data.token.imageUrl);
-  return sharp(Buffer.from(buildSellCardSvg(data, logoDataUri)))
-    .png()
-    .toBuffer();
+  try {
+    const logoDataUri = await fetchLogoDataUri(data.token.imageUrl);
+    return await sharp(Buffer.from(buildSellCardSvg(data, logoDataUri)))
+      .png()
+      .toBuffer();
+  } catch {
+    // A malformed remote logo/SVG edge case must never make a completed trade
+    // invisible. Render a dependency-light branded P/L card from the core fields.
+    return sharp(Buffer.from(buildSellCardFallbackSvg(data))).png().toBuffer();
+  }
 }
 
 export { NEUTRAL_THEME };
@@ -624,9 +673,34 @@ export function buildNetworkTradeCardSvg(
   ]);
 }
 
+function buildNetworkTradeFallbackSvg(data: NetworkTradeCardData): string {
+  const accent = data.realizedRoiPercent >= 0 ? PROFIT_THEME.accent : LOSS_THEME.accent;
+  const label = data.token.symbol ?? data.token.name ?? data.token.mint.slice(0, 8);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">
+    <rect width="1080" height="1080" fill="#07090f"/>
+    <rect x="48" y="48" width="984" height="984" rx="42" fill="#0f1420" stroke="${accent}" stroke-width="4"/>
+    <text x="90" y="130" font-family="${SANS}" font-size="34" font-weight="700" fill="#f2f4fa">GSP BANK SNIPER</text>
+    <text x="990" y="130" text-anchor="end" font-family="${MONO}" font-size="26" font-weight="700" fill="#4f8cff">NETWORK TRADE</text>
+    <text x="540" y="300" text-anchor="middle" font-family="${SANS}" font-size="54" font-weight="700" fill="#f2f4fa">${escapeXml(label)}</text>
+    <text x="540" y="390" text-anchor="middle" font-family="${SANS}" font-size="26" fill="#7d879e">EXTERNAL WALLET · VERIFIED EXIT</text>
+    <text x="540" y="565" text-anchor="middle" font-family="${MONO}" font-size="150" font-weight="700" fill="${accent}">${escapeXml(signed(data.realizedRoiPercent, 1, '%'))}</text>
+    <text x="540" y="655" text-anchor="middle" font-family="${MONO}" font-size="46" font-weight="600" fill="#f2f4fa">${escapeXml(signed(data.realizedPnlSol, 4, ' SOL'))}</text>
+    <text x="540" y="725" text-anchor="middle" font-family="${MONO}" font-size="34" fill="#aab3c5">${escapeXml(signedUsd(data.realizedPnlUsd))}</text>
+    <text x="110" y="850" font-family="${SANS}" font-size="26" fill="#7d879e">WALLET</text>
+    <text x="110" y="900" font-family="${MONO}" font-size="30" fill="#f2f4fa">${escapeXml(shortAddr(data.walletAddress))}</text>
+    <text x="970" y="850" text-anchor="end" font-family="${SANS}" font-size="26" fill="#7d879e">DEX</text>
+    <text x="970" y="900" text-anchor="end" font-family="${MONO}" font-size="30" fill="#f2f4fa">${escapeXml(data.token.dex)}</text>
+    <text x="540" y="990" text-anchor="middle" font-family="${SANS}" font-size="24" fill="#7d879e">Another wallet · not bot performance</text>
+  </svg>`;
+}
+
 export async function renderNetworkTradeCardPng(data: NetworkTradeCardData): Promise<Buffer> {
-  const logoDataUri = await fetchLogoDataUri(data.token.imageUrl);
-  return sharp(Buffer.from(buildNetworkTradeCardSvg(data, logoDataUri)))
-    .png()
-    .toBuffer();
+  try {
+    const logoDataUri = await fetchLogoDataUri(data.token.imageUrl);
+    return await sharp(Buffer.from(buildNetworkTradeCardSvg(data, logoDataUri)))
+      .png()
+      .toBuffer();
+  } catch {
+    return sharp(Buffer.from(buildNetworkTradeFallbackSvg(data))).png().toBuffer();
+  }
 }

@@ -14,6 +14,7 @@ const DEPLOYED_AT = new Date('2020-01-01T00:00:00Z');
 function fakePrisma(overrides: Record<string, unknown> = {}) {
   return {
     smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([]) },
+    wallet: { findMany: vi.fn().mockResolvedValue([]) },
     activityFeedPost: {
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn().mockResolvedValue(undefined),
@@ -84,6 +85,22 @@ describe('fetchNetworkTradeCandidates', () => {
     expect(where.exitAmountSol).toEqual({ not: null });
   });
 
+  it('excludes Nova custodial wallets so network cards are always external trades', async () => {
+    const row = fakeRow({ walletAddress: 'InternalNovaWallet111111111111111111111111' });
+    const prisma = fakePrisma({
+      smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([row]) },
+      wallet: {
+        findMany: vi.fn().mockResolvedValue([
+          { publicKey: 'InternalNovaWallet111111111111111111111111' },
+        ]),
+      },
+    });
+
+    const result = await fetchNetworkTradeCandidates(prisma, 30, DEPLOYED_AT);
+
+    expect(result).toEqual([]);
+  });
+
   it('excludes an entry already posted under the network-trade dedup namespace', async () => {
     const findMany = vi.fn().mockResolvedValue([fakeRow({ id: 'entry1' })]);
     const activityFindMany = vi.fn().mockResolvedValue([{ refId: 'entry1' }]);
@@ -130,30 +147,41 @@ describe('markNetworkTradePosted', () => {
 });
 
 describe('isNetworkTradeCandidateEligible', () => {
-  it('accepts a profitable trade', () => {
+  it('accepts a completed profitable trade', () => {
     expect(
       isNetworkTradeCandidateEligible({
         realizedRoiPercent: 80,
+        realizedPnlUsd: 150,
         walletRugExposureRatePct: 0,
         walletSybilConfidencePct: 0,
       }),
     ).toBe(true);
   });
 
-  it('accepts a small loss', () => {
+  it('rejects every losing or break-even trade from the promotional feed', () => {
     expect(
       isNetworkTradeCandidateEligible({
-        realizedRoiPercent: -15,
+        realizedRoiPercent: -1,
+        realizedPnlUsd: -1,
         walletRugExposureRatePct: 0,
         walletSybilConfidencePct: 0,
       }),
-    ).toBe(true);
-  });
-
-  it('skips a loss steep enough to read as a rug (worse than -30%)', () => {
+    ).toBe(false);
     expect(
       isNetworkTradeCandidateEligible({
-        realizedRoiPercent: -85,
+        realizedRoiPercent: 0,
+        realizedPnlUsd: 0,
+        walletRugExposureRatePct: 0,
+        walletSybilConfidencePct: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it('requires positive realized USD P/L as well as positive ROI', () => {
+    expect(
+      isNetworkTradeCandidateEligible({
+        realizedRoiPercent: 25,
+        realizedPnlUsd: -5,
         walletRugExposureRatePct: 0,
         walletSybilConfidencePct: 0,
       }),
@@ -164,6 +192,7 @@ describe('isNetworkTradeCandidateEligible', () => {
     expect(
       isNetworkTradeCandidateEligible({
         realizedRoiPercent: 100,
+        realizedPnlUsd: 1000,
         walletRugExposureRatePct: 75,
         walletSybilConfidencePct: 0,
       }),
@@ -174,16 +203,18 @@ describe('isNetworkTradeCandidateEligible', () => {
     expect(
       isNetworkTradeCandidateEligible({
         realizedRoiPercent: 100,
+        realizedPnlUsd: 1000,
         walletRugExposureRatePct: 0,
         walletSybilConfidencePct: 90,
       }),
     ).toBe(false);
   });
 
-  it('treats an unscored wallet (undefined rug/Sybil signals) as clean, not a crash', () => {
+  it('treats an unscored profitable wallet as clean, not a crash', () => {
     expect(() =>
       isNetworkTradeCandidateEligible({
         realizedRoiPercent: 50,
+        realizedPnlUsd: 100,
         walletRugExposureRatePct: undefined,
         walletSybilConfidencePct: undefined,
       }),

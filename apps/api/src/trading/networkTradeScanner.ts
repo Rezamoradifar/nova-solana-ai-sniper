@@ -61,6 +61,7 @@ export class NetworkTradeScannerService {
 
   start(intervalMs: number): void {
     if (this.timer) return;
+    void this.tick();
     this.timer = setInterval(() => void this.tick(), intervalMs);
     this.timer.unref?.();
   }

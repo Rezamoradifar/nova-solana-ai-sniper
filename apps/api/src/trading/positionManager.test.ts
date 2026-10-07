@@ -453,13 +453,9 @@ describe('PositionManager guaranteed exit strategy (regression: live incident 20
       expect.objectContaining({
         data: expect.objectContaining({
           takeProfitPercent: undefined,
-          // Hard Loss Ceiling (2026-07-18): the balanced preset's own 25%
-          // default sits exactly at DEFAULT_MAX_LOSS_PERCENT now (both 25),
-          // so it's honored as the preset's own value rather than clamped —
-          // see the dedicated describe block below for a value that's
-          // actually looser than the ceiling.
-          stopLossPercent: 25,
-          stopLossIsSystemDefault: false,
+          // The balanced preset's 25% is clamped to the 20% system ceiling.
+          stopLossPercent: DEFAULT_MAX_LOSS_PERCENT,
+          stopLossIsSystemDefault: true,
           trailingStopPercent: 15,
           trailingStopPreset: 'balanced',
         }),

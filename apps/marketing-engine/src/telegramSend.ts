@@ -94,9 +94,19 @@ export async function sendBrandedPhotoHtml(
     : isFileId(photo)
       ? photo.fileId
       : new InputFile(photo.buffer);
-  return bot.api.sendPhoto(chatId, source, {
-    caption: captionHtml,
-    parse_mode: 'HTML',
-    reply_markup,
-  });
+  try {
+    return await bot.api.sendPhoto(chatId, source, {
+      caption: captionHtml,
+      parse_mode: 'HTML',
+      reply_markup,
+    });
+  } catch {
+    // Delivery fallback only: the network feed still prefers the generated
+    // image, but a Telegram photo-upload failure must not silently erase a
+    // verified completed trade from the feed.
+    return bot.api.sendMessage(chatId, captionHtml, {
+      parse_mode: 'HTML',
+      reply_markup,
+    });
+  }
 }

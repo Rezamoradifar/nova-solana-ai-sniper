@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: '/dashboard/portfolio', label: 'Portfolio' },
   { to: '/dashboard/wallets', label: 'Wallets' },
   { to: '/dashboard/snipes', label: 'Snipe Settings' },
+  { to: '/dashboard/trading-lab', label: 'Trading Lab' },
   { to: '/dashboard/leaderboard', label: 'Leaderboard' },
   { to: '/dashboard/logs', label: 'Logs' },
 ];
@@ -39,6 +40,21 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             {item.label}
           </NavLink>
         ))}
+        {(user?.isAdmin || user?.role === 'ADMIN') && (
+          <NavLink
+            to="/dashboard/admin"
+            onClick={onNavigate}
+            className={({ isActive }) =>
+              `mt-3 block rounded-lg border px-3 py-2 text-sm font-semibold transition-colors ${
+                isActive
+                  ? 'border-accent bg-accent text-white'
+                  : 'border-accent/30 bg-accent/10 text-violet-300 hover:bg-accent/20'
+              }`
+            }
+          >
+            ⚙ Admin Control Center
+          </NavLink>
+        )}
       </nav>
       <div className="border-t border-surface-border px-5 py-4">
         <div className="mb-2 truncate text-xs text-slate-500">{user?.email ?? user?.id}</div>

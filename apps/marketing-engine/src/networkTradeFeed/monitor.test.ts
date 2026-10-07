@@ -30,6 +30,7 @@ function fakeRow(overrides: Record<string, unknown> = {}) {
 function fakePrisma(overrides: Record<string, unknown> = {}) {
   return {
     smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([]) },
+    wallet: { findMany: vi.fn().mockResolvedValue([]) },
     activityFeedPost: {
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn().mockResolvedValue(undefined),
@@ -141,7 +142,7 @@ describe('NetworkTradeFeedMonitor — posts the highest-priority candidate', () 
     });
   });
 
-  it('shows a loss header for a net-negative trade within the acceptable small-loss range', async () => {
+  it('does not publish a net-negative network trade as promotional content', async () => {
     const row = fakeRow({ realizedRoiPercent: -22, realizedPnlUsd: -80, realizedPnlSol: -0.4 });
     const prisma = fakePrisma({
       smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([row]) },
@@ -153,8 +154,7 @@ describe('NetworkTradeFeedMonitor — posts the highest-priority candidate', () 
     vi.setSystemTime(new Date('2026-08-02T08:16:00Z'));
     await monitor.tick();
 
-    const [, , opts] = bot(deps).sendPhoto.mock.calls[0]!;
-    expect(opts.caption).toContain('LOSS');
+    expect(bot(deps).sendPhoto).not.toHaveBeenCalled();
   });
 
   it('still posts a generated card photo (never falls back to text) when live enrichment/logo lookup fails', async () => {
@@ -254,7 +254,7 @@ describe('NetworkTradeFeedMonitor — daily cap', () => {
 });
 
 describe('NetworkTradeFeedMonitor — quality gate (spam/rugs)', () => {
-  it('posts a candidate with a small, acceptable loss', async () => {
+  it('never posts a losing candidate, even when the loss is small', async () => {
     const row = fakeRow({ realizedRoiPercent: -10, realizedPnlUsd: -20 });
     const prisma = fakePrisma({
       smartWalletTokenEntry: { findMany: vi.fn().mockResolvedValue([row]) },
@@ -266,7 +266,7 @@ describe('NetworkTradeFeedMonitor — quality gate (spam/rugs)', () => {
     vi.setSystemTime(new Date('2026-08-02T08:16:00Z'));
     await monitor.tick();
 
-    expect(bot(deps).sendPhoto).toHaveBeenCalledTimes(1);
+    expect(bot(deps).sendPhoto).not.toHaveBeenCalled();
   });
 
   it('never posts a candidate whose loss is steep enough to read as a rug (worse than -30%)', async () => {

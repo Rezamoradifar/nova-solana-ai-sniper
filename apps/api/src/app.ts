@@ -22,6 +22,7 @@ import referralRoutes from './routes/referrals.js';
 import adminRoutes from './routes/admin.js';
 import planRoutes from './routes/plans.js';
 import copyTradeRoutes from './routes/copyTrades.js';
+import marketRoutes from './routes/market.js';
 import wsRoutes from './routes/ws.js';
 import { registerFeeSystem } from './business/registerFeeSystem.js';
 
@@ -66,6 +67,7 @@ export async function buildApp() {
   await app.register(adminRoutes);
   await app.register(planRoutes);
   await app.register(copyTradeRoutes);
+  await app.register(marketRoutes);
   await app.register(wsRoutes);
 
   // Fee/referral system — a pure event-bus subscriber reacting to the already-

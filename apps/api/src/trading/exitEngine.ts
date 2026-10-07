@@ -199,7 +199,10 @@ export function evaluateHardLossCeiling(
 ): HardLossCeilingResult {
   if (entryPriceUsd <= 0) return { breached: false, pnlPercent: 0 };
   const pnlPercent = ((candidatePriceUsd - entryPriceUsd) / entryPriceUsd) * 100;
-  return { breached: pnlPercent <= -Math.abs(effectiveStopLossPercent), pnlPercent };
+  return {
+    breached: candidatePriceUsd <= entryPriceUsd * (1 - Math.abs(effectiveStopLossPercent) / 100),
+    pnlPercent,
+  };
 }
 
 /**
@@ -224,7 +227,11 @@ export function evaluateExit(input: ExitCheckInput): ExitDecision {
     return { shouldExit: true, reason: 'take_profit', newHighWaterMarkUsd, pnlPercent };
   }
 
-  if (input.stopLossPercent != null && pnlPercent <= -Math.abs(input.stopLossPercent)) {
+  if (
+    input.entryPriceUsd > 0 &&
+    input.stopLossPercent != null &&
+    input.currentPriceUsd <= input.entryPriceUsd * (1 - Math.abs(input.stopLossPercent) / 100)
+  ) {
     return { shouldExit: true, reason: 'stop_loss', newHighWaterMarkUsd, pnlPercent };
   }
 

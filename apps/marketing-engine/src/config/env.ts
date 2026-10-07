@@ -9,6 +9,7 @@ export const marketingEnvSchema = envSchema.pick({
   OPENROUTER_MODEL: true,
   TELEGRAM_BOT_TOKEN: true,
   TELEGRAM_CHAT_ID: true,
+  TELEGRAM_TRADES_ONLY: true,
   MARKETING_TELEGRAM_CHANNEL_ID: true,
   MARKETING_AI_IMAGE_ENABLED: true,
   MARKETING_DAILY_POSTS_ENABLED: true,

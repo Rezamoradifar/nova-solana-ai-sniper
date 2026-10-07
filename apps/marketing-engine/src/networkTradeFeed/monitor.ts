@@ -90,6 +90,11 @@ export class NetworkTradeFeedMonitor {
 
   start(): void {
     if (this.timer) return;
+    // Try immediately on boot so a verified profitable backlog item can prove
+    // the feed is alive without waiting for the first random posting window.
+    // The normal random cadence is scheduled after this first tick.
+    this.nextPostDueAt = Date.now();
+    void this.tick();
     this.timer = setInterval(() => void this.tick(), CHECK_INTERVAL_MS);
     this.timer.unref?.();
   }
@@ -182,13 +187,12 @@ export class NetworkTradeFeedMonitor {
       return false;
     }
 
-    // Quality gate (2026-08-05 spec: "prefer profitable trades, small losses
-    // are acceptable, skip spam, rugs and duplicate wallets") — real losses
-    // are never excluded just for being losses; see data.ts's
-    // isNetworkTradeCandidateEligible doc comment for the actual bars.
+    // User-acquisition quality gate: only verified completed PROFIT trades
+    // from external wallets are eligible. Rugs/Sybil clusters remain excluded.
     const qualityEligible = candidates.filter((c) =>
       isNetworkTradeCandidateEligible({
         realizedRoiPercent: c.realizedRoiPercent,
+        realizedPnlUsd: c.realizedPnlUsd,
         walletRugExposureRatePct: c.walletRugExposureRatePct,
         walletSybilConfidencePct: c.walletSybilConfidencePct,
       }),

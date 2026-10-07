@@ -105,7 +105,12 @@ import {
   getOrCreateBusinessSettings,
   getTelegramTrendEnabled,
 } from '@nova/shared';
-import { createBot, NotificationService, AI_HIGH_SCORE_THRESHOLD } from '@nova/telegram-bot';
+import {
+  createBot,
+  NotificationService,
+  RedisDailyTradeCardLimiter,
+  AI_HIGH_SCORE_THRESHOLD,
+} from '@nova/telegram-bot';
 import { eventBus } from './lib/eventBus.js';
 import { metrics } from './lib/metrics.js';
 import { TtlCache } from './lib/ttlCache.js';
@@ -280,6 +285,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       app.config.TELEGRAM_CHAT_ID,
       app.prisma,
       app.log as never,
+      app.config.TELEGRAM_TRADES_ONLY,
+      new RedisDailyTradeCardLimiter(app.redis, app.config.TELEGRAM_DAILY_TRADE_CARD_LIMIT),
     );
   } else {
     app.log.warn('TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set — trade notifications disabled');
@@ -429,7 +436,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // SMART_MONEY_ANALYSIS_ENABLED — this is a marketing-content source, not a
   // buy-decision input. Off by default; adds real, bounded RPC load.
   let networkTradeScanner: NetworkTradeScannerService | undefined;
-  if (app.config.NETWORK_TRADE_SCANNER_ENABLED) {
+  if (app.config.NETWORK_TRADE_SCANNER_ENABLED || app.config.TELEGRAM_TRADES_ONLY) {
     networkTradeScanner = new NetworkTradeScannerService({
       prisma: app.prisma,
       dexScreener,

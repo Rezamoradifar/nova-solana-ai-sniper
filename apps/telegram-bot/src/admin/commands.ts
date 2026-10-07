@@ -1,4 +1,4 @@
-import type { Bot, Context, NextFunction } from 'grammy';
+import { InputFile, type Bot, type Context, type NextFunction } from 'grammy';
 import type { PrismaClient } from '@prisma/client';
 import type { Redis } from 'ioredis';
 import {
@@ -15,6 +15,7 @@ import {
 } from '@nova/shared';
 import { fmtDate, fmtHoldingTimeShort, usd } from '../ui/format.js';
 import { registerSettingsPanel } from './settingsPanel.js';
+import { renderSellCardPng } from '../cards/render.js';
 
 /** Restricts every command registered after this middleware to known admin Telegram IDs. */
 function requireAdmin(adminIds: Set<string>) {
@@ -292,33 +293,50 @@ export function registerAdminCommands(
   // SAMPLE so it can never be mistaken for a real trade.
   bot.command('testtrade', admin, async (ctx) => {
     const chatId = String(ctx.chat.id);
-    const sampleMint = 'So11111111111111111111111111111111111111112';
     const now = new Date();
     const buyAt = new Date(now.getTime() - 15 * 60_000);
-    const chartUrl = `https://dexscreener.com/solana/${sampleMint}`;
-    const text =
-      `🤖 *REAL BOT TRADE* _(SAMPLE — /testtrade)_\n\n` +
-      `🟢 *TESTCOIN*\n\n` +
-      `Name: Test Token\n` +
-      `Token: \`${sampleMint}\` ([Solscan](https://solscan.io/token/${sampleMint}))\n` +
-      `DEX: PUMPFUN\n` +
-      `Buy: ${fmtDate(buyAt)} UTC\n` +
-      `Sell: ${fmtDate(now)} UTC (held ${fmtHoldingTimeShort(now.getTime() - buyAt.getTime())})\n` +
-      `ROI: *+42.0%*\n` +
-      `PnL: *${usd(12.34)}*\n` +
-      `AI Score: *87/100*\n` +
-      `[View chart on DexScreener](${chartUrl})\n\n` +
-      `🔷 *GSP Bank Sniper*`;
+    const sampleMint = 'So11111111111111111111111111111111111111112';
+    const sample = {
+      isPaperTrade: true,
+      stopLossPercent: 20,
+      token: {
+        mint: sampleMint,
+        name: 'Test Token',
+        symbol: 'TESTCOIN',
+        dex: 'PUMPFUN',
+        aiScore: 87,
+        liquidityUsd: 125_000,
+        marketCapUsd: 820_000,
+      },
+      entryPriceUsd: 0.001,
+      exitPriceUsd: 0.00142,
+      buyAmountSol: 0.5,
+      sellAmountSol: 0.71,
+      profitSol: 0.21,
+      profitUsd: 31.5,
+      roiPercent: 42,
+      pnlPercent: 42,
+      holdingTimeMs: now.getTime() - buyAt.getTime(),
+      exitReason: 'take_profit' as const,
+      highestProfitPercent: 48,
+      lockedProfitPercent: 40,
+      walletPublicKey: 'TEST_WALLET_111111111111111111111111111',
+      positionId: 'sample-testtrade',
+      buySignature: 'SAMPLE_BUY',
+      sellSignature: 'SAMPLE_SELL',
+    };
 
     try {
-      await ctx.api.sendMessage(chatId, text, {
+      const png = await renderSellCardPng(sample);
+      await ctx.api.sendPhoto(chatId, new InputFile(png), {
+        caption:
+          '🧪 *P/L CARD TEST*\n\nIf you can see this image, PNG rendering and Telegram photo delivery are working.',
         parse_mode: 'Markdown',
-        link_preview_options: { url: chartUrl },
       });
-      logger.info({ adminId: ctx.from?.id, chatId }, 'admin sent /testtrade sample notification');
+      logger.info({ adminId: ctx.from?.id, chatId }, 'admin sent /testtrade P/L card image');
     } catch (err) {
-      logger.error({ err, chatId }, 'failed to send /testtrade sample notification');
-      await ctx.reply('❌ Failed to send test trade notification — see logs.');
+      logger.error({ err, chatId }, 'failed to render/send /testtrade P/L card image');
+      await ctx.reply('❌ P/L image test failed — check the telegram-bot logs.');
     }
   });
 

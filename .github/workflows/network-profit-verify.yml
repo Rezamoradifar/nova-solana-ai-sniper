@@ -1,0 +1,22 @@
+name: Network Profit Verify
+
+on:
+  push:
+    branches:
+      - codex/real-trade-cards-sl20
+
+jobs:
+  verify-network-profit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --schema apps/api/prisma/schema.prisma
+      - name: TypeScript build
+        run: npx tsc -b packages/shared packages/ai apps/telegram-bot apps/api apps/marketing-engine
+      - name: Network profit tests
+        run: npx vitest run apps/marketing-engine/src/networkTradeFeed apps/marketing-engine/src/telegramSend.test.ts apps/telegram-bot/src/cards/render.test.ts apps/telegram-bot/src/notifications.test.ts

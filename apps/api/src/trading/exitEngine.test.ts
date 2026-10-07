@@ -339,3 +339,13 @@ describe('regression: legitimate large crashes are never ignored forever', () =>
     expect(bothAgree.accepted).toBe(true);
   });
 });
+
+it('enforces the requested 20% ceiling for older 25% configurations', () => {
+  expect(DEFAULT_MAX_LOSS_PERCENT).toBe(20);
+  expect(resolveEffectiveStopLossPercent(25)).toEqual({
+    effectiveStopLossPercent: 20,
+    isSystemDefault: true,
+  });
+  expect(evaluateHardLossCeiling(1, 0.8, 20).breached).toBe(true);
+  expect(evaluateHardLossCeiling(1, 0.801, 20).breached).toBe(false);
+});
