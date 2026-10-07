@@ -15,6 +15,7 @@ export const ADMIN_FEATURES = [
   { key: 'EXIT_STRATEGY_V2_ENABLED', label: 'TP1 / breakeven / trailing' },
   { key: 'ARBITRAGE_SCANNER_ENABLED', label: 'Arbitrage radar' },
   { key: 'NETWORK_TRADE_SCANNER_ENABLED', label: 'External network trade scanner' },
+  { key: 'COPY_TRADING_EXECUTION_ENABLED', label: 'Copy-trade watcher' },
   { key: 'TELEGRAM_TREND_SOURCE_ENABLED', label: 'Telegram trend source' },
   { key: 'DEPOSIT_MONITOR_ENABLED', label: 'Deposit monitor' },
   { key: 'SHADOW_MODE_ENABLED', label: 'Shadow-mode evaluation' },
