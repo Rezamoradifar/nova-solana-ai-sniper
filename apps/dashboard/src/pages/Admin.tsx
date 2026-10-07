@@ -17,7 +17,7 @@ type Control = {
   arbitrage: { enabled: boolean; scans?: number; opportunities?: number; bestNetSol?: number };
 };
 
-type Overview = { settings: { performanceFeeBps: number; referralProgramEnabled: boolean } };
+type Overview = { settings: { treasuryWalletAddress: string | null; envTreasuryWalletAddress: string; performanceFeeBps: number; referralProgramEnabled: boolean; referralLevels: Array<{ level:number; percentBps:number; enabled:boolean }> } };
 type FeatureSetting = {
   key: string;
   label: string;
@@ -53,10 +53,29 @@ export function Admin() {
   const overview = usePolling(() => api.get<Overview>('/admin/overview'), 15000, refresh);
   const featureSettings = usePolling(() => api.get<FeatureSetting[]>('/admin/features'), 15000, refresh);
   const [fee, setFee] = useState('');
+  const [treasury, setTreasury] = useState('');
+  const [refPercents, setRefPercents] = useState<Record<number, string>>({});
 
   useEffect(() => {
-    if (overview.data && fee === '') setFee(String(overview.data.settings.performanceFeeBps / 100));
-  }, [overview.data, fee]);
+    if (!overview.data) return;
+    if (fee === '') setFee(String(overview.data.settings.performanceFeeBps / 100));
+    if (treasury === '') {
+      setTreasury(
+        overview.data.settings.treasuryWalletAddress ??
+          overview.data.settings.envTreasuryWalletAddress,
+      );
+    }
+    if (Object.keys(refPercents).length === 0) {
+      setRefPercents(
+        Object.fromEntries(
+          overview.data.settings.referralLevels.map((level) => [
+            level.level,
+            String(level.percentBps / 100),
+          ]),
+        ),
+      );
+    }
+  }, [overview.data, fee, treasury, refPercents]);
 
   async function put(path: string, body: unknown, ok: string) {
     setBusy(true); setFailure(null); setMessage(null);
@@ -92,7 +111,7 @@ export function Admin() {
           <div className="flex items-center justify-between rounded-lg border border-surface-border p-3"><div><div className="text-sm text-slate-200">Kill switch</div><div className="text-xs text-slate-500">Blocks every new trade immediately.</div></div><button disabled={busy} className={c.runtime.killSwitch ? 'btn-primary' : 'rounded-lg bg-loss px-4 py-2 text-sm font-semibold text-white'} onClick={() => void put('/admin/trading/kill-switch', { enabled: !c.runtime.killSwitch }, 'Kill switch updated.')}>{c.runtime.killSwitch ? 'Disable' : 'Activate'}</button></div>
           <div className="flex items-center justify-between rounded-lg border border-surface-border p-3"><div><div className="text-sm text-slate-200">Auto-buy</div><div className="text-xs text-slate-500">{c.runtime.autoBuyPaused ? 'Paused' : 'Running'}</div></div><button disabled={busy} className="btn-secondary" onClick={() => void put('/admin/trading/auto-buy', { enabled: c.runtime.autoBuyPaused }, 'Auto-buy updated.')}>{c.runtime.autoBuyPaused ? 'Resume' : 'Pause'}</button></div>
         </div></section>
-        <section className="card"><h2 className="font-semibold text-white">Platform economics</h2><div className="mt-4 flex items-end gap-3"><div className="flex-1"><label className="label">Performance fee %</label><input className="input-field" type="number" min="0" max="100" step="0.1" value={fee} onChange={(e) => setFee(e.target.value)} /></div><button disabled={busy} className="btn-primary" onClick={() => void put('/admin/settings/fee', { percent: Number(fee) }, 'Fee updated.')}>Save</button></div>{overview.data && <div className="mt-4 flex items-center justify-between rounded-lg border border-surface-border p-3"><span className="text-sm text-slate-300">Referral program</span><button className="btn-secondary" onClick={() => void put('/admin/settings/referral-program', { enabled: !overview.data!.settings.referralProgramEnabled }, 'Referral setting updated.')}>{overview.data.settings.referralProgramEnabled ? 'Disable' : 'Enable'}</button></div>}</section>
+        <section className="card"><h2 className="font-semibold text-white">Platform economics</h2><div className="mt-4 flex items-end gap-3"><div className="flex-1"><label className="label">Performance fee %</label><input className="input-field" type="number" min="0" max="100" step="0.1" value={fee} onChange={(e) => setFee(e.target.value)} /></div><button disabled={busy} className="btn-primary" onClick={() => void put('/admin/settings/fee', { percent: Number(fee) }, 'Fee updated.')}>Save</button></div><div className="mt-4"><label className="label">Treasury wallet</label><div className="flex gap-2"><input className="input-field font-mono text-xs" value={treasury} onChange={(e)=>setTreasury(e.target.value)} /><button disabled={busy || !treasury.trim()} className="btn-secondary" onClick={() => void put('/admin/settings/treasury', { address: treasury.trim() }, 'Treasury wallet updated.')}>Save</button></div></div>{overview.data && <><div className="mt-4 flex items-center justify-between rounded-lg border border-surface-border p-3"><span className="text-sm text-slate-300">Referral program</span><button className="btn-secondary" onClick={() => void put('/admin/settings/referral-program', { enabled: !overview.data!.settings.referralProgramEnabled }, 'Referral setting updated.')}>{overview.data.settings.referralProgramEnabled ? 'Disable' : 'Enable'}</button></div><div className="mt-3 space-y-2">{overview.data.settings.referralLevels.map((level)=><div key={level.level} className="flex items-center gap-2 rounded-lg border border-surface-border p-2"><span className="w-16 text-xs text-slate-400">Level {level.level}</span><input className="input-field flex-1" type="number" min="0" max="100" step="0.1" value={refPercents[level.level] ?? ''} onChange={(e)=>setRefPercents({...refPercents,[level.level]:e.target.value})}/><span className="text-xs text-slate-500">%</span><button disabled={busy} className="text-xs text-violet-300" onClick={() => void put('/admin/settings/referral/' + level.level, { percent: Number(refPercents[level.level] ?? 0) }, 'Referral level updated.')}>Save</button></div>)}</div></>}</section>
       </div>
 
       <section className="card"><h2 className="font-semibold text-white">Global strategy presets</h2><p className="mt-1 text-xs text-slate-500">Applies to active Snipe Configs. These are not profit guarantees.</p><div className="mt-4 grid gap-3 md:grid-cols-3">{PRESETS.map(([name, body]) => <button key={name} className="rounded-xl border border-surface-border bg-surface p-4 text-left hover:border-accent/50" onClick={() => { if (window.confirm('Apply ' + name + ' to all active configs?')) void put('/admin/snipes/bulk', body, name + ' preset applied.'); }}><div className="font-semibold text-white">{name}</div><div className="mt-2 text-xs text-slate-500">Click to apply with the 20% hard loss ceiling preserved.</div></button>)}</div></section>
