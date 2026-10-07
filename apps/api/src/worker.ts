@@ -264,18 +264,57 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   );
 
   // The one hard safety switch: real swaps only ever fire when LIVE_TRADING is
-  // explicitly "true" AND the safety system verifiably works. Everything else
-  // (unset, "false", a broken safety net) keeps every auto-buy as a simulated
-  // fill — no wallet key is ever unsealed.
+  // explicitly "true", the safety system works, AND at least one dedicated
+  // (non-public-fallback) Solana RPC answers a startup probe. Public mainnet
+  // RPC remains useful as emergency read fallback, but is intentionally not
+  // trusted as the sole execution provider for real-money auto-trading.
   let paperTrading = true;
   if (app.config.LIVE_TRADING) {
     const readiness = await verifySafetySystemReady(safetyConfig, app.redis);
-    if (readiness.ready) {
+    const dedicatedEndpoints = resolveAllRpcEndpoints(solanaConfig).filter(
+      (endpoint) => endpoint.tier === 'primary',
+    );
+    let healthyDedicatedProvider: string | undefined;
+    for (const endpoint of dedicatedEndpoints) {
+      const probe = new Connection(endpoint.url, {
+        commitment: 'confirmed',
+        disableRetryOnRateLimit: true,
+      });
+      try {
+        await Promise.race([
+          probe.getSlot(),
+          new Promise<never>((_, reject) => {
+            const timer = setTimeout(
+              () => reject(new Error('dedicated RPC startup probe timed out')),
+              5_000,
+            );
+            timer.unref?.();
+          }),
+        ]);
+        healthyDedicatedProvider = endpoint.label;
+        break;
+      } catch (err) {
+        app.log.warn(
+          { provider: endpoint.label, err },
+          'dedicated RPC failed LIVE_TRADING startup probe',
+        );
+      }
+    }
+
+    if (readiness.ready && healthyDedicatedProvider) {
       paperTrading = false;
+      app.log.info(
+        { provider: healthyDedicatedProvider },
+        'dedicated Solana RPC passed LIVE_TRADING startup probe',
+      );
     } else {
       app.log.error(
-        { errors: readiness.errors },
-        '🔴 LIVE_TRADING=true was requested but the safety system is not ready — forcing PAPER TRADING instead',
+        {
+          errors: readiness.errors,
+          dedicatedProviders: dedicatedEndpoints.map((endpoint) => endpoint.label),
+          healthyDedicatedProvider: healthyDedicatedProvider ?? null,
+        },
+        '🔴 LIVE_TRADING requested but safety or dedicated RPC readiness failed — forcing PAPER TRADING instead',
       );
     }
   }
