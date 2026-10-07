@@ -21,9 +21,25 @@ const createSchema = z.object({
 // takeProfitPercent/stopLossPercent/trailingStopPercent — editing a config
 // never retroactively changes an already-open position.
 const updateSchema = z.object({
-  takeProfitPercent: z.number().positive().optional(),
-  stopLossPercent: z.number().positive().optional(),
-  trailingStopPercent: z.number().positive().optional(),
+  isActive: z.boolean().optional(),
+  buyAmountSol: z.number().positive().max(1000).optional(),
+  maxSlippageBps: z.number().int().min(1).max(10_000).optional(),
+  minLiquidityUsd: z.number().min(0).max(100_000_000).optional(),
+  minAiScore: z.number().min(0).max(100).optional(),
+  takeProfitPercent: z.number().positive().max(10_000).optional(),
+  // Hard loss ceiling: user/admin may choose tighter protection, never looser.
+  stopLossPercent: z.number().positive().max(20).optional(),
+  trailingStopPercent: z.number().positive().max(100).optional(),
+  autoBuyOnLaunch: z.boolean().optional(),
+  entryFilterEnabled: z.boolean().optional(),
+  minBuySellRatio: z.number().min(0).max(100).optional(),
+  minHolderCount: z.number().int().min(0).max(1_000_000).optional(),
+  minRecentVolumeUsd: z.number().min(0).max(1_000_000_000).optional(),
+  maxTop10HolderPercent: z.number().min(0).max(100).optional(),
+  institutionalModeEnabled: z.boolean().optional(),
+  moonbagPercent: z.number().min(0).max(100).optional(),
+  useOpportunityScoreGate: z.boolean().optional(),
+  exitStrategy: z.enum(['tp1_trailing_v1']).nullable().optional(),
 });
 
 export default async function snipeRoutes(fastify: FastifyInstance) {
