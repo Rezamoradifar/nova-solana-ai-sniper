@@ -20,6 +20,7 @@ import analyticsRoutes from './routes/analytics.js';
 import walletRoutes from './routes/wallets.js';
 import referralRoutes from './routes/referrals.js';
 import adminRoutes from './routes/admin.js';
+import adminUserRoutes from './routes/adminUsers.js';
 import planRoutes from './routes/plans.js';
 import copyTradeRoutes from './routes/copyTrades.js';
 import marketRoutes from './routes/market.js';
@@ -65,6 +66,7 @@ export async function buildApp() {
   await app.register(walletRoutes);
   await app.register(referralRoutes);
   await app.register(adminRoutes);
+  await app.register(adminUserRoutes);
   await app.register(planRoutes);
   await app.register(copyTradeRoutes);
   await app.register(marketRoutes);
