@@ -26,17 +26,34 @@ export default fp(async (fastify: FastifyInstance) => {
       await req.jwtVerify();
     } catch {
       await reply.code(401).send({ error: 'Unauthorized' });
+      return;
+    }
+    const account = await fastify.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { isSuspended: true, deletedAt: true },
+    });
+    if (!account || account.deletedAt) {
+      await reply.code(401).send({ error: 'Account unavailable' });
+      return;
+    }
+    if (account.isSuspended) {
+      await reply.code(403).send({ error: 'Account suspended by administrator' });
     }
   });
 
   fastify.decorate('requireAdmin', async (req: FastifyRequest, reply: FastifyReply) => {
     try {
       await req.jwtVerify();
-      if (req.user.role !== 'ADMIN') {
-        await reply.code(403).send({ error: 'Forbidden' });
-      }
     } catch {
       await reply.code(401).send({ error: 'Unauthorized' });
+      return;
+    }
+    const account = await fastify.prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { role: true, isSuspended: true, deletedAt: true },
+    });
+    if (!account || account.deletedAt || account.isSuspended || account.role !== 'ADMIN') {
+      await reply.code(403).send({ error: 'Forbidden' });
     }
   });
 });
