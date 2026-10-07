@@ -205,7 +205,7 @@ export default function Landing() {
           <div className="feature-grid">
             <Link className="feature-card feature-main" to="/arbitrage">
               <img
-                src="/images/nova-execution.webp"
+                src="/images/gsp-trading-hero.svg"
                 alt="Two titanium arcs linked by a bright green stream"
                 width="1536"
                 height="1024"
