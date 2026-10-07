@@ -46,6 +46,8 @@ interface PublicCopyData {
   chain: 'solana';
   mode: 'signal_only';
   copyConfigEnabled: boolean;
+  copyWatcherReady: boolean;
+  executionMode: 'disabled' | 'paper' | 'live';
   liveExecutionEnabled: boolean;
   updatedAt: number;
   localWallets: LocalWallet[];
@@ -207,8 +209,18 @@ export default function PublicCopyTrading() {
         </label>
         <div className="copy-mode">
           <span>Execution</span>
-          <strong>{data?.liveExecutionEnabled ? 'LIVE' : 'SAFETY LOCKED'}</strong>
-          <small>Creating a config does not bypass platform risk gates.</small>
+          <strong>
+            {data?.executionMode === 'live'
+              ? 'LIVE'
+              : data?.executionMode === 'paper'
+                ? 'PAPER MIRROR'
+                : 'EXECUTION LOCKED'}
+          </strong>
+          <small>
+            {data?.copyWatcherReady
+              ? 'Fresh confirmed target-wallet buys pass through normal GSP safety gates.'
+              : 'Configs are stored, but the copy watcher is not running.'}
+          </small>
         </div>
         <div className="copy-mode">
           <span>GMGN provider</span>
