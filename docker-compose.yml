@@ -51,7 +51,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://nova:nova@postgres:5432/nova_sniper}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     ports:
-      - '127.0.0.1:${GSP_API_PORT:-4088}:4000'
+      - '4000:4000'
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,7 +110,29 @@ services:
         condition: service_completed_successfully
     networks: [nova]
 
+  # Existing/legacy site stays on 80/443. Do not recreate this service when
+  # deploying only the standalone GSP Trading frontend.
   nginx:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./docker/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./data/certbot/www:/var/www/certbot:ro
+      - ./data/certbot/conf:/etc/letsencrypt:ro
+    depends_on:
+      - api
+    networks: [nova]
+
+  # New GSP TRADING web platform, side-by-side with the existing site.
+  # It shares the same internal API service but has its own public web port.
+  gsp-web:
     build:
       context: .
       dockerfile: apps/dashboard/Dockerfile
