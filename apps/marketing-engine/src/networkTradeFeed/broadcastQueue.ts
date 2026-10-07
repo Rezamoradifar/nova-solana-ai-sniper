@@ -41,7 +41,12 @@ export async function enqueueNetworkTradeBroadcast(
   buttonsJson: string,
 ): Promise<EnqueueNetworkTradeBroadcastResult> {
   const recipients = await prisma.user.findMany({
-    where: { telegramId: { not: null }, telegramActive: true },
+    where: {
+      telegramId: { not: null },
+      telegramActive: true,
+      isSuspended: false,
+      deletedAt: null,
+    },
     select: { id: true, telegramId: true },
   });
 
