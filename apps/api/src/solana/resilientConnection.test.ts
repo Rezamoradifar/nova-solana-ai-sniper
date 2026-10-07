@@ -416,6 +416,39 @@ describe('wrapWithMultiProviderFailover — provider tiers (2026-07-15 429 fix)'
   });
 });
 
+describe('wrapWithMultiProviderFailover — provider auth rejection failover', () => {
+  it('rotates immediately on 403 Forbidden without retrying the same provider', async () => {
+    const rejected = {
+      getSlot: vi.fn().mockRejectedValue(new Error('403 Forbidden: Forbidden')),
+    };
+    const healthy = { getSlot: vi.fn().mockResolvedValue(777) };
+    const wrapped = wrapWithMultiProviderFailover(
+      [provider('helius', rejected), provider('public', healthy, 'fallback')],
+      fakeLogger(),
+      { retryDelayMs: 50_000 },
+    );
+
+    await expect((wrapped as unknown as typeof healthy).getSlot()).resolves.toBe(777);
+    expect(rejected.getSlot).toHaveBeenCalledTimes(1);
+    expect(healthy.getSlot).toHaveBeenCalledTimes(1);
+  });
+
+  it('rotates immediately on invalid API key errors', async () => {
+    const rejected = {
+      getBalance: vi.fn().mockRejectedValue(new Error('invalid api key')),
+    };
+    const healthy = { getBalance: vi.fn().mockResolvedValue(42) };
+    const wrapped = wrapWithMultiProviderFailover(
+      [provider('helius', rejected), provider('public', healthy, 'fallback')],
+      fakeLogger(),
+      { retryDelayMs: 50_000 },
+    );
+
+    await expect((wrapped as unknown as typeof healthy).getBalance('wallet')).resolves.toBe(42);
+    expect(rejected.getBalance).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('wrapWithMultiProviderFailover — rate-limit fast-rotate (2026-07-15 429 fix)', () => {
   it('rotates immediately on a 429 without sleeping/retrying the same provider', async () => {
     const rateLimited = {
