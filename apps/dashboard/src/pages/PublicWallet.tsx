@@ -3,9 +3,29 @@ import { Link } from 'react-router-dom';
 import { Icon, PageHeading } from '../components/public/PublicLayout.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 import { useWalletConnection } from '../lib/WalletContext.js';
+import { PUBLIC_API_BASE } from '../lib/publicMarket.js';
+
+interface WalletNetworkSnapshot {
+  chain: 'solana';
+  cluster: 'mainnet-beta';
+  address: string;
+  lamports: string;
+  sol: number;
+  slot: number;
+  checkedAt: number;
+  signatures: Array<{
+    signature: string;
+    slot: number;
+    err: unknown;
+    blockTime: number | null;
+    confirmationStatus: string | null;
+  }>;
+}
 
 export default function PublicWallet() {
   const { state, connect, disconnect, cancel, selectAccount, refresh } = useWalletConnection();
+  const [network, setNetwork] = useState<WalletNetworkSnapshot | null>(null);
+  const [networkError, setNetworkError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copyGuard = useRef<{ address?: string; active: boolean; attempt: number }>({
     active: false,
@@ -35,6 +55,45 @@ export default function PublicWallet() {
     const timer = setTimeout(() => setCopyState('idle'), 2500);
     return () => clearTimeout(timer);
   }, [copyState]);
+
+  useEffect(() => {
+    const address = state.account?.address;
+    if (!address) {
+      setNetwork(null);
+      setNetworkError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const load = async () => {
+      try {
+        const response = await fetch(
+          `${PUBLIC_API_BASE}/public/wallet/${encodeURIComponent(address)}`,
+          {
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
+          },
+        );
+        if (!response.ok) throw new Error('Solana RPC data is currently unavailable.');
+        if (!controller.signal.aborted) {
+          setNetwork((await response.json()) as WalletNetworkSnapshot);
+          setNetworkError(null);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setNetworkError(
+            error instanceof Error ? error.message : 'Solana RPC data is currently unavailable.',
+          );
+        }
+      }
+    };
+
+    void load();
+    const timer = window.setInterval(() => void load(), 15_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [state.account?.address]);
   const copyAddress = async () => {
     const guard = copyGuard.current;
     if (!guard.address || !guard.active) return;
@@ -278,6 +337,14 @@ export default function PublicWallet() {
                 <strong>{state.account ? 'Public address' : 'Not requested'}</strong>
               </div>
               <div>
+                <span>Mainnet balance</span>
+                <strong>{network ? `${network.sol.toFixed(6)} SOL` : networkError ? 'Unavailable' : state.account ? 'Loading…' : '—'}</strong>
+              </div>
+              <div>
+                <span>RPC slot</span>
+                <strong>{network ? network.slot.toLocaleString() : '—'}</strong>
+              </div>
+              <div>
                 <span>Transaction requests</span>
                 <strong>None</strong>
               </div>
@@ -286,6 +353,34 @@ export default function PublicWallet() {
                 <Link to="/telegram">Managed in bot</Link>
               </div>
             </div>
+            {networkError && (
+              <p className="wallet-message wallet-error" role="status">
+                {networkError}
+              </p>
+            )}
+            {network && network.signatures.length > 0 && (
+              <div className="mt-4">
+                <span className="wallet-field-label">RECENT MAINNET ACTIVITY</span>
+                <div className="mt-2 space-y-2">
+                  {network.signatures.slice(0, 5).map((row) => (
+                    <a
+                      key={row.signature}
+                      href={`https://solscan.io/tx/${row.signature}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-surface-border p-3 text-xs hover:border-accent/50"
+                    >
+                      <span className="font-mono text-slate-300">
+                        {row.signature.slice(0, 8)}…{row.signature.slice(-8)}
+                      </span>
+                      <span className={row.err ? 'text-loss' : 'text-profit'}>
+                        {row.err ? 'Failed' : row.confirmationStatus ?? 'confirmed'}
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </aside>
       </div>
