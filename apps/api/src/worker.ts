@@ -157,22 +157,36 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // doc comment), so PumpFunMonitor itself owns rotating across these. Same
   // endpoint resolution/ordering (Helius primary, QuickNode/Chainstack/custom
   // fallback, public last) `getConnection` already uses for ordinary RPC calls.
-  const pumpFunWsProviders: PumpFunWsProvider[] = resolveAllRpcEndpoints(solanaConfig)
-    .filter((endpoint) => endpoint.wsUrl)
-    .map((endpoint) => ({
-      label: endpoint.label,
-      connection: new Connection(endpoint.url, {
-        commitment: 'confirmed',
-        wsEndpoint: endpoint.wsUrl,
-        disableRetryOnRateLimit: true,
-      }),
-    }));
+  const pumpFunWsProviders: PumpFunWsProvider[] = [];
+  for (const endpoint of resolveAllRpcEndpoints(solanaConfig).filter((candidate) => candidate.wsUrl)) {
+    const candidate = new Connection(endpoint.url, {
+      commitment: 'confirmed',
+      wsEndpoint: endpoint.wsUrl,
+      disableRetryOnRateLimit: true,
+    });
+    try {
+      await Promise.race([
+        candidate.getSlot(),
+        new Promise<never>((_, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error('WS provider startup probe timed out')),
+            5_000,
+          );
+          timer.unref?.();
+        }),
+      ]);
+      pumpFunWsProviders.push({ label: endpoint.label, connection: candidate });
+    } catch (err) {
+      app.log.warn(
+        { provider: endpoint.label, err },
+        'skipping WS provider that failed startup RPC probe',
+      );
+    }
+  }
   if (pumpFunWsProviders.length === 0) {
-    // No configured endpoint exposes a wsUrl (e.g. only a bare SOLANA_RPC_URL
-    // with no matching WS URL) — fall back to the primary connection's own
-    // endpoint so pump.fun detection still has exactly one provider to use,
-    // matching today's pre-2026-07-23 single-subscription behavior rather
-    // than throwing at startup.
+    app.log.error(
+      'no healthy WebSocket-capable Solana provider passed startup probe — launch subscriptions will use the primary connection and scanner health may pause auto-buy',
+    );
     pumpFunWsProviders.push({ label: 'primary', connection });
   }
 
