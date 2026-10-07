@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
+import { requireAdminUser } from '../lib/adminAccess.js';
 
 const updateSchema = z.object({
   takeProfitPercent: z.number().positive().optional(),
@@ -362,7 +363,7 @@ export default async function positionRoutes(fastify: FastifyInstance) {
   // missing ownership check, gated behind fastify.requireAdmin instead.
   fastify.post(
     '/admin/positions/:id/close',
-    { preHandler: fastify.requireAdmin, config: { rateLimit: SELL_RATE_LIMIT } },
+    { preHandler: requireAdminUser, config: { rateLimit: SELL_RATE_LIMIT } },
     async (req, reply) => {
       if (!fastify.positionManager || !fastify.dexScreener) {
         return reply.code(503).send({ error: 'Trading engine is not available' });

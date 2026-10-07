@@ -1,8 +1,13 @@
 import { buildApp } from './app.js';
 import { startBackgroundWorkers } from './worker.js';
+import { applyAdminFeatureOverrides } from './lib/adminFeatureOverrides.js';
 
 async function main() {
   const app = await buildApp();
+
+  // Feature choices made in the Admin Control Center are persisted in the DB
+  // and applied before startup-sensitive workers/services are constructed.
+  await applyAdminFeatureOverrides(app.prisma, app.config, app.log as never);
 
   const stopWorkers = await startBackgroundWorkers(app).catch((err) => {
     app.log.warn({ err }, 'background workers not started (likely missing optional config)');

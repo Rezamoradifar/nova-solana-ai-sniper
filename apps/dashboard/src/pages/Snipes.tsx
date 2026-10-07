@@ -129,6 +129,8 @@ export function Snipes() {
           <input
             className="input-field"
             type="number"
+            min="0.1"
+            max="20"
             value={form.stopLossPercent}
             onChange={(e) => update('stopLossPercent', e.target.value)}
           />

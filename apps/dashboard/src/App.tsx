@@ -13,6 +13,8 @@ import { Snipes } from './pages/Snipes.js';
 import { Leaderboard } from './pages/Leaderboard.js';
 import { Logs } from './pages/Logs.js';
 import { Landing } from './pages/Landing.js';
+import { Admin } from './pages/Admin.js';
+import { TradingLab } from './pages/TradingLab.js';
 
 export function App() {
   return (
@@ -36,6 +38,8 @@ export function App() {
             <Route path="wallets" element={<Wallets />} />
             <Route path="wallets/:id" element={<WalletDetail />} />
             <Route path="snipes" element={<Snipes />} />
+            <Route path="trading-lab" element={<TradingLab />} />
+            <Route path="admin" element={<Admin />} />
             <Route path="leaderboard" element={<Leaderboard />} />
             <Route path="logs" element={<Logs />} />
           </Route>

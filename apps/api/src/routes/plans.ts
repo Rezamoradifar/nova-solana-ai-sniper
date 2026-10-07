@@ -162,6 +162,13 @@ export default async function planRoutes(fastify: FastifyInstance) {
       },
     });
     invalidatePlanCache();
+    await fastify.prisma.auditLog.create({
+      data: {
+        userId: req.user.userId,
+        action: 'admin.plan_updated',
+        metadata: { key, fields: Object.keys(body) },
+      },
+    });
     req.log.info({ key, changes: body, by: req.user.userId }, 'plan updated by admin');
     return { ok: true, plan: publicPlan(updated) };
   });
