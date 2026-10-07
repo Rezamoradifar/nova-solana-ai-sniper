@@ -134,4 +134,5 @@ export interface CurrentUser {
   id: string;
   email: string | null;
   role: 'ADMIN' | 'TRADER';
+  isAdmin?: boolean;
 }
