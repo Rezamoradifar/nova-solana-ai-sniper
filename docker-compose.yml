@@ -51,7 +51,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://nova:nova@postgres:5432/nova_sniper}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     ports:
-      - '${GSP_API_PORT:-4088}:4000'
+      - '127.0.0.1:${GSP_API_PORT:-4088}:4000'
     depends_on:
       postgres:
         condition: service_healthy
