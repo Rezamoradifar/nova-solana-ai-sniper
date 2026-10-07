@@ -118,8 +118,7 @@ export function selectMarkets(input: unknown): MarketToken[] {
 }
 
 export async function fetchMarkets(signal?: AbortSignal): Promise<MarketToken[]> {
-  const url = `https://api.dexscreener.com/tokens/v1/solana/${MARKET_TOKENS.map((t) => t.mint).join(',')}`;
-  const response = await fetch(url, {
+  const response = await fetch(`${PUBLIC_API_BASE}/public/markets`, {
     signal: signal
       ? AbortSignal.any([signal, AbortSignal.timeout(12_000)])
       : AbortSignal.timeout(12_000),
@@ -128,7 +127,7 @@ export async function fetchMarkets(signal?: AbortSignal): Promise<MarketToken[]>
     throw new Error(
       response.status === 429
         ? 'Market source is busy. Retrying shortly.'
-        : 'Market source is temporarily unavailable.',
+        : 'GSP market gateway is temporarily unavailable.',
     );
   return selectMarkets(await response.json());
 }
