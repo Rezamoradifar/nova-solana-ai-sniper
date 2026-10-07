@@ -9,7 +9,7 @@ const createSchema = z.object({
   minLiquidityUsd: z.number().min(0).default(1000),
   minAiScore: z.number().min(0).max(100).default(60),
   takeProfitPercent: z.number().positive().optional(),
-  stopLossPercent: z.number().positive().optional(),
+  stopLossPercent: z.number().positive().max(20).optional(),
   trailingStopPercent: z.number().positive().optional(),
   autoBuyOnLaunch: z.boolean().default(false),
 });
