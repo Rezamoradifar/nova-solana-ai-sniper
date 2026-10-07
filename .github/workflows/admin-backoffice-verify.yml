@@ -22,4 +22,6 @@ jobs:
       - name: Dashboard build
         run: npm run build --workspace apps/dashboard
       - name: Compose validation
-        run: docker compose config >/dev/null
+        run: |
+          cp .env.example .env
+          docker compose config >/dev/null
