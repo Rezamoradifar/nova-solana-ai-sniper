@@ -185,6 +185,12 @@ export default async function authRoutes(fastify: FastifyInstance) {
   fastify.post('/auth/login', { config: { rateLimit: AUTH_RATE_LIMIT } }, async (req, reply) => {
     const body = loginSchema.parse(req.body);
     const user = await fastify.prisma.user.findUnique({ where: { email: body.email } });
+    if (user?.deletedAt) {
+      return reply.code(401).send({ error: 'Invalid credentials' });
+    }
+    if (user?.isSuspended) {
+      return reply.code(403).send({ error: 'Account suspended by administrator' });
+    }
     if (!user?.passwordHash || !verifyPassword(body.password, user.passwordHash)) {
       await fastify.prisma.auditLog.create({
         data: { action: 'auth.login_failed', ip: req.ip, metadata: { email: body.email } },
@@ -221,6 +227,12 @@ export default async function authRoutes(fastify: FastifyInstance) {
     const telegramId = parsed.user.id.toString();
 
     const user = await resolveOrCreateTelegramUser(fastify, req, telegramId, parsed.start_param);
+    if (user.deletedAt) {
+      return reply.code(401).send({ error: 'Account unavailable' });
+    }
+    if (user.isSuspended) {
+      return reply.code(403).send({ error: 'Account suspended by administrator' });
+    }
     await fastify.prisma.auditLog.create({
       data: { userId: user.id, action: 'auth.telegram_login', ip: req.ip },
     });
