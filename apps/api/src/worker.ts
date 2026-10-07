@@ -33,6 +33,8 @@ declare module 'fastify' {
     scannerConcurrencyGovernor?: ScannerConcurrencyGovernor;
     /** The mode the worker actually started in (LIVE_TRADING can be forced to PAPER). */
     tradingMode?: 'LIVE' | 'PAPER';
+    /** True only when the real on-chain copy-trade watcher is actually running. */
+    copyTradingExecutionReady?: boolean;
   }
 }
 import {
@@ -64,6 +66,8 @@ import { JitoClient } from './solana/jito.js';
 import { configureFastSend, jitoTransactionSender, rpcSender } from './solana/fastSend.js';
 import { ArbitrageScanner, setActiveArbitrageScanner } from './trading/arbitrageScanner.js';
 import { PositionManager } from './trading/positionManager.js';
+import { CopyTradingService } from './trading/copyTrading.js';
+import { CopyTradeWatcher } from './trading/copyTradeWatcher.js';
 import type { Tp1TrailingConfig } from './trading/tp1TrailingStrategy.js';
 import { AutoTrader } from './trading/autoTrader.js';
 import { resolveTokenAgeMs } from './trading/riskTier.js';
@@ -394,6 +398,37 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   }
   if (!app.hasDecorator('dexScreener')) {
     app.decorate('dexScreener', dexScreener);
+  }
+
+  const copyTradingService = new CopyTradingService(
+    app.prisma,
+    positionManager,
+    app.log as never,
+    app.config.ENCRYPTION_KEY,
+  );
+  let copyTradeWatcher: CopyTradeWatcher | undefined;
+  if (app.config.COPY_TRADING_EXECUTION_ENABLED) {
+    copyTradeWatcher = new CopyTradeWatcher({
+      prisma: app.prisma,
+      redis: app.redis,
+      connection,
+      dexScreener,
+      copyTrading: copyTradingService,
+      logger: app.log as never,
+      pollIntervalMs: app.config.COPY_TRADING_POLL_INTERVAL_MS,
+      maxSignalAgeMs: app.config.COPY_TRADING_MAX_SIGNAL_AGE_SECONDS * 1000,
+      minSourceBuySol: app.config.COPY_TRADING_MIN_SOURCE_BUY_SOL,
+    });
+    copyTradeWatcher.start();
+    app.log.warn(
+      { tradingMode: paperTrading ? 'PAPER' : 'LIVE' },
+      'Copy Trading signal watcher started',
+    );
+  } else {
+    app.log.info('COPY_TRADING_EXECUTION_ENABLED=false — copy configs are stored but not mirrored');
+  }
+  if (!app.hasDecorator('copyTradingExecutionReady')) {
+    app.decorate('copyTradingExecutionReady', Boolean(copyTradeWatcher));
   }
   const autoTrader = new AutoTrader({
     prisma: app.prisma,
@@ -1989,6 +2024,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     sourceHealthMonitor.stop();
     shadowModePriceSampler?.stop();
     networkTradeScanner?.stop();
+    copyTradeWatcher?.stop();
     arbitrageScanner?.stop();
     if (app.config.SCANNER_CONCURRENCY_GOVERNOR_ENABLED) {
       scannerConcurrencyGovernor.stop();
