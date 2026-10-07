@@ -198,6 +198,13 @@
   align-items: center;
   gap: 12px;
 }
+.nova-site .network-header-status {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
 .nova-site .menu-toggle {
   display: none !important;
 }
@@ -2879,6 +2886,9 @@
   }
   .nova-site .header-actions {
     gap: 9px;
+  }
+  .nova-site .network-header-status {
+    display: none;
   }
   .nova-site .header-actions .button-sm {
     font-size: 10px;
