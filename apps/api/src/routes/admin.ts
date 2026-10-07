@@ -14,6 +14,7 @@ import {
 } from '@nova/shared';
 import { requireAdminUser } from '../lib/adminAccess.js';
 import { getActiveArbitrageScanner } from '../trading/arbitrageScanner.js';
+import { ADMIN_FEATURES, isAdminFeatureKey } from '../lib/adminFeatureOverrides.js';
 import {
   computePerformance,
   INVALID_PAPER_HOLD_MS,
@@ -40,6 +41,42 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     if (error) return reply.code(400).send({ error });
     return reply.send({ ok: true });
   }
+
+  fastify.get('/admin/features', guard, async () => {
+    const overrides = await fastify.prisma.adminFeatureOverride.findMany();
+    const desired = new Map(overrides.map((row) => [row.key, row.enabled]));
+    const effective = fastify.config as unknown as Record<string, unknown>;
+    return ADMIN_FEATURES.map((feature) => ({
+      key: feature.key,
+      label: feature.label,
+      effectiveEnabled: Boolean(effective[feature.key]),
+      desiredEnabled: desired.get(feature.key) ?? Boolean(effective[feature.key]),
+      restartRequired: true,
+      pendingRestart:
+        desired.has(feature.key) && desired.get(feature.key) !== Boolean(effective[feature.key]),
+    }));
+  });
+
+  fastify.put('/admin/features/:key', guard, async (req, reply) => {
+    const { key } = z.object({ key: z.string().min(1).max(80) }).parse(req.params);
+    const { enabled } = flagBody.parse(req.body);
+    if (!isAdminFeatureKey(key)) {
+      return reply.code(400).send({ error: 'Feature is not admin-toggleable' });
+    }
+    await fastify.prisma.adminFeatureOverride.upsert({
+      where: { key },
+      create: { key, enabled, updatedByUserId: req.user.userId },
+      update: { enabled, updatedByUserId: req.user.userId },
+    });
+    await fastify.prisma.auditLog.create({
+      data: {
+        userId: req.user.userId,
+        action: 'admin.feature_override',
+        metadata: { key, enabled, restartRequired: true },
+      },
+    });
+    return reply.send({ ok: true, key, desiredEnabled: enabled, restartRequired: true });
+  });
 
   fastify.get('/admin/overview', guard, async () => {
     const prisma = fastify.prisma;
