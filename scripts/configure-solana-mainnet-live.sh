@@ -19,6 +19,27 @@ if [[ -z "$HELIUS_KEY" ]]; then
   exit 1
 fi
 
+echo "Validating Helius key against Solana mainnet..."
+if ! HELIUS_TEST="$(
+  curl -fsS --max-time 10 --config - <<EOF
+url = "https://mainnet.helius-rpc.com/?api-key=$HELIUS_KEY"
+header = "Content-Type: application/json"
+request = "POST"
+data = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getSlot\"}"
+EOF
+)"; then
+  unset HELIUS_KEY
+  echo "ERROR: Helius rejected the key or endpoint is unavailable. Nothing was changed." >&2
+  exit 1
+fi
+if ! printf '%s' "$HELIUS_TEST" | grep -q '"result"'; then
+  unset HELIUS_KEY
+  echo "ERROR: Helius key validation did not return a valid RPC result. Nothing was changed." >&2
+  exit 1
+fi
+unset HELIUS_TEST
+echo "Helius RPC validation passed."
+
 set_env() {
   local key="$1" value="$2"
   if grep -qE "^$key=" "$ENV_FILE"; then
