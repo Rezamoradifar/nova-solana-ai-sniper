@@ -5,6 +5,7 @@ on:
     branches:
       - codex/full-admin-backoffice
       - codex/gsp-trading-port-8088
+      - codex/gsp-trading-latest-8088
 
 jobs:
   verify:
