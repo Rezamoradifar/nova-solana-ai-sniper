@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { Icon, MarketTicker, TokenMark, useMarkets } from '../components/public/PublicLayout.js';
 import { money, pct } from '../lib/publicMarket.js';
 import { WebsiteTools } from '../components/public/WebsiteTools.js';
+import { NetworkWinners } from '../components/public/NetworkWinners.js';
 
 export default function Landing() {
   const { tokens, loading, error } = useMarkets();
@@ -184,6 +185,7 @@ export default function Landing() {
           entire market.
         </p>
       </section>
+      <NetworkWinners />
       <section className="toolkit-section">
         <div className="site-container site-section">
           <div className="section-heading">
