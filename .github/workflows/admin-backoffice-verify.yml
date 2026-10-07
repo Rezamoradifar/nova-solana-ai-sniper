@@ -20,6 +20,8 @@ jobs:
       - run: npx prisma generate --schema apps/api/prisma/schema.prisma
       - name: TypeScript backend
         run: npx tsc -b packages/shared packages/ai apps/telegram-bot apps/api
+      - name: Copy trading network tests
+        run: npx vitest run apps/api/src/trading/copyTradeWatcher.test.ts
       - name: Dashboard build
         run: npm run build --workspace apps/dashboard
       - name: Compose validation
