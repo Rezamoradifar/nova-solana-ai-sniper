@@ -113,6 +113,7 @@ services:
   # Existing/legacy site stays on 80/443. Do not recreate this service when
   # deploying only the standalone GSP Trading frontend.
   nginx:
+    profiles: ['legacy']
     build:
       context: .
       dockerfile: apps/dashboard/Dockerfile
