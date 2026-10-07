@@ -58,6 +58,15 @@ model User {
   // telegramId at all.
   telegramActive Boolean @default(true)
 
+  // Admin account lifecycle. Suspension blocks authentication/API access while
+  // preserving wallets and open-position exit monitoring. Deleted accounts are
+  // anonymized/disabled rather than hard-deleted so financial and audit history
+  // remains intact and referentially consistent.
+  isSuspended      Boolean  @default(false)
+  suspendedAt     DateTime?
+  suspensionReason String?
+  deletedAt        DateTime?
+
   wallets               Wallet[]
   watchlists            WatchlistItem[]
   snipeConfigs          SnipeConfig[]
