@@ -12,7 +12,7 @@ type Control = {
   safety: { maxTradeSol: number; maxDailyLossUsd: number; maxOpenPositions: number; minWalletReserveSol: number; maxStopLossPercent: number };
   features: { key: string; label: string; enabled: boolean; restartRequired: boolean }[];
   integrations: { key: string; label: string; configured: boolean }[];
-  counters: { users: number; activeWallets: number; activeSnipes: number; autoBuySnipes: number; openPositions: number; liveTrades24h: number; paperTrades24h: number; withdrawalsPending: number; payoutsPending: number };
+  counters: { users: number; activeWallets: number; activeSnipes: number; autoBuySnipes: number; activeCopyConfigs: number; openPositions: number; liveTrades24h: number; paperTrades24h: number; withdrawalsPending: number; payoutsPending: number };
   profit: { netProfitUsd24h: number; platformFeeUsd24h: number; referralRewardsUsd24h: number };
   arbitrage: { enabled: boolean; scans?: number; opportunities?: number; bestNetSol?: number };
 };
@@ -101,7 +101,7 @@ export function Admin() {
         <Stat label="Open positions" value={String(c.counters.openPositions)} />
         <Stat label="Net profit / 24h" value={money(c.profit.netProfitUsd24h)} tone={c.profit.netProfitUsd24h >= 0 ? 'text-profit' : 'text-loss'} />
         <Stat label="Live trades / 24h" value={String(c.counters.liveTrades24h)} sub={String(c.counters.paperTrades24h) + ' paper'} />
-        <Stat label="Auto-buy configs" value={String(c.counters.autoBuySnipes)} sub={String(c.counters.activeSnipes) + ' active snipes'} />
+        <Stat label="Auto-buy configs" value={String(c.counters.autoBuySnipes)} sub={String(c.counters.activeSnipes) + ' active snipes'} /><Stat label="Copy configs" value={String(c.counters.activeCopyConfigs)} sub="config records; live signal wiring not claimed" />
         <Stat label="Pending payouts" value={String(c.counters.payoutsPending)} />
         <Stat label="Withdrawals" value={String(c.counters.withdrawalsPending)} />
       </div>
