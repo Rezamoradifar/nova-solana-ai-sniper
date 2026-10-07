@@ -575,6 +575,28 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     };
   });
 
+  fastify.put('/admin/copy-trades/:id', guard, async (req, reply) => {
+    const { id } = z.object({ id: z.string().min(1) }).parse(req.params);
+    const { enabled } = flagBody.parse(req.body);
+    const existing = await fastify.prisma.copyTradeConfig.findUnique({
+      where: { id },
+      select: { id: true, userId: true },
+    });
+    if (!existing) return reply.code(404).send({ error: 'Copy trade config not found' });
+    await fastify.prisma.copyTradeConfig.update({
+      where: { id },
+      data: { isActive: enabled },
+    });
+    await fastify.prisma.auditLog.create({
+      data: {
+        userId: req.user.userId,
+        action: 'admin.copy_trade_toggle',
+        metadata: { configId: id, targetUserId: existing.userId, enabled },
+      },
+    });
+    return reply.send({ ok: true, enabled });
+  });
+
   fastify.get('/admin/copy-trades', guard, async (req) => {
     const { limit, offset } = pageQuery.parse(req.query);
     const [total, rows] = await Promise.all([
