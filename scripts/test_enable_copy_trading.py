@@ -18,6 +18,7 @@ elif a[:4] == ['compose', 'ps', '-q', 'gsp-web']: print('web-id')
 elif a[0] == 'inspect':
     print(str(root/'docker-compose.yml') if 'config_files' in a[2] else 'sha256:old-'+a[-1])
 elif 'status' in a: print('null')
+elif a[:6] == ['compose', 'run', '--rm', '--no-deps', '-T', 'api'] and a[-1] == '-' and os.environ.get('FAIL_RPC'): sys.exit(1)
 elif 'build' in a and os.environ.get('FAIL_BUILD'): sys.exit(2)
 elif 'enable' in a:
     assert 'COPY_TRADING_EXECUTION_ENABLED=true' in (root/'.env').read_text()
@@ -29,7 +30,7 @@ class RolloutTests(unittest.TestCase):
     def run_rollout(self, **overrides):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); (root/'bin').mkdir(); (root/'scripts').mkdir()
-            for name in ['enable-copy-trading.sh', 'copy-trading-feature.mjs']:
+            for name in ['enable-copy-trading.sh', 'copy-trading-feature.mjs', 'check-solana-rpc.mjs']:
                 shutil.copy2(ROOT/'scripts'/name, root/'scripts'/name)
             (root/'docker-compose.yml').write_text('services: {}\n')
             original = 'LIVE_TRADING=false\nRPC_KEY=do-not-print\nCOPY_TRADING_EXECUTION_ENABLED=false\n'
@@ -54,6 +55,14 @@ class RolloutTests(unittest.TestCase):
         result, contents, calls, original = self.run_rollout(FAIL_BUILD='1')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(contents, original)
+        self.assertNotIn(' - enable', calls)
+        self.assertNotIn('up -d', calls)
+
+    def test_rpc_failure_stops_before_build_or_activation(self):
+        result, contents, calls, original = self.run_rollout(FAIL_RPC='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(contents, original)
+        self.assertNotIn('build api', calls)
         self.assertNotIn(' - enable', calls)
         self.assertNotIn('up -d', calls)
 

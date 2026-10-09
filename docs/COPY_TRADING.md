@@ -99,6 +99,22 @@ restores the previous environment, feature override and pinned images, then asks
 the operator to verify health. The script does not stop nginx, delete containers'
 data, reset Git, disable risk checks or turn on LIVE trading.
 
+Before building, activation now makes a read-only `getSlot` probe with the
+environment that would be deployed. If all configured HTTP providers fail, it
+stops without replacing containers or changing activation. For a standalone
+check, run `docker compose run --rm --no-deps -T api node --input-type=module - < scripts/check-solana-rpc.mjs`.
+The output contains provider labels and status codes, never endpoint URLs, API
+keys or raw provider errors. This checks HTTP reads only, not WebSocket access,
+capacity under load, or the eventual worker trading mode.
+
+`ACCESS_DENIED` / 403 from Helius requires checking the key's permissions, server
+IP restrictions and endpoint access in the Helius dashboard. A public fallback
+returning 429 is rate-limited; it is not evidence that the API needs reinstalling.
+Fix provider access first. Do not disable token security gates to hide missing RPC
+data. Requests and latency probes now skip providers until their error cooldown
+expires; when all are cooling down, reads fail locally with a bounded retry delay
+instead of repeatedly sending traffic to the same rejected endpoints.
+
 After activation, check `/copy-trading`: actual LIVE/PAPER mode, watcher health,
 server limits, qualified candidates and your own enabled wallets. Health and mode
 are separate: a degraded worker may still execute healthy targets. Pause a wallet
@@ -119,3 +135,9 @@ rollout tests passed; backend TypeScript, targeted lint and the production dashb
 build passed. Browser interaction QA was blocked because Chromium was absent and
 the browser download returned an invalid archive. Docker/VPS/live-trade checks
 remain unexecuted.
+
+RPC recovery follow-up: 146 targeted RPC/copy/security tests, four mocked Docker
+rollout tests, backend TypeScript and targeted lint passed. Four isolated probe
+simulations verified healthy responses, HTTP 403/429, JSON-RPC errors and transport
+errors, including output redaction. No server credentials were read or changed;
+provider access and VPS deployment still require operator verification.

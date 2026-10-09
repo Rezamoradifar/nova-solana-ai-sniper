@@ -2,7 +2,7 @@
 set -euo pipefail
 # Run from an existing Nova/GSP checkout after switching to the reviewed revision.
 cd "${1:-$(pwd)}"
-[[ -f docker-compose.yml && -f .env && -f scripts/copy-trading-feature.mjs ]] || {
+[[ -f docker-compose.yml && -f .env && -f scripts/copy-trading-feature.mjs && -f scripts/check-solana-rpc.mjs ]] || {
   echo 'Run in the existing GSP repository with its existing .env.' >&2; exit 1;
 }
 command -v python3 >/dev/null
@@ -35,8 +35,11 @@ import json, sys
 v = json.load(open(sys.argv[1]))
 assert v is None or isinstance(v.get('enabled'), bool), 'Invalid feature backup'
 PY
-# A failed build leaves the running application and activation unchanged.
+# Check the environment that would be deployed, using the existing API image.
+# This one-off Node command does not start workers or execute any trades.
 docker compose config --quiet
+docker compose run --rm --no-deps -T api node --input-type=module - < scripts/check-solana-rpc.mjs
+# A failed preflight or build leaves the running application and activation unchanged.
 docker compose build api gsp-web
 rollback() {
   trap - ERR INT TERM
