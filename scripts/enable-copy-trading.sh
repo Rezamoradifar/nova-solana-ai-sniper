@@ -23,12 +23,19 @@ for container in "$api_id" "$web_id"; do
   [[ "$actual_compose" == "$expected_compose" ]] || { echo 'Running container uses a different Compose configuration.' >&2; exit 1; }
 done
 umask 077
-backup="$(pwd -P)/backups/copy-trading-$(date -u +%Y%m%dT%H%M%SZ)"
-mkdir -p "$backup"
+mkdir -p backups
+backup=$(mktemp -d "$(pwd -P)/backups/copy-trading-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")
 cp -p .env "$backup/env"
 api_image=$(docker inspect --format '{{.Image}}' "$api_id")
 web_image=$(docker inspect --format '{{.Image}}' "$web_id")
-printf 'services:\n  api:\n    image: "%s"\n  gsp-web:\n    image: "%s"\n' "$api_image" "$web_image" > "$backup/rollback.yml"
+api_rollback="nova-copy-rollback-api:$(basename "$backup")"
+web_rollback="nova-copy-rollback-web:$(basename "$backup")"
+# Keep explicit local tags and an actual archive, not only container image IDs.
+# If an image cannot be retained, abort while the old containers still run.
+docker image tag "$api_image" "$api_rollback"
+docker image tag "$web_image" "$web_rollback"
+printf 'services:\n  api:\n    image: "%s"\n    pull_policy: never\n  gsp-web:\n    image: "%s"\n    pull_policy: never\n' "$api_rollback" "$web_rollback" > "$backup/rollback.yml"
+docker image save --output "$backup/images.tar" "$api_rollback" "$web_rollback"
 docker compose exec -T api node --input-type=module - status < scripts/copy-trading-feature.mjs > "$backup/feature.json"
 python3 - "$backup/feature.json" <<'PY'
 import json, sys
@@ -44,10 +51,17 @@ docker compose build api gsp-web
 rollback() {
   trap - ERR INT TERM
   echo 'Activation failed; restoring the saved feature, environment, and images.' >&2
-  cp -p "$backup/env" .env
   local failed=0
-  docker compose run --rm --no-deps -T api node --input-type=module - restore "$(cat "$backup/feature.json")" < scripts/copy-trading-feature.mjs || failed=1
-  docker compose -f docker-compose.yml -f "$backup/rollback.yml" up -d --no-deps --no-build api gsp-web || failed=1
+  cp -p "$backup/env" .env || failed=1
+  if ! docker image inspect "$api_rollback" "$web_rollback" >/dev/null 2>&1; then
+    docker image load --input "$backup/images.tar" || failed=1
+  fi
+  if [[ "$failed" == 0 ]]; then
+    docker compose -f docker-compose.yml -f "$backup/rollback.yml" run --rm --no-deps --pull never -T api node --input-type=module - restore "$(cat "$backup/feature.json")" < scripts/copy-trading-feature.mjs || failed=1
+  fi
+  if [[ "$failed" == 0 ]]; then
+    docker compose -f docker-compose.yml -f "$backup/rollback.yml" up -d --no-deps --no-build --pull never api gsp-web || failed=1
+  fi
   if [[ "$failed" == 0 ]]; then
     echo "Rollback commands completed; verify service health. Backup: $backup" >&2
   else

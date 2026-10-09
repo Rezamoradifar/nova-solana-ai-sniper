@@ -87,7 +87,7 @@ bash scripts/enable-copy-trading.sh
 ```
 
 The script builds before replacing containers, backs up `.env`, the copy-feature
-value and running image IDs under private `backups/`, enables the copy watcher in
+value and tagged running images in an `images.tar` archive under private `backups/`, enables the copy watcher in
 both environment and the existing admin override, and recreates only `api` and
 `gsp-web`. It preserves LIVE/PAPER and all secrets. Already-active account copy
 configurations begin receiving eligible signals if the existing worker mode is
@@ -98,6 +98,29 @@ Health verification requires `/health/ready` and a healthy copy watcher. Failure
 restores the previous environment, feature override and pinned images, then asks
 the operator to verify health. The script does not stop nginx, delete containers'
 data, reset Git, disable risk checks or turn on LIVE trading.
+
+The image archive is written before build/cutover; insufficient disk space or
+an unavailable old image stops activation while the running containers remain
+untouched. Rollback reloads missing local tags from the archive and uses
+`--pull never`. A bare container `sha256:...` ID is no longer used as the Compose
+image reference. Keep the private backup until the new deployment is verified;
+`backups/` is excluded from Docker build context.
+
+If a previous installer reported `Rollback incomplete` because its old image is
+missing, run from the repository:
+
+```bash
+bash scripts/recover-copy-trading.sh /absolute/path/to/backups/copy-trading-TIMESTAMP
+```
+
+This is service recovery using the **current locally built API/web images**,
+not a promise to recover absent old image contents. It saves the current `.env`,
+checks that both current images exist, restores the specified saved environment
+and copy-feature value, and starts only `api` and `gsp-web` with no pulls/builds.
+It never reads the broken legacy `rollback.yml`. `RECOVERY_HTTP_OK` means the
+internal API and web HTTP checks passed; RPC access and trading readiness still
+need verification. A missing current image stops recovery before configuration
+replacement; a failed feature restore prevents starting replacement containers.
 
 Before building, activation now makes a read-only `getSlot` probe with the
 environment that would be deployed. If all configured HTTP providers fail, it
@@ -141,3 +164,9 @@ rollout tests, backend TypeScript and targeted lint passed. Four isolated probe
 simulations verified healthy responses, HTTP 403/429, JSON-RPC errors and transport
 errors, including output redaction. No server credentials were read or changed;
 provider access and VPS deployment still require operator verification.
+
+Rollback recovery follow-up: ten mocked Docker tests cover successful activation,
+preflight/build/archive failures, archived-image reload, failed feature restoration
+and service recovery without the invalid rollback override. Shell syntax was
+checked. Docker is unavailable in the development environment; these checks do
+not constitute a real Docker/VPS recovery test.
