@@ -355,6 +355,14 @@ function cacheKeyFor(method: string, args: unknown[]): string {
 interface ProviderState {
   failureCount: number;
   cooldownUntil: number;
+  failureGeneration: number;
+}
+
+export class RpcProvidersCoolingDownError extends Error {
+  constructor(readonly retryAfterMs: number) {
+    super(`RPC service unavailable: all providers are on cooldown; retry after ${retryAfterMs}ms`);
+    this.name = 'RpcProvidersCoolingDownError';
+  }
 }
 
 /**
@@ -396,7 +404,7 @@ export function wrapWithMultiProviderFailover(
   const cacheTtlMs = options.cacheTtlMs ?? 2_000;
 
   const state = new Map<string, ProviderState>(
-    providers.map((p) => [p.label, { failureCount: 0, cooldownUntil: 0 }]),
+    providers.map((p) => [p.label, { failureCount: 0, cooldownUntil: 0, failureGeneration: 0 }]),
   );
   const cache = new Map<string, { value: unknown; cachedAt: number }>();
   const inFlight = new Map<string, Promise<unknown>>();
@@ -426,6 +434,7 @@ export function wrapWithMultiProviderFailover(
     const benchmarkTick = async (): Promise<void> => {
       await Promise.all(
         providers.map(async (p) => {
+          if (state.get(p.label)!.cooldownUntil > Date.now()) return;
           const startedAt = Date.now();
           try {
             await Promise.race([
@@ -454,12 +463,10 @@ export function wrapWithMultiProviderFailover(
   }
 
   /**
-   * Primary-tier providers first, fallback-tier last — regardless of health —
-   * so a shared/free public RPC endpoint (see RpcProviderConfig.tier's doc
-   * comment) is only ever reached once every primary provider is unhealthy,
-   * instead of getting an equal round-robin share of ordinary traffic. Within
-   * each tier: healthy (off-cooldown) providers first, unhealthy ones last as
-   * a last resort — unchanged. Stage 2 (2026-07-14): when benchmarking is
+   * Eligible primary-tier providers first, eligible fallback-tier last. A
+   * provider on cooldown is excluded entirely, even during a total outage;
+   * trying it as a last resort on every call defeats its backoff and amplifies
+   * 403/429 storms. Stage 2 (2026-07-14): when benchmarking is
    * enabled and has at least one sample, healthy providers are additionally
    * sorted fastest-known-latency-first (stable sort, so any provider with no
    * sample yet keeps its round-robin position, ordered after every provider
@@ -478,7 +485,6 @@ export function wrapWithMultiProviderFailover(
 
     const order = (list: RpcProviderConfig[]): RpcProviderConfig[] => {
       const healthy = list.filter((p) => state.get(p.label)!.cooldownUntil <= now);
-      const unhealthy = list.filter((p) => state.get(p.label)!.cooldownUntil > now);
       if (options.benchmarkIntervalMs) {
         healthy.sort((a, b) => {
           const la = rpcLatencyRegistry.get(a.label);
@@ -489,7 +495,7 @@ export function wrapWithMultiProviderFailover(
           return la - lb;
         });
       }
-      return [...healthy, ...unhealthy];
+      return healthy;
     };
 
     const primary = rotated.filter((p) => (p.tier ?? 'primary') === 'primary');
@@ -522,11 +528,15 @@ export function wrapWithMultiProviderFailover(
   function failAndCooldown(provider: RpcProviderConfig): void {
     const st = state.get(provider.label)!;
     st.failureCount += 1;
+    st.failureGeneration += 1;
     st.cooldownUntil = Date.now() + backoffFor(st.failureCount);
     rpcCooldownRegistry.record(provider.label, st.cooldownUntil);
   }
 
-  function clearCooldown(provider: RpcProviderConfig, st: ProviderState): void {
+  function clearCooldown(provider: RpcProviderConfig, st: ProviderState, generation: number): void {
+    // A success already in flight when another request failed must not erase
+    // that newer cooldown (common when a burst is partially rate-limited).
+    if (st.failureGeneration !== generation) return;
     st.failureCount = 0;
     st.cooldownUntil = 0;
     rpcCooldownRegistry.record(provider.label, 0);
@@ -539,10 +549,14 @@ export function wrapWithMultiProviderFailover(
     for (let i = 0; i < candidates.length; i++) {
       const provider = candidates[i]!;
       const st = state.get(provider.label)!;
+      // Another concurrent request may have failed while this call was awaiting
+      // an earlier candidate. Do not use the now-stale eligibility snapshot.
+      if (st.cooldownUntil > Date.now()) continue;
       const hasMore = i < candidates.length - 1;
       try {
+        const generation = st.failureGeneration;
         const result = await callProvider(provider, prop, args);
-        clearCooldown(provider, st);
+        clearCooldown(provider, st, generation);
         return result;
       } catch (firstErr) {
         lastErr = firstErr;
@@ -580,9 +594,12 @@ export function wrapWithMultiProviderFailover(
         options.onFailover?.({ method: prop, attempt: 1, provider: provider.label });
         await sleep(withJitter(retryDelayMs));
 
+        if (st.cooldownUntil > Date.now()) continue;
+
         try {
+          const generation = st.failureGeneration;
           const result = await callProvider(provider, prop, args);
-          clearCooldown(provider, st);
+          clearCooldown(provider, st, generation);
           return result;
         } catch (secondErr) {
           lastErr = secondErr;
@@ -608,7 +625,9 @@ export function wrapWithMultiProviderFailover(
       }
     }
 
-    throw lastErr;
+    if (lastErr !== undefined) throw lastErr;
+    const earliestRetry = Math.min(...[...state.values()].map((st) => st.cooldownUntil));
+    throw new RpcProvidersCoolingDownError(Math.max(1, earliestRetry - Date.now()));
   }
 
   async function runCached(prop: string, args: unknown[]): Promise<unknown> {

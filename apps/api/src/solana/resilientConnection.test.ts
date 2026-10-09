@@ -582,7 +582,7 @@ describe('rpcCooldownRegistry (2026-07-15 Helius credit audit)', () => {
     expect(snapshot.healthy).toBe(0);
   });
 
-  it('clears a provider back to 0 once it succeeds again', async () => {
+  it('clears a provider back to 0 once it succeeds after cooldown expires', async () => {
     const flaky = {
       getSlot: vi
         .fn()
@@ -594,8 +594,121 @@ describe('rpcCooldownRegistry (2026-07-15 Helius credit audit)', () => {
     await expect((wrapped as unknown as typeof flaky).getSlot()).rejects.toThrow();
     expect(rpcCooldownRegistry.snapshot().flaky).toBeGreaterThan(0);
 
-    await (wrapped as unknown as typeof flaky).getSlot();
-    expect(rpcCooldownRegistry.snapshot().flaky).toBe(0);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(rpcCooldownRegistry.snapshot().flaky! + 1);
+    try {
+      await (wrapped as unknown as typeof flaky).getSlot();
+      expect(rpcCooldownRegistry.snapshot().flaky).toBe(0);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+});
+
+describe('provider cooldown enforcement', () => {
+  it('does not let an older in-flight success erase a newer rate-limit cooldown', async () => {
+    let finish!: (value: number) => void;
+    const impl = {
+      getSlot: vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<number>((resolve) => {
+              finish = resolve;
+            }),
+        )
+        .mockRejectedValue(new Error('429 Too Many Requests')),
+    };
+    const wrapped = wrapWithMultiProviderFailover([provider('limited', impl)], fakeLogger());
+    const first = wrapped.getSlot();
+    await expect(wrapped.getSlot()).rejects.toThrow('429');
+    const cooldown = rpcCooldownRegistry.snapshot().limited;
+    finish(42);
+    await expect(first).resolves.toBe(42);
+    expect(rpcCooldownRegistry.snapshot().limited).toBe(cooldown);
+    await expect(wrapped.getSlot()).rejects.toMatchObject({ name: 'RpcProvidersCoolingDownError' });
+    expect(impl.getSlot).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a rejected primary ahead of a healthy fallback on later calls', async () => {
+    const rejected = { getSlot: vi.fn().mockRejectedValue(new Error('403 Forbidden')) };
+    const fallback = { getSlot: vi.fn().mockResolvedValue(42) };
+    const wrapped = wrapWithMultiProviderFailover(
+      [provider('helius', rejected), provider('public', fallback, 'fallback')],
+      fakeLogger(),
+      { baseBackoffMs: 60_000 },
+    );
+    for (let i = 0; i < 4; i++) await wrapped.getSlot();
+    expect(rejected.getSlot).toHaveBeenCalledTimes(1);
+    expect(fallback.getSlot).toHaveBeenCalledTimes(4);
+  });
+
+  it('fails locally during a total outage instead of repeatedly hitting 403/429 endpoints', async () => {
+    const rejected = { getSlot: vi.fn().mockRejectedValue(new Error('403 Forbidden')) };
+    const limited = { getSlot: vi.fn().mockRejectedValue(new Error('429 Too Many Requests')) };
+    const wrapped = wrapWithMultiProviderFailover(
+      [provider('helius', rejected), provider('public', limited, 'fallback')],
+      fakeLogger(),
+      { baseBackoffMs: 60_000 },
+    );
+    await expect(wrapped.getSlot()).rejects.toThrow('429');
+    for (let i = 0; i < 4; i++) {
+      await expect(wrapped.getSlot()).rejects.toMatchObject({
+        name: 'RpcProvidersCoolingDownError',
+        retryAfterMs: expect.any(Number),
+      });
+    }
+    expect(rejected.getSlot).toHaveBeenCalledTimes(1);
+    expect(limited.getSlot).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks a queued fallback after a concurrent call puts it on cooldown', async () => {
+    let rejectSlow!: (error: Error) => void;
+    const slow = {
+      getSlot: vi.fn(
+        () =>
+          new Promise<number>((_, reject) => {
+            rejectSlow = reject;
+          }),
+      ),
+    };
+    const limited = { getSlot: vi.fn().mockRejectedValue(new Error('429 Too Many Requests')) };
+    const wrapped = wrapWithMultiProviderFailover(
+      [provider('slow', slow), provider('limited', limited)],
+      fakeLogger(),
+      { baseBackoffMs: 60_000 },
+    );
+    const first = wrapped.getSlot();
+    const firstResult = expect(first).rejects.toThrow('403');
+    // Mark the secondary unavailable through a different, uncached method.
+    Object.assign(slow, { getBalance: vi.fn().mockRejectedValue(new Error('403 Forbidden')) });
+    Object.assign(limited, {
+      getBalance: vi.fn().mockRejectedValue(new Error('429 Too Many Requests')),
+    });
+    await expect(wrapped.getBalance('wallet' as never)).rejects.toThrow();
+    rejectSlow(new Error('403 Forbidden'));
+    await firstResult;
+    expect(limited.getSlot).not.toHaveBeenCalled();
+  });
+
+  it('does not run latency probes against providers still on cooldown', async () => {
+    vi.useFakeTimers();
+    try {
+      const impl = {
+        getSlot: vi.fn().mockResolvedValue(1),
+        getBalance: vi.fn().mockRejectedValue(new Error('429 Too Many Requests')),
+      };
+      const wrapped = wrapWithMultiProviderFailover([provider('limited', impl)], fakeLogger(), {
+        benchmarkIntervalMs: 1_000,
+        baseBackoffMs: 60_000,
+      });
+      await expect(wrapped.getBalance('wallet' as never)).rejects.toThrow('429');
+      impl.getSlot.mockClear();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(impl.getSlot).not.toHaveBeenCalled();
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
   });
 });
 

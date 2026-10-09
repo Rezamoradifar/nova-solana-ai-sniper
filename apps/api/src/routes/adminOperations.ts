@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { refreshWalletBalance } from '@nova/shared';
 import { requireAdminUser } from '../lib/adminAccess.js';
+import { createCopySchema } from './copyTrades.js';
 
 const pageQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -10,10 +11,11 @@ const pageQuery = z.object({
 });
 const idParams = z.object({ id: z.string().min(1) });
 const flagBody = z.object({ enabled: z.boolean() });
-const copyCreateBody = z.object({
-  targetAddress: z.string().min(32).max(44),
-  copyPercentSize: z.number().positive().max(100).default(100),
-  maxAmountSol: z.number().positive().max(1000).nullable().optional(),
+const copyCreateBody = createCopySchema.extend({
+  maxAmountSol: z.preprocess(
+    (value) => (value === null ? undefined : value),
+    createCopySchema.shape.maxAmountSol,
+  ),
 });
 const blacklistBody = z.object({
   type: z.enum(['MINT', 'DEPLOYER']),
@@ -155,15 +157,17 @@ export default async function adminOperationsRoutes(fastify: FastifyInstance) {
       select: { id: true, isSuspended: true, deletedAt: true },
     });
     if (!user) return reply.code(404).send({ error: 'User not found' });
-    if (user.deletedAt) return reply.code(409).send({ error: 'Deleted account cannot use copy trading' });
-    if (user.isSuspended) return reply.code(409).send({ error: 'Suspended account cannot use copy trading' });
+    if (user.deletedAt)
+      return reply.code(409).send({ error: 'Deleted account cannot use copy trading' });
+    if (user.isSuspended)
+      return reply.code(409).send({ error: 'Suspended account cannot use copy trading' });
 
     const created = await fastify.prisma.copyTradeConfig.create({
       data: {
         userId: id,
         targetAddress: body.targetAddress,
         copyPercentSize: body.copyPercentSize,
-        maxAmountSol: body.maxAmountSol ?? undefined,
+        maxAmountSol: Math.min(body.maxAmountSol, fastify.config.COPY_TRADING_MAX_BUY_SOL),
       },
     });
     await fastify.prisma.auditLog.create({
@@ -186,7 +190,9 @@ export default async function adminOperationsRoutes(fastify: FastifyInstance) {
     });
     if (!config) return reply.code(404).send({ error: 'Copy trade config not found' });
     if (enabled && (config.user.isSuspended || config.user.deletedAt)) {
-      return reply.code(409).send({ error: 'Cannot enable copy trading for suspended/deleted user' });
+      return reply
+        .code(409)
+        .send({ error: 'Cannot enable copy trading for suspended/deleted user' });
     }
     await fastify.prisma.$transaction([
       fastify.prisma.copyTradeConfig.update({ where: { id }, data: { isActive: enabled } }),
@@ -212,7 +218,11 @@ export default async function adminOperationsRoutes(fastify: FastifyInstance) {
         data: {
           userId: req.user.userId,
           action: 'admin.copy_trade_deleted',
-          metadata: { copyConfigId: id, targetUserId: config.userId, targetAddress: config.targetAddress },
+          metadata: {
+            copyConfigId: id,
+            targetUserId: config.userId,
+            targetAddress: config.targetAddress,
+          },
           ip: req.ip,
         },
       }),

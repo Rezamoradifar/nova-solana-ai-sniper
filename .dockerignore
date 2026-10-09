@@ -11,5 +11,6 @@ coverage
 .env.*
 !.env.example
 docs
+backups
 apps/dashboard/node_modules
 apps/dashboard/dist

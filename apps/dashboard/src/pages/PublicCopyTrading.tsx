@@ -9,6 +9,17 @@ interface LocalWallet {
   address: string;
   label: string | null;
   signalScore: number;
+  recommendation: {
+    eligible: boolean;
+    reasons: string[];
+    warnings: string[];
+    score: number;
+    closedTrades: number;
+    distinctTokens: number;
+    realizedPnlSol: number;
+    profitFactor: number | null;
+    winRatePct: number;
+  };
   confidenceScore: number | null;
   sampleSize: number;
   medianRoiPercent: number | null;
@@ -44,7 +55,15 @@ interface GmgnTrade {
 
 interface PublicCopyData {
   chain: 'solana';
-  mode: 'signal_only';
+  mode: 'buy_mirror_independent_exits';
+  recommendations: LocalWallet[];
+  limits: {
+    maxBuySol: number;
+    maxDailyBuys: number;
+    maxOpenPositions: number;
+    slippageBps: number;
+  };
+  watcher: { running: boolean; healthy: boolean; lastSuccessAt: number | null } | null;
   copyConfigEnabled: boolean;
   copyWatcherReady: boolean;
   executionMode: 'disabled' | 'paper' | 'live';
@@ -83,6 +102,7 @@ export default function PublicCopyTrading() {
   const [configs, setConfigs] = useState<CopyConfig[]>([]);
   const [copyPercent, setCopyPercent] = useState('25');
   const [maxSol, setMaxSol] = useState('0.10');
+  const [manualAddress, setManualAddress] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [busyAddress, setBusyAddress] = useState<string | null>(null);
 
@@ -96,8 +116,10 @@ export default function PublicCopyTrading() {
         if (!response.ok) throw new Error('Copy-trading feed unavailable.');
         setData((await response.json()) as PublicCopyData);
       } catch (error) {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
+          setData(null);
           setMessage(error instanceof Error ? error.message : 'Copy-trading feed unavailable.');
+        }
       }
     };
     void load();
@@ -122,7 +144,7 @@ export default function PublicCopyTrading() {
   const configured = useMemo(() => new Set(configs.map((item) => item.targetAddress)), [configs]);
 
   async function addCopy(address: string) {
-    if (!user) return;
+    if (!user || busyAddress) return;
     const percent = Number(copyPercent);
     const amount = Number(maxSol);
     if (
@@ -145,12 +167,32 @@ export default function PublicCopyTrading() {
       });
       setConfigs((current) => [...current.filter((item) => item.id !== created.id), created]);
       setMessage(
-        `Copy configuration created for ${short(address)}. Live execution is still safety-gated.`,
+        `Copy enabled for ${short(address)} · cap ${created.maxAmountSol} SOL. ${data?.executionMode === 'live' ? 'New verified buys may spend real SOL.' : data?.executionMode === 'paper' ? 'Paper mode only.' : 'Waiting for the server watcher.'}`,
       );
     } catch (error) {
       setMessage(
         error instanceof ApiError ? error.message : 'Could not create copy configuration.',
       );
+    } finally {
+      setBusyAddress(null);
+    }
+  }
+
+  async function toggleCopy(config: CopyConfig) {
+    if (busyAddress) return;
+    setBusyAddress(config.targetAddress);
+    try {
+      const updated = await api.put<CopyConfig>(`/copy-trades/${config.id}/status`, {
+        enabled: !config.isActive,
+      });
+      setConfigs((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      setMessage(
+        updated.isActive
+          ? 'Copy buys resumed.'
+          : 'New copy buys paused. Existing positions retain their exits.',
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not update copy configuration.');
     } finally {
       setBusyAddress(null);
     }
@@ -164,7 +206,12 @@ export default function PublicCopyTrading() {
         text="Rank tracked Solana wallets using GSP on-chain history, inspect GMGN Smart Money activity when the official API is connected, and create bounded copy configurations."
       >
         <span className="observation-badge">
-          <Icon name="activity" size={17} /> Signals live · execution gated
+          <Icon name="activity" size={17} />{' '}
+          {data?.executionMode === 'live'
+            ? 'LIVE COPY BUYS'
+            : data?.executionMode === 'paper'
+              ? 'PAPER COPY BUYS'
+              : 'WATCHER NOT READY'}
         </span>
       </PageHeading>
 
@@ -218,8 +265,10 @@ export default function PublicCopyTrading() {
           </strong>
           <small>
             {data?.copyWatcherReady
-              ? 'Fresh confirmed target-wallet buys pass through normal GSP safety gates.'
-              : 'Configs are stored, but the copy watcher is not running.'}
+              ? 'Copies SOL-funded buys. Stop-loss and trailing exits act independently; target sells are not mirrored.'
+              : data?.watcher?.running
+                ? 'Watcher health is degraded. Buys can still execute for healthy targets.'
+                : 'Watcher is stopped. Copy configurations are stored.'}
           </small>
         </div>
         <div className="copy-mode">
@@ -243,8 +292,134 @@ export default function PublicCopyTrading() {
       <section className="panel copy-wallet-panel">
         <div className="table-toolbar">
           <div>
+            <h2>Recommended from verified history</h2>
+            <p>
+              30-day recorded sample · 20+ closed trades · 5+ tokens · positive realized SOL · risk
+              and freshness checks.
+            </p>
+          </div>
+          <span className="outline-tag">UP TO 3 CANDIDATES</span>
+        </div>
+        {(data?.recommendations ?? []).map((wallet) => (
+          <div className="table-toolbar" key={wallet.address}>
+            <div>
+              <strong>{wallet.label || short(wallet.address)}</strong>
+              <p>
+                {wallet.recommendation.closedTrades} verified closes ·{' '}
+                {num(wallet.recommendation.realizedPnlSol, ' SOL')} realized ·{' '}
+                {num(wallet.recommendation.winRatePct, '%')} wins
+              </p>
+              <p>{wallet.recommendation.warnings.join(' · ')}</p>
+              <a
+                className="text-link"
+                href={`https://solscan.io/account/${wallet.address}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Inspect wallet ↗
+              </a>
+            </div>
+            {configured.has(wallet.address) ? (
+              <span className="copy-active-pill">Configured below</span>
+            ) : user ? (
+              <button
+                className="nova-button button-sm"
+                disabled={busyAddress !== null}
+                onClick={() => void addCopy(wallet.address)}
+              >
+                Enable copy buys
+              </button>
+            ) : (
+              <Link className="nova-button button-sm" to="/login">
+                Sign in to copy
+              </Link>
+            )}
+          </div>
+        ))}
+        {!data?.recommendations?.length && (
+          <div className="empty-state">
+            <h3>No qualified wallet yet</h3>
+            <p>
+              We wait for enough verified history. Recent volume or a Smart Money tag alone does not
+              qualify a wallet.
+            </p>
+          </div>
+        )}
+        {data?.limits && (
+          <p className="inline-notice">
+            Server ceilings: {data.limits.maxBuySol} SOL per buy · {data.limits.maxDailyBuys}{' '}
+            attempts per Tehran day · {data.limits.maxOpenPositions} open positions ·{' '}
+            {data.limits.slippageBps / 100}% slippage. Your account and plan can impose tighter
+            limits.
+          </p>
+        )}
+      </section>
+
+      {user && (
+        <section className="panel copy-wallet-panel">
+          <div className="table-toolbar">
+            <div>
+              <h2>Your copy wallets</h2>
+              <p>
+                Enabling a wallet allows new buys whenever server mode is LIVE. Failed submission
+                attempts also count toward the daily limit.
+              </p>
+            </div>
+          </div>
+          <form
+            className="copy-control-strip"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void addCopy(manualAddress.trim());
+            }}
+          >
+            <label>
+              <span>Reviewed Solana wallet address</span>
+              <input
+                className="input-field"
+                required
+                value={manualAddress}
+                onChange={(event) => setManualAddress(event.target.value)}
+                placeholder="Wallet address"
+              />
+            </label>
+            <button className="nova-button button-sm" disabled={busyAddress !== null} type="submit">
+              Enable copy buys
+            </button>
+          </form>
+          {configs.map((config) => (
+            <div className="table-toolbar" key={config.id}>
+              <div>
+                <strong>{short(config.targetAddress)}</strong>
+                <p>
+                  {config.copyPercentSize}% of source · cap{' '}
+                  {config.maxAmountSol ?? data?.limits?.maxBuySol ?? 'server limit'} SOL ·{' '}
+                  {config.isActive ? 'Enabled' : 'Paused'}
+                </p>
+              </div>
+              <button
+                className="nova-button button-sm button-outline"
+                disabled={busyAddress !== null}
+                onClick={() => void toggleCopy(config)}
+              >
+                {config.isActive ? 'Pause' : 'Resume'}
+              </button>
+            </div>
+          ))}
+          {!configs.length && (
+            <p className="empty-state">No copy wallets configured for this account.</p>
+          )}
+        </section>
+      )}
+
+      <section className="panel copy-wallet-panel">
+        <div className="table-toolbar">
+          <div>
             <h2>GSP ranked Solana wallets</h2>
-            <p>Score uses recorded confidence with Sybil and rug-exposure penalties.</p>
+            <p>
+              Candidate score uses verified closed trades. Expand your review using the reasons
+              below each wallet.
+            </p>
           </div>
           <span className="outline-tag">ON-CHAIN GSP DATA</span>
         </div>
@@ -269,9 +444,14 @@ export default function PublicCopyTrading() {
                   <td>
                     <strong>{wallet.label || short(wallet.address)}</strong>
                     <small className="cell-subtext">{short(wallet.address)}</small>
+                    <small className="cell-subtext">
+                      {wallet.recommendation.eligible
+                        ? ['Qualifies for review', ...wallet.recommendation.warnings].join(' · ')
+                        : wallet.recommendation.reasons.join(' · ')}
+                    </small>
                   </td>
                   <td className="number positive">{wallet.signalScore}/100</td>
-                  <td className="number">{wallet.sampleSize}</td>
+                  <td className="number">{wallet.recommendation.closedTrades} verified closes</td>
                   <td
                     className={
                       wallet.medianRoiPercent != null && wallet.medianRoiPercent >= 0
@@ -289,10 +469,10 @@ export default function PublicCopyTrading() {
                     ) : user ? (
                       <button
                         className="nova-button button-sm"
-                        disabled={busyAddress === wallet.address}
+                        disabled={busyAddress !== null}
                         onClick={() => void addCopy(wallet.address)}
                       >
-                        {busyAddress === wallet.address ? 'Adding…' : 'Copy wallet'}
+                        {busyAddress === wallet.address ? 'Adding…' : 'Enable copy buys'}
                       </button>
                     ) : (
                       <Link className="nova-button button-sm button-outline" to="/login">
@@ -362,10 +542,10 @@ export default function PublicCopyTrading() {
                       ) : user ? (
                         <button
                           className="nova-button button-sm"
-                          disabled={busyAddress === wallet.address}
+                          disabled={busyAddress !== null}
                           onClick={() => void addCopy(wallet.address)}
                         >
-                          {busyAddress === wallet.address ? 'Adding…' : 'Copy wallet'}
+                          {busyAddress === wallet.address ? 'Adding…' : 'Enable copy buys'}
                         </button>
                       ) : (
                         <Link className="nova-button button-sm button-outline" to="/login">

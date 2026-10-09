@@ -56,6 +56,7 @@ export interface NetworkTradeScannerDeps {
 export class NetworkTradeScannerService {
   private timer: ReturnType<typeof setInterval> | undefined;
   private ticking = false;
+  private lastCandidateId: string | undefined;
 
   constructor(private readonly deps: NetworkTradeScannerDeps) {}
 
@@ -93,8 +94,9 @@ export class NetworkTradeScannerService {
       where: {
         firstSeenAt: { gte: windowStart },
         liquidityUsd: { gte: this.deps.minLiquidityUsd },
+        ...(this.lastCandidateId ? { id: { gt: this.lastCandidateId } } : {}),
       },
-      orderBy: { firstSeenAt: 'desc' },
+      orderBy: { id: 'asc' },
       take: this.deps.batchSize * 4,
       select: { id: true, mint: true },
     });
@@ -115,11 +117,17 @@ export class NetworkTradeScannerService {
 
   private async tickInner(): Promise<void> {
     const candidates = await this.fetchCandidateMints();
-    if (candidates.length === 0) return;
+    if (candidates.length === 0) {
+      this.lastCandidateId = undefined;
+      return;
+    }
 
     let scanned = 0;
     for (const candidate of candidates) {
       if (scanned >= this.deps.batchSize) break;
+      // Advance past both scanned and cooldown-skipped mints. Otherwise the
+      // newest 4x-batch window hides every other token for six hours.
+      this.lastCandidateId = candidate.id;
       // SET ... NX EX — atomic claim, doubles as the rescan-cooldown guard.
       const claimed = await this.deps.redis
         .set(redisScanKey(candidate.mint), '1', 'EX', RESCAN_COOLDOWN_SECONDS, 'NX')
