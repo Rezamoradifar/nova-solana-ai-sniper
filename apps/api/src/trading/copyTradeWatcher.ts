@@ -1,9 +1,29 @@
-import { LAMPORTS_PER_SOL, PublicKey, type Connection, type ParsedTransactionWithMeta } from '@solana/web3.js';
+import {
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  type Connection,
+  type ParsedTransactionWithMeta,
+} from '@solana/web3.js';
 import type { PrismaClient } from '@prisma/client';
 import type { Redis } from 'ioredis';
 import type { Logger } from '@nova/shared';
-import type { DexScreenerClient } from '../solana/dexscreener.js';
 import type { CopyTradingService } from './copyTrading.js';
+import { PUMPFUN_PROGRAM_ID } from '../solana/pumpfun.js';
+import { PUMPSWAP_PROGRAM_ID } from '../solana/dex/pumpswap.js';
+import { RAYDIUM_CPMM_PROGRAM_ID } from '../solana/dex/raydium.js';
+import { ORCA_WHIRLPOOL_PROGRAM_ID } from '../solana/dex/orca.js';
+import { METEORA_DLMM_PROGRAM_ID } from '../solana/dex/meteora.js';
+
+const SWAP_PROGRAMS = new Set([
+  'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',
+  ...[
+    PUMPFUN_PROGRAM_ID,
+    PUMPSWAP_PROGRAM_ID,
+    RAYDIUM_CPMM_PROGRAM_ID,
+    ORCA_WHIRLPOOL_PROGRAM_ID,
+    METEORA_DLMM_PROGRAM_ID,
+  ].map((id) => id.toBase58()),
+]);
 
 const WSOL_MINT = 'So11111111111111111111111111111111111111112';
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -20,45 +40,59 @@ export function detectCopyBuy(
   targetAddress: string,
   minSourceBuySol: number,
 ): DetectedCopyBuy | undefined {
+  if (!tx.meta || tx.meta.err !== null) return undefined;
   const accountIndex = tx.transaction.message.accountKeys.findIndex(
-    (key) => key.pubkey?.toBase58() === targetAddress,
+    (key) => key.signer && key.pubkey?.toBase58() === targetAddress,
   );
   if (accountIndex < 0) return undefined;
-
-  const preLamports = tx.meta?.preBalances?.[accountIndex];
-  const postLamports = tx.meta?.postBalances?.[accountIndex];
-  if (preLamports === undefined || postLamports === undefined) return undefined;
-  const amountSolOriginal = (preLamports - postLamports) / LAMPORTS_PER_SOL;
-  if (!Number.isFinite(amountSolOriginal) || amountSolOriginal < minSourceBuySol) return undefined;
-
-  const pre = tx.meta?.preTokenBalances ?? [];
-  const post = tx.meta?.postTokenBalances ?? [];
-  const mints = new Set(
-    post.filter((row) => row.owner === targetAddress).map((row) => row.mint),
-  );
-
-  let best: { mint: string; delta: number } | undefined;
+  const instructions = [
+    ...tx.transaction.message.instructions,
+    ...(tx.meta.innerInstructions ?? []).flatMap((group) => group.instructions),
+  ];
+  if (!instructions.some((ix) => SWAP_PROGRAMS.has(ix.programId.toBase58()))) return undefined;
+  const preLamports = tx.meta.preBalances[accountIndex];
+  const postLamports = tx.meta.postBalances[accountIndex];
+  if (!Number.isFinite(preLamports) || !Number.isFinite(postLamports)) return undefined;
+  const pre = tx.meta.preTokenBalances ?? [];
+  const post = tx.meta.postTokenBalances ?? [];
+  const owned = [...pre, ...post].filter((row) => row.owner === targetAddress);
+  const mints = new Set(owned.map((row) => row.mint));
+  const amount = (rows: typeof pre, mint: string) =>
+    rows
+      .filter((row) => row.owner === targetAddress && row.mint === mint)
+      .reduce(
+        (sum, row) => sum + Number(row.uiTokenAmount.uiAmountString ?? row.uiTokenAmount.uiAmount),
+        0,
+      );
+  const gains: string[] = [];
   for (const mint of mints) {
-    if (mint === WSOL_MINT || mint === USDC_MINT || mint === USDT_MINT) continue;
-    const preAmount = pre
-      .filter((row) => row.owner === targetAddress && row.mint === mint)
-      .reduce((sum, row) => sum + (row.uiTokenAmount.uiAmount ?? 0), 0);
-    const postAmount = post
-      .filter((row) => row.owner === targetAddress && row.mint === mint)
-      .reduce((sum, row) => sum + (row.uiTokenAmount.uiAmount ?? 0), 0);
-    const delta = postAmount - preAmount;
-    if (delta <= 0) continue;
-    if (!best || delta > best.delta) best = { mint, delta };
+    if (mint === WSOL_MINT) continue;
+    const delta = amount(post, mint) - amount(pre, mint);
+    if (!Number.isFinite(delta)) return undefined;
+    // SOL-funded single-asset swaps only; reject token-funded swaps and ambiguous baskets.
+    if (delta < 0 || ((mint === USDC_MINT || mint === USDT_MINT) && delta !== 0)) return undefined;
+    if (delta > 0) gains.push(mint);
   }
-
-  return best ? { mint: best.mint, amountSolOriginal } : undefined;
+  if (gains.length !== 1) return undefined;
+  let rentChange = 0;
+  for (const index of new Set(owned.map((row) => row.accountIndex))) {
+    const row = owned.find((item) => item.accountIndex === index)!;
+    if (row.mint === WSOL_MINT) continue;
+    rentChange += (tx.meta.postBalances[index] ?? 0) - (tx.meta.preBalances[index] ?? 0);
+  }
+  const amountSolOriginal =
+    (preLamports! - postLamports! - (accountIndex === 0 ? tx.meta.fee : 0) - rentChange) /
+      LAMPORTS_PER_SOL +
+    amount(pre, WSOL_MINT) -
+    amount(post, WSOL_MINT);
+  if (!Number.isFinite(amountSolOriginal) || amountSolOriginal < minSourceBuySol) return undefined;
+  return { mint: gains[0]!, amountSolOriginal };
 }
 
 export interface CopyTradeWatcherDeps {
   prisma: PrismaClient;
   redis: Redis;
   connection: Connection;
-  dexScreener: DexScreenerClient;
   copyTrading: CopyTradingService;
   logger: Logger;
   pollIntervalMs: number;
@@ -69,6 +103,23 @@ export interface CopyTradeWatcherDeps {
 export class CopyTradeWatcher {
   private timer: ReturnType<typeof setInterval> | undefined;
   private ticking = false;
+  private cursor = 0;
+  private tickHadError = false;
+  private lastSuccessAt: number | null = null;
+  private lastErrorAt: number | null = null;
+
+  getStatus() {
+    return {
+      running: Boolean(this.timer),
+      lastSuccessAt: this.lastSuccessAt,
+      lastErrorAt: this.lastErrorAt,
+      healthy:
+        Boolean(this.timer) &&
+        this.lastSuccessAt !== null &&
+        Date.now() - this.lastSuccessAt < Math.max(60_000, this.deps.pollIntervalMs * 4) &&
+        (this.lastErrorAt === null || this.lastSuccessAt > this.lastErrorAt),
+    };
+  }
 
   constructor(private readonly deps: CopyTradeWatcherDeps) {}
 
@@ -88,8 +139,11 @@ export class CopyTradeWatcher {
     if (this.ticking) return;
     this.ticking = true;
     try {
+      this.tickHadError = false;
       await this.tickInner();
+      if (!this.tickHadError) this.lastSuccessAt = Date.now();
     } catch (error) {
+      this.lastErrorAt = Date.now();
       this.deps.logger.error({ error }, 'copyTradeWatcher tick failed');
     } finally {
       this.ticking = false;
@@ -103,11 +157,24 @@ export class CopyTradeWatcher {
         user: { isSuspended: false, deletedAt: null },
       },
       select: { targetAddress: true },
+      orderBy: { targetAddress: 'asc' },
     });
     const targets = [...new Set(configs.map((row) => row.targetAddress))];
     if (targets.length === 0) return;
 
-    for (const targetAddress of targets) {
+    const internal = await this.deps.prisma.wallet.findMany({
+      where: { publicKey: { in: targets } },
+      select: { publicKey: true },
+    });
+    const excluded = new Set(internal.map((w) => w.publicKey));
+    const external = targets.filter((address) => !excluded.has(address));
+    // Bounded RPC work, rotating so a busy/failed first wallet cannot starve later targets.
+    const batch = Array.from(
+      { length: Math.min(10, external.length) },
+      (_, i) => external[(this.cursor + i) % external.length]!,
+    );
+    this.cursor = external.length ? (this.cursor + batch.length) % external.length : 0;
+    for (const targetAddress of batch) {
       let publicKey: PublicKey;
       try {
         publicKey = new PublicKey(targetAddress);
@@ -124,6 +191,8 @@ export class CopyTradeWatcher {
           'confirmed',
         );
       } catch (error) {
+        this.tickHadError = true;
+        this.lastErrorAt = Date.now();
         this.deps.logger.warn({ targetAddress, error }, 'copy trade target history read failed');
         continue;
       }
@@ -131,7 +200,12 @@ export class CopyTradeWatcher {
       for (const row of [...signatures].reverse()) {
         if (row.err) continue;
         const timestampMs = (row.blockTime ?? 0) * 1000;
-        if (!timestampMs || Date.now() - timestampMs > this.deps.maxSignalAgeMs) continue;
+        if (
+          !timestampMs ||
+          timestampMs > Date.now() + 5000 ||
+          Date.now() - timestampMs > this.deps.maxSignalAgeMs
+        )
+          continue;
 
         const seenKey = `copy-trade:seen:${targetAddress}:${row.signature}`;
         if (await this.deps.redis.exists(seenKey)) continue;
@@ -141,7 +215,11 @@ export class CopyTradeWatcher {
             commitment: 'confirmed',
             maxSupportedTransactionVersion: 0,
           })
-          .catch(() => null);
+          .catch(() => {
+            this.tickHadError = true;
+            this.lastErrorAt = Date.now();
+            return null;
+          });
         if (!tx) continue;
 
         const detected = detectCopyBuy(tx, targetAddress, this.deps.minSourceBuySol);
@@ -160,12 +238,6 @@ export class CopyTradeWatcher {
           await this.deps.redis.set(seenKey, 'unknown-token', 'EX', SEEN_TTL_SECONDS);
           continue;
         }
-
-        const pair = await this.deps.dexScreener.getBestSolanaPair(token.mint).catch(() => undefined);
-        const entryPriceUsd =
-          pair?.priceUsd !== undefined && Number.isFinite(Number(pair.priceUsd))
-            ? Number(pair.priceUsd)
-            : 0;
 
         const claimed = await this.deps.redis.set(
           seenKey,
@@ -191,7 +263,7 @@ export class CopyTradeWatcher {
           mint: token.mint,
           tokenId: token.id,
           amountSolOriginal: detected.amountSolOriginal,
-          entryPriceUsd,
+          observedAt: timestampMs,
         });
         await this.deps.redis.set(seenKey, 'done', 'EX', SEEN_TTL_SECONDS);
       }

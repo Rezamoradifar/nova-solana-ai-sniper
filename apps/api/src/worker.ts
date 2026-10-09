@@ -35,6 +35,7 @@ declare module 'fastify' {
     tradingMode?: 'LIVE' | 'PAPER';
     /** True only when the real on-chain copy-trade watcher is actually running. */
     copyTradingExecutionReady?: boolean;
+    copyTradeWatcher?: CopyTradeWatcher;
   }
 }
 import {
@@ -162,7 +163,9 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // endpoint resolution/ordering (Helius primary, QuickNode/Chainstack/custom
   // fallback, public last) `getConnection` already uses for ordinary RPC calls.
   const pumpFunWsProviders: PumpFunWsProvider[] = [];
-  for (const endpoint of resolveAllRpcEndpoints(solanaConfig).filter((candidate) => candidate.wsUrl)) {
+  for (const endpoint of resolveAllRpcEndpoints(solanaConfig).filter(
+    (candidate) => candidate.wsUrl,
+  )) {
     const candidate = new Connection(endpoint.url, {
       commitment: 'confirmed',
       wsEndpoint: endpoint.wsUrl,
@@ -405,6 +408,29 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     positionManager,
     app.log as never,
     app.config.ENCRYPTION_KEY,
+    {
+      redis: app.redis,
+      maxAmountSol: app.config.COPY_TRADING_MAX_BUY_SOL,
+      maxDailyBuys: app.config.COPY_TRADING_MAX_DAILY_BUYS,
+      maxOpenPositions: app.config.COPY_TRADING_MAX_OPEN_POSITIONS,
+      slippageBps: app.config.COPY_TRADING_SLIPPAGE_BPS,
+      maxSignalAgeMs: app.config.COPY_TRADING_MAX_SIGNAL_AGE_SECONDS * 1000,
+      validateToken: async (signal) => {
+        const token = await app.prisma.token.findUnique({ where: { id: signal.tokenId } });
+        if (!token || token.mint !== signal.mint || token.dex === 'JUPITER') return false;
+        // A Token row alone is NOT proof it passed discovery. Run the common
+        // blacklist, critical-security and reverse sell-quote gates again.
+        const result = await runCandidatePipeline(
+          { riskAnalyzer, jupiter, prisma: app.prisma, logger: app.log as never },
+          { mint: token.mint, dex: token.dex, poolAddress: token.poolAddress ?? undefined },
+        );
+        return (
+          result.passed &&
+          result.riskFlags.liquidityUsd >= app.config.COPY_TRADING_MIN_LIQUIDITY_USD &&
+          RiskAnalyzer.ruleBasedScore(result.riskFlags) >= 70
+        );
+      },
+    },
   );
   let copyTradeWatcher: CopyTradeWatcher | undefined;
   if (app.config.COPY_TRADING_EXECUTION_ENABLED) {
@@ -412,13 +438,13 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       prisma: app.prisma,
       redis: app.redis,
       connection,
-      dexScreener,
       copyTrading: copyTradingService,
       logger: app.log as never,
       pollIntervalMs: app.config.COPY_TRADING_POLL_INTERVAL_MS,
       maxSignalAgeMs: app.config.COPY_TRADING_MAX_SIGNAL_AGE_SECONDS * 1000,
       minSourceBuySol: app.config.COPY_TRADING_MIN_SOURCE_BUY_SOL,
     });
+    app.decorate('copyTradeWatcher', copyTradeWatcher);
     copyTradeWatcher.start();
     app.log.warn(
       { tradingMode: paperTrading ? 'PAPER' : 'LIVE' },
@@ -507,12 +533,17 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // Shadow-mode price sampling — independent of priceMonitor.ts (scoped to
   // OPEN positions only). See shadowModePriceSampler.ts's doc comment.
   let shadowModePriceSampler: ShadowModePriceSampler | undefined;
-  if (app.config.SHADOW_MODE_ENABLED) {
+  if (
+    app.config.SHADOW_MODE_ENABLED ||
+    app.config.NETWORK_TRADE_SCANNER_ENABLED ||
+    app.config.COPY_TRADING_EXECUTION_ENABLED
+  ) {
     shadowModePriceSampler = new ShadowModePriceSampler({
       prisma: app.prisma,
       dexScreener,
       smartWalletTracker,
       logger: app.log as never,
+      sampleShadowLogs: app.config.SHADOW_MODE_ENABLED,
     });
     shadowModePriceSampler.start();
   }
@@ -524,7 +555,11 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // SMART_MONEY_ANALYSIS_ENABLED — this is a marketing-content source, not a
   // buy-decision input. Off by default; adds real, bounded RPC load.
   let networkTradeScanner: NetworkTradeScannerService | undefined;
-  if (app.config.NETWORK_TRADE_SCANNER_ENABLED || app.config.TELEGRAM_TRADES_ONLY) {
+  if (
+    app.config.NETWORK_TRADE_SCANNER_ENABLED ||
+    app.config.TELEGRAM_TRADES_ONLY ||
+    app.config.COPY_TRADING_EXECUTION_ENABLED
+  ) {
     networkTradeScanner = new NetworkTradeScannerService({
       prisma: app.prisma,
       dexScreener,

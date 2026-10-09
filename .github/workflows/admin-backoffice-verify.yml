@@ -6,6 +6,7 @@ on:
       - codex/full-admin-backoffice
       - codex/gsp-trading-port-8088
       - codex/gsp-trading-latest-8088
+      - codex/copy-trading-ranked-wallets-20261009
 
 jobs:
   verify:
@@ -21,7 +22,11 @@ jobs:
       - name: TypeScript backend
         run: npx tsc -b packages/shared packages/ai apps/telegram-bot apps/api
       - name: Copy trading network tests
-        run: npx vitest run apps/api/src/trading/copyTradeWatcher.test.ts
+        run: npx vitest run apps/api/src/trading/copyTradeWatcher.test.ts apps/api/src/trading/copyTrading.test.ts apps/api/src/trading/copyWalletRanking.test.ts apps/api/src/routes/copyTrades.test.ts apps/api/src/routes/publicCopyTrading.test.ts apps/api/src/trading/networkTradeScanner.test.ts apps/api/src/trading/shadowModePriceSampler.test.ts apps/api/src/detection/candidatePipeline.test.ts apps/api/src/trading/safety.test.ts
+      - name: Copy rollout checks
+        run: |
+          bash -n scripts/enable-copy-trading.sh
+          python3 scripts/test_enable_copy_trading.py
       - name: Dashboard build
         run: npm run build --workspace apps/dashboard
       - name: Compose validation

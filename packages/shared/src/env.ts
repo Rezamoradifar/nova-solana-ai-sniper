@@ -474,6 +474,11 @@ export const envSchema = z.object({
   COPY_TRADING_EXECUTION_ENABLED: booleanFlag(false),
   COPY_TRADING_POLL_INTERVAL_MS: z.coerce.number().int().min(5000).default(15000),
   COPY_TRADING_MAX_SIGNAL_AGE_SECONDS: z.coerce.number().int().min(15).max(600).default(120),
+  COPY_TRADING_MAX_BUY_SOL: z.coerce.number().positive().max(10).default(0.1),
+  COPY_TRADING_MAX_DAILY_BUYS: z.coerce.number().int().min(1).max(100).default(10),
+  COPY_TRADING_MAX_OPEN_POSITIONS: z.coerce.number().int().min(1).max(20).default(3),
+  COPY_TRADING_SLIPPAGE_BPS: z.coerce.number().int().min(1).max(300).default(150),
+  COPY_TRADING_MIN_LIQUIDITY_USD: z.coerce.number().min(1000).default(10000),
   COPY_TRADING_MIN_SOURCE_BUY_SOL: z.coerce.number().positive().default(0.01),
 
   // Twitter / X
