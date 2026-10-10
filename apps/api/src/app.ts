@@ -31,6 +31,8 @@ import copyTradeRoutes from './routes/copyTrades.js';
 import marketRoutes from './routes/market.js';
 import wsRoutes from './routes/ws.js';
 import { registerFeeSystem } from './business/registerFeeSystem.js';
+import { reserveWorkerRuntime } from './lib/workerLifecycle.js';
+import integrationRoutes from './routes/integrations.js';
 
 export async function buildApp() {
   // trustProxy: the API only ever receives real client traffic via the Nginx
@@ -49,7 +51,7 @@ export async function buildApp() {
     trustProxy: true,
   });
 
-  app.decorate('backgroundWorkersReady', false);
+  reserveWorkerRuntime(app);
   await app.register(configPlugin);
   await app.register(helmet);
   await app.register(cors, { origin: app.config.CORS_ORIGIN, credentials: true });
@@ -74,6 +76,7 @@ export async function buildApp() {
   await app.register(walletRoutes);
   await app.register(referralRoutes);
   await app.register(adminRoutes);
+  await app.register(integrationRoutes);
   await app.register(adminUserRoutes);
   await app.register(adminOperationsRoutes);
   await app.register(adminWithdrawalRoutes);

@@ -4,6 +4,10 @@ import { useAuth } from '../lib/AuthContext.js';
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Overview', end: true },
+  { to: '/dashboard/tools', label: 'All tools' },
+  { to: '/copy-trading', label: 'Copy Trading' },
+  { to: '/dashboard/subscription', label: 'Subscription' },
+  { to: '/dashboard/referrals', label: 'Invite Friends' },
   { to: '/dashboard/tokens', label: 'Live Tokens' },
   { to: '/dashboard/positions', label: 'Positions' },
   { to: '/dashboard/portfolio', label: 'Portfolio' },
@@ -22,7 +26,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <div className="text-lg font-bold text-white">GSP TRADING</div>
         <div className="text-xs text-slate-500">AI Solana Trading</div>
       </div>
-      <nav className="flex-1 space-y-1 px-3 py-4">
+      <nav className="flex-1 overflow-y-auto space-y-1 px-3 py-4">
         {NAV_ITEMS.map((item) => (
           <NavLink
             key={item.to}

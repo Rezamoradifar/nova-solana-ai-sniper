@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { withDeadline } from '../lib/deadline.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -14,14 +15,19 @@ export default async function healthRoutes(fastify: FastifyInstance) {
       return reply.code(503).send({
         status: 'not_ready',
         reason: !fastify.backgroundWorkersReady
-          ? 'background workers did not start'
+          ? 'background workers are not ready'
           : 'no RPC connection',
       });
     }
     try {
-      await fastify.prisma.$queryRaw`SELECT 1`;
-      await fastify.redis.ping();
-      await fastify.solanaConnection.getSlot();
+      await withDeadline(
+        Promise.all([
+          fastify.prisma.$queryRaw`SELECT 1`,
+          fastify.redis.ping(),
+          fastify.solanaConnection.getSlot(),
+        ]),
+        4000,
+      );
       return { status: 'ready' };
     } catch (err) {
       fastify.log.error(err, 'readiness check failed');
