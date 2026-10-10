@@ -146,13 +146,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     additionalRpcUrls: app.config.ADDITIONAL_RPC_URLS,
   };
   const connection = getConnection(solanaConfig, app.log as never);
-  // Exposed for the /health/ready check — decorating here (before app.listen(),
-  // see server.ts) rather than via a plugin since the connection only exists once
-  // background workers actually start (not guaranteed — see this function's own
-  // doc comment on being the one hard requirement).
-  if (!app.hasDecorator('solanaConnection')) {
-    app.decorate('solanaConnection', connection);
-  }
+  app.solanaConnection = connection;
 
   // Multi-provider WS failover for the pump.fun launch subscription
   // (2026-07-23, recurring silent-drop incident follow-up) — a dedicated,
@@ -325,7 +319,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       );
     }
   }
-  app.decorate('tradingMode', paperTrading ? 'PAPER' : 'LIVE');
+  app.tradingMode = paperTrading ? 'PAPER' : 'LIVE';
   app.log.warn(
     paperTrading
       ? '📝 PAPER TRADING mode — auto-buys are simulated, no real swaps or wallet keys used'
@@ -396,12 +390,8 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       timeStopMinProfitPercent: app.config.TIME_STOP_MIN_PROFIT_PERCENT,
     },
   );
-  if (!app.hasDecorator('positionManager')) {
-    app.decorate('positionManager', positionManager);
-  }
-  if (!app.hasDecorator('dexScreener')) {
-    app.decorate('dexScreener', dexScreener);
-  }
+  app.positionManager = positionManager;
+  app.dexScreener = dexScreener;
 
   const copyTradingService = new CopyTradingService(
     app.prisma,
@@ -444,7 +434,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
       maxSignalAgeMs: app.config.COPY_TRADING_MAX_SIGNAL_AGE_SECONDS * 1000,
       minSourceBuySol: app.config.COPY_TRADING_MIN_SOURCE_BUY_SOL,
     });
-    app.decorate('copyTradeWatcher', copyTradeWatcher);
+    app.copyTradeWatcher = copyTradeWatcher;
     copyTradeWatcher.start();
     app.log.warn(
       { tradingMode: paperTrading ? 'PAPER' : 'LIVE' },
@@ -453,9 +443,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   } else {
     app.log.info('COPY_TRADING_EXECUTION_ENABLED=false — copy configs are stored but not mirrored');
   }
-  if (!app.hasDecorator('copyTradingExecutionReady')) {
-    app.decorate('copyTradingExecutionReady', Boolean(copyTradeWatcher));
-  }
+  app.copyTradingExecutionReady = Boolean(copyTradeWatcher);
   const autoTrader = new AutoTrader({
     prisma: app.prisma,
     riskAnalyzer,
@@ -697,7 +685,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   // and would shadow recordValidCreate()/getHealth(), both called directly
   // on this instance elsewhere in this file and in scannerHealth.ts.
   const monitor = new PumpFunMonitor(pumpFunWsProviders, app.log as never);
-  app.decorate('pumpFunMonitor', monitor);
+  app.pumpFunMonitor = monitor;
 
   // Multi-LLM consensus (2026-07-27: Gemini fully removed from the trading
   // pipeline — see packages/ai/src/consensus.ts's module-level comment).
@@ -1790,7 +1778,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     },
   );
   sourceHealthMonitor.start();
-  app.decorate('sourceHealthMonitor', sourceHealthMonitor);
+  app.sourceHealthMonitor = sourceHealthMonitor;
 
   // 2026-07-23 recurring-incident follow-up: the old PUMPFUN-only
   // "qualifying Create" SourceHealthMonitor that used to live here (fed by
@@ -1815,7 +1803,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     },
   );
   fallbackLaunchDiscovery.start();
-  app.decorate('fallbackLaunchDiscovery', fallbackLaunchDiscovery);
+  app.fallbackLaunchDiscovery = fallbackLaunchDiscovery;
 
   const scannerHealthCoordinator = new ScannerHealthCoordinator(
     {
@@ -1831,7 +1819,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
     },
   );
   scannerHealthCoordinator.start();
-  app.decorate('scannerHealthCoordinator', scannerHealthCoordinator);
+  app.scannerHealthCoordinator = scannerHealthCoordinator;
 
   const securityGateSummaryReporter = new SecurityGateSummaryReporter(notifier, app.log as never);
   securityGateSummaryReporter.start(app.config.SECURITY_GATE_SUMMARY_INTERVAL_MS);
@@ -2007,7 +1995,7 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
   } else {
     perfMonitor.stop();
   }
-  app.decorate('scannerConcurrencyGovernor', scannerConcurrencyGovernor);
+  app.scannerConcurrencyGovernor = scannerConcurrencyGovernor;
 
   monitor.start(
     (event) => {

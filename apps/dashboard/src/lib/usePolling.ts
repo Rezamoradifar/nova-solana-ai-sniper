@@ -21,6 +21,7 @@ export function usePolling<T>(
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     async function tick() {
       try {
@@ -32,15 +33,17 @@ export function usePolling<T>(
       } catch (err) {
         if (!cancelled) setError(err as Error);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          timer = setTimeout(() => void tick(), intervalMs);
+        }
       }
     }
 
     void tick();
-    const timer = setInterval(() => void tick(), intervalMs);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   }, [intervalMs, refreshSignal]);
 

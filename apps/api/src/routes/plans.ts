@@ -4,6 +4,7 @@ import { effectivePlanKey, getOrCreateBusinessSettings } from '@nova/shared';
 import { requireAdminUser } from '../lib/adminAccess.js';
 import { invalidatePlanCache, loadPlans, publicPlan } from '../lib/plans.js';
 import { purchasePlan } from '../business/planPurchase.js';
+import { reviewedPlanPurchase } from '../business/reviewedPlanPurchase.js';
 
 const DAY_MS = 86_400_000;
 
@@ -27,6 +28,66 @@ const planUpdateBody = z
   .partial();
 
 export default async function planRoutes(fastify: FastifyInstance) {
+  fastify.get('/plans/history', { preHandler: fastify.authenticate }, async (req) => {
+    return fastify.prisma.subscription.findMany({
+      where: { userId: req.user.userId },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+      select: {
+        id: true,
+        planKey: true,
+        amountSol: true,
+        txSignature: true,
+        expiresAt: true,
+        createdAt: true,
+      },
+    });
+  });
+  fastify.post(
+    '/plans/purchase-reviewed',
+    {
+      preHandler: fastify.authenticate,
+      config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
+    },
+    async (req, reply) => {
+      const body = z
+        .object({
+          requestId: z.string().uuid(),
+          planKey: z.string().min(1).max(40),
+          walletId: z.string().min(1),
+          expectedPriceSol: z.number().finite().positive().max(1000),
+        })
+        .parse(req.body);
+      if (!fastify.backgroundWorkersReady || !fastify.solanaConnection)
+        return reply.code(503).send({ error: 'Payments are temporarily unavailable' });
+      const wallet = await fastify.prisma.wallet.findFirst({
+        where: { id: body.walletId, userId: req.user.userId, isActive: true },
+        select: { id: true },
+      });
+      if (!wallet)
+        return reply
+          .code(400)
+          .send({ error: 'Select an active wallet that belongs to your account.' });
+      const result = await reviewedPlanPurchase(fastify.prisma, req.user.userId, body, () =>
+        purchasePlan(
+          {
+            prisma: fastify.prisma,
+            connection: fastify.solanaConnection!,
+            logger: req.log as never,
+            encryptionKey: fastify.config.ENCRYPTION_KEY,
+            envTreasuryAddress: fastify.config.PLATFORM_TREASURY_WALLET_ADDRESS,
+            minWalletReserveSol: fastify.config.MIN_WALLET_RESERVE_SOL,
+          },
+          { userId: req.user.userId, ...body },
+        ),
+      );
+      if (!result.ok)
+        return reply
+          .code(400)
+          .send({ error: result.error, paymentUncertain: result.paymentUncertain ?? false });
+      return result;
+    },
+  );
   // Public: the website's pricing table.
   fastify.get('/public/plans', async () => {
     const [all, settings] = await Promise.all([

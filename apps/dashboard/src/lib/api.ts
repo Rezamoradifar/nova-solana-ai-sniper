@@ -1,4 +1,5 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000';
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://localhost:4000' : '/api');
 const TOKEN_STORAGE_KEY = 'nova.token';
 
 export function getToken(): string | null {
@@ -17,6 +18,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public paymentUncertain = false,
   ) {
     super(message);
   }
@@ -26,6 +28,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
+    signal: options.signal ?? AbortSignal.timeout(options.method ? 90_000 : 15_000),
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -40,7 +43,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const body = await res.json().catch(() => undefined);
 
   if (!res.ok) {
-    throw new ApiError(res.status, body?.error ?? `Request failed with status ${res.status}`);
+    throw new ApiError(
+      res.status,
+      body?.error ?? `Request failed with status ${res.status}`,
+      body?.paymentUncertain === true,
+    );
   }
 
   return body as T;

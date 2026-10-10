@@ -35,12 +35,10 @@ function setup(
   };
   const connection = {
     getBalance: vi.fn().mockResolvedValue(balanceLamports),
-    getLatestBlockhash: vi
-      .fn()
-      .mockResolvedValue({
-        blockhash: Keypair.generate().publicKey.toBase58(),
-        lastValidBlockHeight: 100,
-      }),
+    getLatestBlockhash: vi.fn().mockResolvedValue({
+      blockhash: Keypair.generate().publicKey.toBase58(),
+      lastValidBlockHeight: 100,
+    }),
     sendTransaction: vi.fn().mockResolvedValue('sig'),
     confirmTransaction: vi.fn().mockResolvedValue({ value: { err: null } }),
   };
@@ -55,6 +53,13 @@ function setup(
 }
 
 describe('purchasePlan', () => {
+  it('rejects a changed reviewed price before any RPC or payment', async () => {
+    const { deps, connection } = setup(5e9);
+    const result = await purchasePlan(deps, { userId: 'u1', planKey: 'pro', expectedPriceSol: 1 });
+    expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/price changed/) });
+    expect(connection.getBalance).not.toHaveBeenCalled();
+    expect(connection.sendTransaction).not.toHaveBeenCalled();
+  });
   it('pays the treasury on-chain, then records the subscription and moves the user onto the plan', async () => {
     const { deps, prisma, connection } = setup(2e9);
     const r = await purchasePlan(deps, { userId: 'u1', planKey: 'pro' });
