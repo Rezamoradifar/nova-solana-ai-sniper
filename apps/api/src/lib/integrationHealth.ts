@@ -41,7 +41,7 @@ async function probe(
         ? 'rate_limited'
         : rpcError?.code === 401 || rpcError?.code === 403
           ? 'access_denied'
-          : body && !valid(body)
+          : r.ok && (!body || typeof body !== 'object' || !valid(body))
             ? 'unavailable'
             : status;
     return {

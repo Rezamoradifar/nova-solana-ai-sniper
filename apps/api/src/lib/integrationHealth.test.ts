@@ -36,11 +36,14 @@ describe('connection diagnostics', () => {
     expect(a[0]?.status).toBe('healthy');
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
-  it('does not accept a 200 with a malformed JSON-RPC payload as healthy', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => Response.json({ result: 'not a slot' })),
-    );
-    expect((await createIntegrationHealth({} as ApiEnv)())[0]?.status).toBe('unavailable');
-  });
+  it.each([null, {}, { result: 'not a slot' }])(
+    'does not accept malformed JSON-RPC success %j',
+    async (body) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => Response.json(body)),
+      );
+      expect((await createIntegrationHealth({} as ApiEnv)())[0]?.status).toBe('unavailable');
+    },
+  );
 });
