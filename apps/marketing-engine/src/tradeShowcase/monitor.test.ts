@@ -194,7 +194,14 @@ describe('TradeShowcaseMonitor — real bot trade sendPhoto + DM broadcast', () 
     // only queries telegramActive users, and creates one delivery row per
     // recipient with the exact same caption the channel post used.
     expect(userFindMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { telegramId: { not: null }, telegramActive: true } }),
+      expect.objectContaining({
+        where: {
+          telegramId: { not: null },
+          telegramActive: true,
+          isSuspended: false,
+          deletedAt: null,
+        },
+      }),
     );
     expect(tradeBroadcastCreate).toHaveBeenCalledWith(
       expect.objectContaining({

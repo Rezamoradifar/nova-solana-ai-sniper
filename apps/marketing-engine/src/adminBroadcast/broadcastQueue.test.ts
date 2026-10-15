@@ -22,7 +22,12 @@ describe('enqueueAdminBroadcast', () => {
     const { prisma, findMany } = fakePrisma([]);
     await enqueueAdminBroadcast(prisma, 'hello');
     expect(findMany).toHaveBeenCalledWith({
-      where: { telegramId: { not: null }, telegramActive: true },
+      where: {
+        telegramId: { not: null },
+        telegramActive: true,
+        isSuspended: false,
+        deletedAt: null,
+      },
       select: { id: true, telegramId: true },
     });
   });
