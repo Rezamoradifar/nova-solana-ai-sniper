@@ -40,6 +40,38 @@ const winnersQuery = z.object({
 });
 
 export default async function publicNetworkRoutes(fastify: FastifyInstance) {
+  // Share one upstream request across viewers; never extend a failed snapshot's age.
+  let marketSnapshot: { pairs: unknown[]; updatedAt: number } | undefined;
+  let marketRequest: Promise<{ pairs: unknown[]; updatedAt: number }> | undefined;
+  let retryAfter = 0;
+  let sourceStatus = 502;
+  async function loadMarkets() {
+    if (marketSnapshot && Date.now() - marketSnapshot.updatedAt < 2_000) return marketSnapshot;
+    if (marketRequest) return marketRequest;
+    if (Date.now() < retryAfter) throw new Error('Market source cooling down');
+    marketRequest = (async () => {
+      try {
+        sourceStatus = 502;
+        const base = fastify.config.DEXSCREENER_API_BASE.replace(/\/$/, '');
+        const response = await fetch(`${base}/tokens/v1/solana/${MARKET_MINTS.join(',')}`, {
+          signal: AbortSignal.timeout(10_000),
+        });
+        sourceStatus = response.status === 429 ? 429 : 502;
+        if (!response.ok) throw new Error('Market source unavailable');
+        const pairs: unknown = await response.json();
+        if (!Array.isArray(pairs) || !pairs.length) throw new Error('Invalid market response');
+        marketSnapshot = { pairs, updatedAt: Date.now() };
+        return marketSnapshot;
+      } catch (error) {
+        retryAfter = Date.now() + (sourceStatus === 429 ? 10_000 : 2_000);
+        throw error;
+      } finally {
+        marketRequest = undefined;
+      }
+    })();
+    return marketRequest;
+  }
+
   fastify.get(
     '/public/network/status',
     { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } },
@@ -130,16 +162,18 @@ export default async function publicNetworkRoutes(fastify: FastifyInstance) {
     '/public/markets',
     { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } },
     async (_req, reply) => {
-      const base = fastify.config.DEXSCREENER_API_BASE.replace(/\/$/, '');
-      const url = `${base}/tokens/v1/solana/${MARKET_MINTS.join(',')}`;
-      const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-      if (!response.ok) {
-        return reply
-          .code(response.status === 429 ? 429 : 502)
-          .send({ error: 'Market source unavailable' });
+      reply.header('Cache-Control', 'no-store');
+      try {
+        const snapshot = await loadMarkets();
+        reply.header('X-Market-Updated-At', String(snapshot.updatedAt));
+        return reply.send(snapshot.pairs);
+      } catch {
+        reply.header(
+          'Retry-After',
+          String(Math.max(1, Math.ceil((retryAfter - Date.now()) / 1000))),
+        );
+        return reply.code(sourceStatus).send({ error: 'Market source unavailable' });
       }
-      reply.header('Cache-Control', 'public, max-age=1, stale-while-revalidate=5');
-      return reply.send(await response.json());
     },
   );
 

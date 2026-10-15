@@ -119,6 +119,7 @@ export function selectMarkets(input: unknown): MarketToken[] {
 
 export async function fetchMarkets(signal?: AbortSignal): Promise<MarketToken[]> {
   const response = await fetch(`${PUBLIC_API_BASE}/public/markets`, {
+    cache: 'no-store',
     signal: signal
       ? AbortSignal.any([signal, AbortSignal.timeout(12_000)])
       : AbortSignal.timeout(12_000),
@@ -129,7 +130,11 @@ export async function fetchMarkets(signal?: AbortSignal): Promise<MarketToken[]>
         ? 'Market source is busy. Retrying shortly.'
         : 'GSP market gateway is temporarily unavailable.',
     );
-  return selectMarkets(await response.json());
+  const rawUpdatedAt = response.headers.get('X-Market-Updated-At');
+  const timestamp = Number(rawUpdatedAt);
+  const priceUpdatedAt =
+    rawUpdatedAt && Number.isFinite(timestamp) && timestamp > 0 ? timestamp : undefined;
+  return selectMarkets(await response.json()).map((token) => ({ ...token, priceUpdatedAt }));
 }
 
 export function money(value: number | undefined, compact = false): string {

@@ -192,14 +192,15 @@ function MarketProvider({ children }: { children: ReactNode }) {
   const previousPricesRef = useRef(new Map<string, number>());
   const refresh = useCallback(() => {
     if (document.hidden) return;
-    requestRef.current?.abort();
+    // Let slow responses finish instead of aborting them on every polling tick.
+    if (requestRef.current && !requestRef.current.signal.aborted) return;
     const controller = new AbortController();
     requestRef.current = controller;
     setLoading(true);
     fetchMarkets(controller.signal)
       .then((data) => {
         if (!controller.signal.aborted) {
-          const now = Date.now();
+          const now = data[0]?.priceUpdatedAt ?? Date.now();
           const previous = previousPricesRef.current;
           const next = data.map((token) => {
             const prior = previous.get(token.mint);
@@ -225,7 +226,10 @@ function MarketProvider({ children }: { children: ReactNode }) {
           setError(e instanceof Error ? e.message : 'Market connection interrupted.');
       })
       .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        if (requestRef.current === controller) {
+          requestRef.current = undefined;
+          if (!controller.signal.aborted) setLoading(false);
+        }
       });
   }, []);
   useEffect(() => {
@@ -430,7 +434,11 @@ export function PublicLayout() {
                 className={`status-pill network-header-status ${
                   network?.status === 'ready' ? '' : 'is-offline'
                 }`}
-                title={network?.slot ? `Solana slot ${network.slot.toLocaleString()}` : 'Solana network status'}
+                title={
+                  network?.slot
+                    ? `Solana slot ${network.slot.toLocaleString()}`
+                    : 'Solana network status'
+                }
               >
                 <span className={`status-dot ${network?.status === 'ready' ? '' : 'offline'}`} />
                 MAINNET · {network?.status === 'ready' ? 'ONLINE' : 'DEGRADED'} ·{' '}
