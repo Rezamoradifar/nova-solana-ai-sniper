@@ -9,7 +9,7 @@ command -v python3 >/dev/null
 command -v flock >/dev/null
 exec 9>.env.copy-trading-deploy.lock
 flock -n 9 || { echo 'Another copy-trading deployment is running.' >&2; exit 1; }
-# Require the checked-in, single Compose setup; custom overrides need their own rollout.
+# Require the checked-in Compose setup; only our verified image-only rollback overlay is accepted.
 [[ -z "${COMPOSE_FILE:-}" ]] || { echo 'Custom COMPOSE_FILE detected; use your normal deployment workflow.' >&2; exit 1; }
 [[ ! -f compose.override.yaml && ! -f compose.override.yml && ! -f docker-compose.override.yml && ! -f docker-compose.override.yaml ]] || {
   echo 'Custom Compose override detected; use your normal deployment workflow.' >&2; exit 1;
@@ -18,10 +18,41 @@ api_id=$(docker compose ps -q api)
 web_id=$(docker compose ps -q gsp-web)
 [[ -n "$api_id" && -n "$web_id" ]] || { echo 'Existing api and gsp-web containers are required.' >&2; exit 1; }
 expected_compose="$(pwd -P)/docker-compose.yml"
-for container in "$api_id" "$web_id"; do
-  actual_compose=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$container")
-  [[ "$actual_compose" == "$expected_compose" ]] || { echo 'Running container uses a different Compose configuration.' >&2; exit 1; }
-done
+api_compose=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$api_id")
+web_compose=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$web_id")
+[[ "$api_compose" == "$web_compose" ]] || { echo 'API and web use different Compose configurations.' >&2; exit 1; }
+if [[ "$api_compose" != "$expected_compose" ]]; then
+  [[ "$api_compose" == "$expected_compose,"* ]] || { echo 'Running container uses a different Compose configuration.' >&2; exit 1; }
+  prior_overlay=${api_compose#"$expected_compose,"}
+  # A rollback from this installer pins only images. Reject extra files,
+  # symlinks, altered manifests, ports, mounts or environment overrides.
+  python3 - "$(pwd -P)" "$prior_overlay" <<'PY_MANIFEST'
+from pathlib import Path
+import re, sys
+root = Path(sys.argv[1]); manifest = Path(sys.argv[2])
+name = manifest.parent.name
+if (manifest.name != 'rollback.yml' or
+    not re.fullmatch(r'copy-trading-\d{8}T\d{6}Z-[A-Za-z0-9]{6}', name) or
+    manifest.parent.parent != root / 'backups' or
+    manifest.resolve() != manifest or not manifest.is_file()):
+    sys.exit('Unrecognized rollback manifest; use the custom deployment workflow.')
+expected = ('services:\n  api:\n    image: "nova-copy-rollback-api:' + name +
+    '"\n    pull_policy: never\n  gsp-web:\n    image: "nova-copy-rollback-web:' + name +
+    '"\n    pull_policy: never\n')
+if manifest.read_text() != expected:
+    sys.exit('Rollback manifest differs from the installer image-only format.')
+PY_MANIFEST
+  prior_name=$(basename "$(dirname "$prior_overlay")")
+  for container in "$api_id" "$web_id"; do
+    prior_service=api
+    [[ "$container" != "$web_id" ]] || prior_service=web
+    prior_tag="nova-copy-rollback-$prior_service:$prior_name"
+    running_image=$(docker inspect --format '{{.Image}}' "$container")
+    pinned_image=$(docker image inspect --format '{{.Id}}' "$prior_tag")
+    [[ "$running_image" == "$pinned_image" ]] || { echo 'Rollback image does not match the running container.' >&2; exit 1; }
+  done
+  echo 'Verified installer rollback detected; retrying from the running images.'
+fi
 umask 077
 mkdir -p backups
 backup=$(mktemp -d "$(pwd -P)/backups/copy-trading-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")
@@ -45,7 +76,7 @@ PY
 # Check the environment that would be deployed, using the existing API image.
 # This one-off Node command does not start workers or execute any trades.
 docker compose config --quiet
-docker compose run --rm --no-deps -T api node --input-type=module - < scripts/check-solana-rpc.mjs
+docker compose -f docker-compose.yml -f "$backup/rollback.yml" run --rm --no-deps --no-build --pull never -T api node --input-type=module - < scripts/check-solana-rpc.mjs
 # A failed preflight or build leaves the running application and activation unchanged.
 docker compose build api gsp-web migrate
 # Apply additive database changes before enabling the watcher. A failure leaves

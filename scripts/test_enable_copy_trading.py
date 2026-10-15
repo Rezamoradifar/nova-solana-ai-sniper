@@ -23,6 +23,11 @@ elif a[:2] == ['image','save']:
 elif a[:2] == ['image','load']:
     state=json.loads(Path(a[3]).read_text()); statefile.write_text(json.dumps(state))
 elif a[:2] == ['image','inspect']:
+    if '--format' in a:
+        tag = a[-1]
+        if tag not in state: sys.exit(1)
+        print('sha256:wrong' if os.environ.get('MISMATCH_ROLLBACK') else state[tag])
+        sys.exit(0)
     for tag in a[2:]:
         if tag.startswith('nova-copy-rollback-') and tag not in state: sys.exit(1)
         if tag.startswith('nova-current-') and os.environ.get('MISSING_CURRENT_IMAGE'): sys.exit(1)
@@ -30,9 +35,14 @@ elif 'config' in a and '--images' in a: print('nova-current-api:latest\nnova-cur
 elif a[:4] == ['compose', 'ps', '-q', 'api']: print('api-id')
 elif a[:4] == ['compose', 'ps', '-q', 'gsp-web']: print('web-id')
 elif a[0] == 'inspect':
-    print(str(root/'docker-compose.yml') if 'config_files' in a[2] else 'sha256:old-'+a[-1])
+    if 'config_files' in a[2]:
+        value = str(root/'docker-compose.yml')
+        if os.environ.get('MANAGED_ROLLBACK'): value += ',' + str(root/'backups/copy-trading-20261015T170327Z-KVhx5W/rollback.yml')
+        if os.environ.get('EXTRA_COMPOSE'): value += ',' + str(root/'custom.yml')
+        print(value)
+    else: print('sha256:old-'+a[-1])
 elif 'status' in a: print('null')
-elif a[:6] == ['compose', 'run', '--rm', '--no-deps', '-T', 'api'] and a[-1] == '-' and os.environ.get('FAIL_RPC'): sys.exit(1)
+elif 'run' in a and 'api' in a and a[-1] == '-' and os.environ.get('FAIL_RPC'): sys.exit(1)
 elif a[:4] == ['compose', 'run', '--rm', 'migrate'] and os.environ.get('FAIL_MIGRATION'): sys.exit(2)
 elif 'build' in a and os.environ.get('FAIL_BUILD'): sys.exit(2)
 elif 'build' in a and os.environ.get('DROP_ROLLBACK_IMAGES'): statefile.write_text('{}')
@@ -63,6 +73,18 @@ class RolloutTests(unittest.TestCase):
             (root/'docker-compose.yml').write_text('services: {}\n')
             original = 'LIVE_TRADING=false\nRPC_KEY=do-not-print\nCOPY_TRADING_EXECUTION_ENABLED=false\n'
             (root/'.env').write_text(original)
+            if overrides.get('MANAGED_ROLLBACK'):
+                name = 'copy-trading-20261015T170327Z-KVhx5W'
+                saved = root/'backups'/name; saved.mkdir(parents=True)
+                manifest = ('services:\n  api:\n    image: "nova-copy-rollback-api:' + name +
+                    '"\n    pull_policy: never\n  gsp-web:\n    image: "nova-copy-rollback-web:' + name +
+                    '"\n    pull_policy: never\n')
+                if overrides.get('TAMPER_ROLLBACK'): manifest += '    privileged: true\n'
+                (saved/'rollback.yml').write_text(manifest)
+                (root/'image-state.json').write_text(__import__('json').dumps({
+                    'nova-copy-rollback-api:'+name: 'sha256:old-api-id',
+                    'nova-copy-rollback-web:'+name: 'sha256:old-web-id',
+                }))
             docker = root/'bin/docker'; docker.write_text(DOCKER); docker.chmod(0o755)
             env = {**os.environ, 'TEST_REPO': str(root), 'PATH': str(root/'bin')+':'+os.environ['PATH'], **overrides}
             env.pop('COMPOSE_FILE', None)
@@ -133,6 +155,44 @@ class RolloutTests(unittest.TestCase):
         self.assertEqual(contents, original)
         self.assertNotIn('rollback.yml up', calls)
         self.assertIn('Rollback incomplete', result.stderr)
+
+    def test_retry_accepts_verified_installer_rollback_and_preflights_running_image(self):
+        result, contents, calls, _ = self.run_rollout(MANAGED_ROLLBACK='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Verified installer rollback detected', result.stdout)
+        self.assertIn('COPY_TRADING_EXECUTION_ENABLED=true', contents)
+        preflight = next(line for line in calls.splitlines() if 'run' in line and line.endswith(' -'))
+        self.assertIn('rollback.yml', preflight)
+        self.assertIn('--no-build --pull never', preflight)
+        self.assertLess(calls.index(preflight), calls.index('build api'))
+
+    def test_modified_rollback_is_rejected_before_backup_or_activation(self):
+        result, contents, calls, original = self.run_rollout(MANAGED_ROLLBACK='1', TAMPER_ROLLBACK='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(contents, original)
+        self.assertIn('image-only format', result.stderr)
+        self.assertNotIn('image save', calls)
+        self.assertNotIn('up -d', calls)
+
+    def test_mismatched_rollback_image_is_rejected(self):
+        result, contents, calls, original = self.run_rollout(MANAGED_ROLLBACK='1', MISMATCH_ROLLBACK='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(contents, original)
+        self.assertIn('does not match', result.stderr)
+        self.assertNotIn('build api', calls)
+
+    def test_custom_compose_is_still_rejected(self):
+        result, contents, calls, original = self.run_rollout(EXTRA_COMPOSE='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(contents, original)
+        self.assertNotIn('image save', calls)
+
+    def test_retry_cutover_failure_restores_new_backup_of_running_images(self):
+        result, contents, calls, original = self.run_rollout(MANAGED_ROLLBACK='1', FAIL_CUTOVER='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(contents, original)
+        self.assertIn('Rollback commands completed', result.stderr)
+        self.assertIn('rollback.yml up -d --no-deps --no-build --pull never', calls)
 
 
 class RecoveryTests(unittest.TestCase):
