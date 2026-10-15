@@ -13,6 +13,8 @@ from pathlib import Path
 a = sys.argv[1:]
 root = Path(os.environ['TEST_REPO'])
 with (root/'calls').open('a') as f: f.write(' '.join(a)+'\n')
+if 'run' in a and '--no-build' in a:
+    print('unknown flag: --no-build', file=sys.stderr); sys.exit(125)
 statefile=root/'image-state.json'
 state=json.loads(statefile.read_text()) if statefile.exists() else {}
 if a[:2] == ['image','tag']:
@@ -163,7 +165,8 @@ class RolloutTests(unittest.TestCase):
         self.assertIn('COPY_TRADING_EXECUTION_ENABLED=true', contents)
         preflight = next(line for line in calls.splitlines() if 'run' in line and line.endswith(' -'))
         self.assertIn('rollback.yml', preflight)
-        self.assertIn('--no-build --pull never', preflight)
+        self.assertIn('--pull never', preflight)
+        self.assertNotIn('--no-build', preflight)
         self.assertLess(calls.index(preflight), calls.index('build api'))
 
     def test_modified_rollback_is_rejected_before_backup_or_activation(self):

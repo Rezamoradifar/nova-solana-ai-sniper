@@ -76,7 +76,7 @@ PY
 # Check the environment that would be deployed, using the existing API image.
 # This one-off Node command does not start workers or execute any trades.
 docker compose config --quiet
-docker compose -f docker-compose.yml -f "$backup/rollback.yml" run --rm --no-deps --no-build --pull never -T api node --input-type=module - < scripts/check-solana-rpc.mjs
+docker compose -f docker-compose.yml -f "$backup/rollback.yml" run --rm --no-deps --pull never -T api node --input-type=module - < scripts/check-solana-rpc.mjs
 # A failed preflight or build leaves the running application and activation unchanged.
 docker compose build api gsp-web migrate
 # Apply additive database changes before enabling the watcher. A failure leaves
