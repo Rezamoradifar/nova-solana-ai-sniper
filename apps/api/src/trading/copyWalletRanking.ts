@@ -117,13 +117,26 @@ export function rankCopyWallet(
 }
 
 export async function loadRankedCopyWallets(prisma: PrismaClient, now = Date.now()) {
+  const windowStart = new Date(now - COPY_RECOMMENDATION_POLICY.lookbackDays * 86_400_000);
+  // Bound candidate selection by the same recent window used to score them.
+  // Ordering by the SmartWallet relation's unfiltered count let old history
+  // crowd recent, eligible wallets out of the 100-wallet review sample.
+  const recentWalletCounts = await prisma.smartWalletTokenEntry.groupBy({
+    by: ['walletAddress'],
+    where: {
+      entryAt: { gte: windowStart, lte: new Date(now) },
+      wallet: { isTracked: true },
+    },
+    _count: { walletAddress: true },
+    orderBy: [{ _count: { walletAddress: 'desc' } }, { walletAddress: 'asc' }],
+    take: 100,
+  });
+  if (recentWalletCounts.length === 0) return [];
   const wallets = await prisma.smartWallet.findMany({
     where: {
       isTracked: true,
-      entries: { some: { entryAt: { gte: new Date(now - 30 * 86_400_000) } } },
+      address: { in: recentWalletCounts.map((row) => row.walletAddress) },
     },
-    orderBy: [{ entries: { _count: 'desc' } }, { address: 'asc' }],
-    take: 100,
     select: {
       address: true,
       label: true,
@@ -138,7 +151,7 @@ export async function loadRankedCopyWallets(prisma: PrismaClient, now = Date.now
       lastActivityAt: true,
       sybilConfidencePct: true,
       entries: {
-        where: { entryAt: { gte: new Date(now - 30 * 86_400_000) } },
+        where: { entryAt: { gte: windowStart, lte: new Date(now) } },
         orderBy: { entryAt: 'desc' },
         take: 501,
         select: {

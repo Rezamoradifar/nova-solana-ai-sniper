@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { refreshWalletBalance } from '@nova/shared';
 import { requireAdminUser } from '../lib/adminAccess.js';
-import { createCopySchema } from './copyTrades.js';
+import { createCopySchema, isInternalCopyTarget } from './copyTrades.js';
 
 const pageQuery = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -161,6 +161,9 @@ export default async function adminOperationsRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: 'Deleted account cannot use copy trading' });
     if (user.isSuspended)
       return reply.code(409).send({ error: 'Suspended account cannot use copy trading' });
+    if (await isInternalCopyTarget(fastify.prisma, body.targetAddress)) {
+      return reply.code(400).send({ error: 'Internal GSP wallets cannot be copy targets' });
+    }
 
     const created = await fastify.prisma.copyTradeConfig.create({
       data: {

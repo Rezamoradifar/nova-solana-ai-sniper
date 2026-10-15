@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { rankCopyWallet, loadRankedCopyWallets } from './copyWalletRanking.js';
 
 const now = Date.UTC(2026, 9, 9);
@@ -100,6 +100,9 @@ describe('copy wallet recommendations', () => {
     ];
     const result = await loadRankedCopyWallets(
       {
+        smartWalletTokenEntry: {
+          groupBy: async () => wallets.map((wallet) => ({ walletAddress: wallet.address })),
+        },
         smartWallet: { findMany: async () => wallets },
         wallet: { findMany: async () => [{ publicKey: 'internal' }] },
       } as never,
@@ -109,6 +112,38 @@ describe('copy wallet recommendations', () => {
     expect(result[0]!.recommendation.eligible).toBe(false);
     expect(result[0]!.recommendation.reasons).toContain(
       'History exceeds the bounded review sample',
+    );
+  });
+
+  it('selects the 100-wallet candidate set by recent entry counts', async () => {
+    const groupBy = vi
+      .fn()
+      .mockResolvedValue([{ walletAddress: 'recent', _count: { walletAddress: 30 } }]);
+    const findMany = vi
+      .fn()
+      .mockResolvedValue([{ address: 'recent', sybilConfidencePct: 0, entries: rows() }]);
+    await loadRankedCopyWallets(
+      {
+        smartWalletTokenEntry: { groupBy },
+        smartWallet: { findMany },
+        wallet: { findMany: async () => [] },
+      } as never,
+      now,
+    );
+    // The groupBy query itself constrains the same 30-day window and caps the
+    // sorted recent-activity sample before wallet observations are materialized.
+    expect(groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        by: ['walletAddress'],
+        where: expect.objectContaining({
+          entryAt: expect.objectContaining({ gte: expect.any(Date), lte: new Date(now) }),
+        }),
+        orderBy: [{ _count: { walletAddress: 'desc' } }, { walletAddress: 'asc' }],
+        take: 100,
+      }),
+    );
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { isTracked: true, address: { in: ['recent'] } } }),
     );
   });
 });

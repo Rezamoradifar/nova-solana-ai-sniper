@@ -22,6 +22,7 @@ export interface CopyTradingOptions {
   maxOpenPositions: number;
   slippageBps: number;
   maxSignalAgeMs: number;
+  getCurrentPriceUsd: (mint: string) => Promise<number | undefined>;
 }
 
 // Reserve BEFORE submission. Failed/uncertain submissions consume a slot too:
@@ -44,7 +45,7 @@ export function copyBudgetDay(now = Date.now()): string {
   }).format(now);
 }
 
-/** Copy buys only; PositionManager owns independent stop/trailing exits. */
+/** Mirrors buys and source sells; PositionManager also owns independent risk exits. */
 export class CopyTradingService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -138,6 +139,7 @@ export class CopyTradingService {
           encryptionKey: this.encryptionKey,
           tokenId: signal.tokenId,
           mint: signal.mint,
+          copyTradeTargetAddress: signal.targetAddress,
           amountSol,
           slippageBps: this.options.slippageBps,
         });
@@ -160,6 +162,73 @@ export class CopyTradingService {
           .catch((err) =>
             this.logger.error({ err }, 'copy-trade lock release failed; expires automatically'),
           );
+      }
+    }
+  }
+
+  /** Proportionally mirror source sells against tagged copy positions only. */
+  async mirrorSell(signal: {
+    targetAddress: string;
+    mint: string;
+    soldFraction: number;
+    observedAt: number;
+  }) {
+    if (
+      !Number.isFinite(signal.observedAt) ||
+      signal.observedAt > Date.now() + 5000 ||
+      Date.now() - signal.observedAt > this.options.maxSignalAgeMs ||
+      !Number.isFinite(signal.soldFraction) ||
+      signal.soldFraction <= 0 ||
+      signal.soldFraction > 1
+    )
+      return;
+    const positions = await this.prisma.position.findMany({
+      where: {
+        status: 'OPEN',
+        copyTradeTargetAddress: signal.targetAddress,
+        token: { mint: signal.mint },
+      },
+      include: { wallet: true, _count: { select: { partialExits: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    const pair = await this.options.getCurrentPriceUsd(signal.mint).catch(() => undefined);
+    const priceUsd = Number(pair);
+    if (!Number.isFinite(priceUsd) || priceUsd <= 0) return;
+    for (const position of positions) {
+      const remaining = position.remainingAmountToken ?? position.amountToken;
+      if (
+        position.status !== 'OPEN' ||
+        !Number.isFinite(remaining) ||
+        remaining <= 0 ||
+        !position.wallet?.isActive
+      )
+        continue;
+      const sellAmount = remaining * signal.soldFraction;
+      try {
+        if (signal.soldFraction >= 0.999999) {
+          await this.positionManager.closePosition(
+            position.id,
+            position.walletId,
+            position.wallet.encryptedSecret,
+            this.encryptionKey,
+            { currentPriceUsd: priceUsd },
+          );
+        } else {
+          await this.positionManager.executePartialSell(
+            position.id,
+            position.walletId,
+            1_000_000 + position._count.partialExits,
+            sellAmount,
+            priceUsd,
+            position.wallet.encryptedSecret,
+            this.encryptionKey,
+          );
+        }
+      } catch (err) {
+        this.logger.error(
+          { err, positionId: position.id, targetAddress: signal.targetAddress, mint: signal.mint },
+          'copy source sell execution failed',
+        );
       }
     }
   }

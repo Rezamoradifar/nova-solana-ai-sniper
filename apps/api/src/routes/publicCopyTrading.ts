@@ -14,13 +14,35 @@ export function publicWalletScore(wallet: {
 }
 
 export default async function publicCopyTradingRoutes(fastify: FastifyInstance) {
+  const RANKED_WALLET_CACHE_TTL_MS = 60_000;
+  let rankedWalletCache:
+    { expiresAt: number; value: Awaited<ReturnType<typeof loadRankedCopyWallets>> } | undefined;
+  let rankedWalletLoad: Promise<Awaited<ReturnType<typeof loadRankedCopyWallets>>> | undefined;
+
+  async function getRankedWallets() {
+    if (rankedWalletCache && rankedWalletCache.expiresAt > Date.now()) {
+      return rankedWalletCache.value;
+    }
+    if (!rankedWalletLoad) {
+      rankedWalletLoad = loadRankedCopyWallets(fastify.prisma)
+        .then((value) => {
+          rankedWalletCache = { value, expiresAt: Date.now() + RANKED_WALLET_CACHE_TTL_MS };
+          return value;
+        })
+        .finally(() => {
+          rankedWalletLoad = undefined;
+        });
+    }
+    return rankedWalletLoad;
+  }
+
   fastify.get(
     '/public/copy-trading',
     { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
     async (_request, reply) => {
       reply.header('Cache-Control', 'no-store');
 
-      const localWallets = await loadRankedCopyWallets(fastify.prisma);
+      const localWallets = await getRankedWallets();
 
       const gmgnApiKey = fastify.config.GMGN_API_KEY?.trim();
       let gmgn:
@@ -96,7 +118,7 @@ export default async function publicCopyTradingRoutes(fastify: FastifyInstance) 
 
       return {
         chain: 'solana',
-        mode: 'buy_mirror_independent_exits',
+        mode: 'buy_and_proportional_sell_mirror_independent_exits',
         watcher: watcher ?? null,
         recommendationPolicy: COPY_RECOMMENDATION_POLICY,
         recommendations: localWallets.filter((w) => w.recommendation.eligible).slice(0, 3),

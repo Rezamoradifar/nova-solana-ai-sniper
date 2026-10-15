@@ -55,7 +55,7 @@ interface GmgnTrade {
 
 interface PublicCopyData {
   chain: 'solana';
-  mode: 'buy_mirror_independent_exits';
+  mode: 'buy_and_proportional_sell_mirror_independent_exits';
   recommendations: LocalWallet[];
   limits: {
     maxBuySol: number;
@@ -265,9 +265,9 @@ export default function PublicCopyTrading() {
           </strong>
           <small>
             {data?.copyWatcherReady
-              ? 'Copies SOL-funded buys. Stop-loss and trailing exits act independently; target sells are not mirrored.'
+              ? 'Copies SOL-funded buys and mirrors source sells proportionally. Stop-loss and trailing exits remain active independently.'
               : data?.watcher?.running
-                ? 'Watcher health is degraded. Buys can still execute for healthy targets.'
+                ? 'Watcher health is degraded. Copy signals may be missed for unavailable targets.'
                 : 'Watcher is stopped. Copy configurations are stored.'}
           </small>
         </div>

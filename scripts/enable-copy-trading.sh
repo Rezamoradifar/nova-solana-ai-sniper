@@ -47,7 +47,10 @@ PY
 docker compose config --quiet
 docker compose run --rm --no-deps -T api node --input-type=module - < scripts/check-solana-rpc.mjs
 # A failed preflight or build leaves the running application and activation unchanged.
-docker compose build api gsp-web
+docker compose build api gsp-web migrate
+# Apply additive database changes before enabling the watcher. A failure leaves
+# the running API, feature flag and LIVE/PAPER mode untouched.
+docker compose run --rm migrate
 rollback() {
   trap - ERR INT TERM
   echo 'Activation failed; restoring the saved feature, environment, and images.' >&2

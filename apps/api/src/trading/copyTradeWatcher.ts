@@ -35,6 +35,74 @@ export interface DetectedCopyBuy {
   amountSolOriginal: number;
 }
 
+export interface DetectedCopySell {
+  mint: string;
+  soldFraction: number;
+}
+
+/** Accept only a confirmed swap that debits one source token and returns SOL/WSOL. */
+export function detectCopySell(
+  tx: ParsedTransactionWithMeta,
+  targetAddress: string,
+): DetectedCopySell | undefined {
+  if (!tx.meta || tx.meta.err !== null) return undefined;
+  const accountIndex = tx.transaction.message.accountKeys.findIndex(
+    (key) => key.signer && key.pubkey?.toBase58() === targetAddress,
+  );
+  if (accountIndex < 0) return undefined;
+  const instructions = [
+    ...tx.transaction.message.instructions,
+    ...(tx.meta.innerInstructions ?? []).flatMap((group) => group.instructions),
+  ];
+  if (!instructions.some((ix) => SWAP_PROGRAMS.has(ix.programId.toBase58()))) return undefined;
+  const pre = tx.meta.preTokenBalances ?? [];
+  const post = tx.meta.postTokenBalances ?? [];
+  const owned = [...pre, ...post].filter((row) => row.owner === targetAddress);
+  const mints = new Set(owned.map((row) => row.mint));
+  const amount = (rows: typeof pre, mint: string) =>
+    rows
+      .filter((row) => row.owner === targetAddress && row.mint === mint)
+      .reduce(
+        (sum, row) => sum + Number(row.uiTokenAmount.uiAmountString ?? row.uiTokenAmount.uiAmount),
+        0,
+      );
+  const losses: Array<{ mint: string; sold: number; before: number }> = [];
+  for (const mint of mints) {
+    const before = amount(pre, mint);
+    const after = amount(post, mint);
+    const delta = after - before;
+    if (!Number.isFinite(delta)) return undefined;
+    if (mint === WSOL_MINT || mint === USDC_MINT || mint === USDT_MINT) {
+      // Only SOL/wSOL proceeds are supported. A stablecoin receipt is a valid
+      // source swap but must not be treated as an SOL exit signal.
+      if (delta < 0 || (mint !== WSOL_MINT && delta > 0)) return undefined;
+      continue;
+    }
+    if (delta > 0) return undefined;
+    if (delta < 0) losses.push({ mint, sold: -delta, before });
+  }
+  if (losses.length !== 1 || losses[0]!.before <= 0) return undefined;
+  const { mint, sold, before } = losses[0]!;
+  let rentChange = 0;
+  for (const index of new Set(owned.map((row) => row.accountIndex))) {
+    const row = owned.find((item) => item.accountIndex === index)!;
+    if (row.mint === WSOL_MINT) continue;
+    rentChange += (tx.meta.postBalances[index] ?? 0) - (tx.meta.preBalances[index] ?? 0);
+  }
+  const solReceived =
+    (tx.meta.postBalances[accountIndex]! -
+      tx.meta.preBalances[accountIndex]! +
+      (accountIndex === 0 ? tx.meta.fee : 0) +
+      rentChange) /
+      LAMPORTS_PER_SOL +
+    amount(post, WSOL_MINT) -
+    amount(pre, WSOL_MINT);
+  const soldFraction = sold / before;
+  if (!Number.isFinite(solReceived) || solReceived <= 0) return undefined;
+  if (!Number.isFinite(soldFraction) || soldFraction <= 0 || soldFraction > 1) return undefined;
+  return { mint, soldFraction: Math.min(soldFraction, 1) };
+}
+
 export function detectCopyBuy(
   tx: ParsedTransactionWithMeta,
   targetAddress: string,
@@ -159,7 +227,19 @@ export class CopyTradeWatcher {
       select: { targetAddress: true },
       orderBy: { targetAddress: 'asc' },
     });
-    const targets = [...new Set(configs.map((row) => row.targetAddress))];
+    const mirroredPositions = await this.deps.prisma.position.findMany({
+      where: { status: 'OPEN', copyTradeTargetAddress: { not: null } },
+      select: { copyTradeTargetAddress: true },
+      distinct: ['copyTradeTargetAddress'],
+    });
+    const targets = [
+      ...new Set([
+        ...configs.map((row) => row.targetAddress),
+        ...mirroredPositions.flatMap((row) =>
+          row.copyTradeTargetAddress ? [row.copyTradeTargetAddress] : [],
+        ),
+      ]),
+    ].sort();
     if (targets.length === 0) return;
 
     const internal = await this.deps.prisma.wallet.findMany({
@@ -223,13 +303,14 @@ export class CopyTradeWatcher {
         if (!tx) continue;
 
         const detected = detectCopyBuy(tx, targetAddress, this.deps.minSourceBuySol);
-        if (!detected) {
+        const detectedSell = detected ? undefined : detectCopySell(tx, targetAddress);
+        if (!detected && !detectedSell) {
           await this.deps.redis.set(seenKey, 'ignored', 'EX', SEEN_TTL_SECONDS);
           continue;
         }
 
         const token = await this.deps.prisma.token.findUnique({
-          where: { mint: detected.mint },
+          where: { mint: (detected ?? detectedSell)!.mint },
           select: { id: true, mint: true },
         });
         if (!token) {
@@ -248,12 +329,32 @@ export class CopyTradeWatcher {
         );
         if (claimed !== 'OK') continue;
 
+        if (detectedSell) {
+          this.deps.logger.info(
+            {
+              targetAddress,
+              signature: row.signature,
+              mint: token.mint,
+              soldFraction: detectedSell.soldFraction,
+            },
+            'fresh copy-trade source sell detected',
+          );
+          await this.deps.copyTrading.mirrorSell({
+            targetAddress,
+            mint: token.mint,
+            soldFraction: detectedSell.soldFraction,
+            observedAt: timestampMs,
+          });
+          await this.deps.redis.set(seenKey, 'done', 'EX', SEEN_TTL_SECONDS);
+          continue;
+        }
+
         this.deps.logger.info(
           {
             targetAddress,
             signature: row.signature,
             mint: token.mint,
-            sourceBuySol: detected.amountSolOriginal,
+            sourceBuySol: detected!.amountSolOriginal,
           },
           'fresh copy-trade buy detected',
         );
@@ -262,7 +363,7 @@ export class CopyTradeWatcher {
           targetAddress,
           mint: token.mint,
           tokenId: token.id,
-          amountSolOriginal: detected.amountSolOriginal,
+          amountSolOriginal: detected!.amountSolOriginal,
           observedAt: timestampMs,
         });
         await this.deps.redis.set(seenKey, 'done', 'EX', SEEN_TTL_SECONDS);

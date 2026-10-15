@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { PrismaClient } from '@prisma/client';
 import { isValidSolanaPublicKey } from '@nova/shared';
 import { z } from 'zod';
 
@@ -7,6 +8,12 @@ export const createCopySchema = z.object({
   copyPercentSize: z.number().finite().positive().max(100).default(25),
   maxAmountSol: z.number().finite().positive().max(10).default(0.1),
 });
+
+export async function isInternalCopyTarget(prisma: Pick<PrismaClient, 'wallet'>, address: string) {
+  return Boolean(
+    await prisma.wallet.findFirst({ where: { publicKey: address }, select: { id: true } }),
+  );
+}
 
 export default async function copyTradeRoutes(fastify: FastifyInstance) {
   const guard = { preHandler: fastify.authenticate };
@@ -33,11 +40,7 @@ export default async function copyTradeRoutes(fastify: FastifyInstance) {
     if (!(await accountReady(req.user.userId))) {
       return reply.code(409).send({ error: 'An active account and trading wallet are required' });
     }
-    const internal = await fastify.prisma.wallet.findFirst({
-      where: { publicKey: body.targetAddress },
-      select: { id: true },
-    });
-    if (internal)
+    if (await isInternalCopyTarget(fastify.prisma, body.targetAddress))
       return reply.code(400).send({ error: 'Internal GSP wallets cannot be copy targets' });
     const existing = await fastify.prisma.copyTradeConfig.findFirst({
       where: { userId: req.user.userId, targetAddress: body.targetAddress },

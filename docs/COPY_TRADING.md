@@ -1,6 +1,6 @@
 # Copy trading: activation and operating limits
 
-This revision completes bounded **buy mirroring** in the existing GSP TRADING
+This revision completes bounded **buy and proportional sell mirroring** in the existing GSP TRADING
 branch. It does not select a spending account automatically. A signed-in user
 reviews wallets at `/copy-trading` and enables or pauses their own configurations.
 
@@ -9,23 +9,31 @@ reviews wallets at `/copy-trading` and enables or pauses their own configuration
 - The watcher polls up to ten distinct external targets per tick, rotating fairly.
   It reads the latest eight signatures, rejects failed/stale/future transactions,
   requires a signing target and a supported swap program, and recognizes
-  single-token SOL/wSOL-funded buys. Fees and non-wSOL token-account rent are
-  excluded from source sizing. Stablecoin-funded buys and source sells are not
-  mirrored; high-frequency wallets can exceed this bounded polling coverage.
+  single-token SOL/wSOL-funded buys and single-token swaps that sell into SOL/wSOL.
+  Fees and non-wSOL token-account rent are excluded from source buy sizing.
+  Stablecoin-funded swaps and ambiguous multi-token swaps are skipped;
+  high-frequency wallets can exceed this bounded polling coverage.
 - Redis claims each source signature for seven days. An uncertain processing
   attempt is not automatically retried. This is at-most-once best effort, not a
   guarantee of delivery; crashes can skip a trade instead of duplicating it.
 - A token must exist in discovery and pass the shared blacklist, critical-security
   and reverse sell-quote pipeline again (including its existing short risk cache).
   Copy buys additionally require $10,000 observed liquidity and rule score >=70.
+  The token must also have a known, persisted deployer so the deployer blacklist is
+  rechecked; older token rows without that evidence are skipped until rediscovered.
   These checks reduce exposure; they cannot prove a token safe or guarantee a fill.
 - Per-account copy attempts are serialized with a Redis lease. Suspended/deleted
   users are excluded, and active status is rechecked before submission. Duplicate
   legacy target configurations are processed once per user per source signal.
+- A source sale is applied proportionally to each OPEN position tagged to that
+  source and mint. Fully sold source positions use the normal close path; partial
+  sales reduce remaining token amount through the normal partial-sell path. Open
+  tagged positions keep their source under observation after a copy config is
+  paused or deleted. Untagged/manual positions are never selected for source exits.
 - Subscription limits and the normal PositionManager gates still apply: kill
   switch, scanner pause, trade size, daily realized loss, duplicate positions,
   open positions, fee reserve and price impact. Existing stop-loss/trailing exits
-  manage copied positions; **the source wallet's sells are not mirrored**.
+  continue managing copied positions independently of source sell signals.
 
 Default copy ceilings (server environment can tighten them):
 
@@ -50,6 +58,9 @@ bounded by the server and subscription caps. No outcome or profit is promised.
 The API ranks up to 100 tracked wallets with recent recorded entries, considering
 at most 500 observations per wallet from the last 30 days. It returns at most three
 qualified **review candidates**, not a network-wide or complete-portfolio ranking.
+The 100-wallet cap is ordered by recent-window entry counts, and the public endpoint
+caches the ranked result for 60 seconds to avoid rescanning the same observations on
+every dashboard poll.
 Internal GSP wallets and truncated histories are excluded.
 
 Eligibility requires 20 verified closed trades, five tokens, positive recorded
@@ -73,8 +84,10 @@ this does not merge that PR's marketing/broadcast changes.
 ## Existing-server activation
 
 Prerequisites: the existing GSP single `docker-compose.yml` deployment, its real
-`.env`, running `api` and `gsp-web` containers, Python 3 and `flock`, and the existing
-admin-feature migration already applied. No new database migration is introduced.
+`.env`, running `api` and `gsp-web` containers, Python 3 and `flock`, and a healthy
+database. The installer applies pending migrations before enabling the watcher; this
+revision adds nullable token-deployer and copy-source position columns. Existing rows without a known deployer
+remain ineligible for copied buys until rediscovery supplies that evidence.
 Custom Compose configurations deliberately stop and require their normal rollout.
 
 From the existing repository, preserve any local edits before switching revisions:
@@ -86,10 +99,12 @@ git switch --detach FETCH_HEAD &&
 bash scripts/enable-copy-trading.sh
 ```
 
-The script builds before replacing containers, backs up `.env`, the copy-feature
-value and tagged running images in an `images.tar` archive under private `backups/`, enables the copy watcher in
-both environment and the existing admin override, and recreates only `api` and
-`gsp-web`. It preserves LIVE/PAPER and all secrets. Already-active account copy
+The script saves `.env`, the copy-feature value and tagged running images in an
+`images.tar` archive under private `backups/`, builds the API, web and migration
+images, then applies migrations before enabling the copy watcher in both environment
+and the existing admin override. It recreates only `api` and `gsp-web`, preserving
+LIVE/PAPER and all secrets. The nullable deployer-column migration is additive and
+stays applied if application rollback is needed. Already-active account copy
 configurations begin receiving eligible signals if the existing worker mode is
 LIVE; otherwise they remain paper executions. New accounts still need a wallet
 and an explicit copy configuration.

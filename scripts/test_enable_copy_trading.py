@@ -33,6 +33,7 @@ elif a[0] == 'inspect':
     print(str(root/'docker-compose.yml') if 'config_files' in a[2] else 'sha256:old-'+a[-1])
 elif 'status' in a: print('null')
 elif a[:6] == ['compose', 'run', '--rm', '--no-deps', '-T', 'api'] and a[-1] == '-' and os.environ.get('FAIL_RPC'): sys.exit(1)
+elif a[:4] == ['compose', 'run', '--rm', 'migrate'] and os.environ.get('FAIL_MIGRATION'): sys.exit(2)
 elif 'build' in a and os.environ.get('FAIL_BUILD'): sys.exit(2)
 elif 'build' in a and os.environ.get('DROP_ROLLBACK_IMAGES'): statefile.write_text('{}')
 elif 'enable' in a:
@@ -74,7 +75,8 @@ class RolloutTests(unittest.TestCase):
         self.assertIn('LIVE_TRADING=false', contents)
         self.assertIn('COPY_TRADING_EXECUTION_ENABLED=true', contents)
         self.assertNotIn('do-not-print', result.stdout+result.stderr+calls)
-        self.assertLess(calls.index('build api gsp-web'), calls.index(' - enable'))
+        self.assertLess(calls.index('build api gsp-web migrate'), calls.index('run --rm migrate'))
+        self.assertLess(calls.index('run --rm migrate'), calls.index(' - enable'))
         self.assertIn('up -d --no-deps --no-build api gsp-web', calls)
         self.assertNotIn(' stop ', calls)
 
@@ -82,6 +84,14 @@ class RolloutTests(unittest.TestCase):
         result, contents, calls, original = self.run_rollout(FAIL_BUILD='1')
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(contents, original)
+        self.assertNotIn(' - enable', calls)
+        self.assertNotIn('up -d', calls)
+
+    def test_migration_failure_leaves_activation_and_containers_untouched(self):
+        result, contents, calls, original = self.run_rollout(FAIL_MIGRATION='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(contents, original)
+        self.assertIn('run --rm migrate', calls)
         self.assertNotIn(' - enable', calls)
         self.assertNotIn('up -d', calls)
 

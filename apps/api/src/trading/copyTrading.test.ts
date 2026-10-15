@@ -30,10 +30,14 @@ function fixture() {
       findMany: vi.fn().mockResolvedValue([config]),
       findFirst: vi.fn().mockResolvedValue(config),
     },
-    position: { count: vi.fn().mockResolvedValue(0) },
+    position: { count: vi.fn().mockResolvedValue(0), findMany: vi.fn().mockResolvedValue([]) },
   };
   const redis = { set: vi.fn().mockResolvedValue('OK'), eval: vi.fn().mockResolvedValue(1) };
-  const manager = { openPosition: vi.fn().mockResolvedValue({}) };
+  const manager = {
+    openPosition: vi.fn().mockResolvedValue({}),
+    closePosition: vi.fn().mockResolvedValue({ closed: true }),
+    executePartialSell: vi.fn().mockResolvedValue({ closed: false }),
+  };
   const validateToken = vi.fn().mockResolvedValue(true);
   const signal = {
     targetAddress: 'target',
@@ -56,6 +60,7 @@ function fixture() {
       maxOpenPositions: 3,
       slippageBps: 150,
       maxSignalAgeMs: 120_000,
+      getCurrentPriceUsd: vi.fn().mockResolvedValue(1),
     },
   );
   return { service, signal, config, prisma, redis, manager, validateToken };
@@ -68,6 +73,82 @@ describe('bounded copy execution', () => {
       expect.objectContaining({ amountSol: 0.1, slippageBps: 150 }),
     );
     expect(f.redis.eval.mock.calls[0]![2]).toContain('copy-trade:daily:user:');
+    expect(f.manager.openPosition).toHaveBeenCalledWith(
+      expect.objectContaining({ copyTradeTargetAddress: f.signal.targetAddress }),
+    );
+  });
+
+  it('mirrors partial source sells proportionally into tagged positions only', async () => {
+    const f = fixture();
+    f.prisma.position.findMany.mockResolvedValue([
+      {
+        id: 'copied-position',
+        walletId: 'wallet',
+        status: 'OPEN',
+        amountToken: 100,
+        remainingAmountToken: 80,
+        wallet: { isActive: true, encryptedSecret: 'encrypted' },
+        _count: { partialExits: 2 },
+      },
+    ]);
+    await f.service.mirrorSell({
+      targetAddress: 'target',
+      mint: 'mint',
+      soldFraction: 0.25,
+      observedAt: Date.now(),
+    });
+    expect(f.prisma.position.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { status: 'OPEN', copyTradeTargetAddress: 'target', token: { mint: 'mint' } },
+      }),
+    );
+    expect(f.manager.executePartialSell).toHaveBeenCalledWith(
+      'copied-position',
+      'wallet',
+      1_000_002,
+      20,
+      1,
+      'encrypted',
+      'not-a-real-key',
+    );
+    expect(f.manager.closePosition).not.toHaveBeenCalled();
+  });
+
+  it('uses normal close for a full source exit and skips inactive wallets', async () => {
+    const f = fixture();
+    f.prisma.position.findMany.mockResolvedValue([
+      {
+        id: 'inactive',
+        walletId: 'wallet',
+        status: 'OPEN',
+        amountToken: 10,
+        wallet: { isActive: false },
+      },
+      {
+        id: 'full',
+        walletId: 'wallet',
+        status: 'OPEN',
+        amountToken: 10,
+        wallet: { isActive: true, encryptedSecret: 'encrypted' },
+      },
+    ]);
+    await f.service.mirrorSell({
+      targetAddress: 'target',
+      mint: 'mint',
+      soldFraction: 1,
+      observedAt: Date.now(),
+    });
+    expect(f.manager.closePosition).toHaveBeenCalledTimes(1);
+    expect(f.manager.closePosition).toHaveBeenCalledWith(
+      'full',
+      'wallet',
+      'encrypted',
+      'not-a-real-key',
+      {
+        currentPriceUsd: 1,
+      },
+    );
+    expect(f.manager.executePartialSell).not.toHaveBeenCalled();
   });
   it('respects the tighter subscription cap', async () => {
     mockedPlan.mockResolvedValue({

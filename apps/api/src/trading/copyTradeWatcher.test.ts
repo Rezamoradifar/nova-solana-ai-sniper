@@ -1,6 +1,6 @@
 import { PublicKey, type ParsedTransactionWithMeta } from '@solana/web3.js';
 import { describe, expect, it, vi } from 'vitest';
-import { detectCopyBuy, CopyTradeWatcher } from './copyTradeWatcher.js';
+import { detectCopyBuy, detectCopySell, CopyTradeWatcher } from './copyTradeWatcher.js';
 
 const TARGET = '11111111111111111111111111111111';
 const TOKEN = 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN';
@@ -163,9 +163,85 @@ describe('copy buy transaction validation', () => {
   });
 });
 
+describe('detectCopySell', () => {
+  it('detects a partial swap sell and computes the fraction of source holdings sold', () => {
+    const value = tx({
+      preLamports: 1e9,
+      postLamports: 1.25e9,
+      mint: TOKEN,
+      preToken: 100,
+      postToken: 75,
+    });
+    expect(detectCopySell(value, TARGET)).toEqual({ mint: TOKEN, soldFraction: 0.25 });
+  });
+  it('rejects failed transactions, transfer-only token debits, and stablecoin debits', () => {
+    const failed = tx({
+      preLamports: 1e9,
+      postLamports: 1.25e9,
+      mint: TOKEN,
+      preToken: 100,
+      postToken: 75,
+    });
+    failed.meta!.err = { InstructionError: [0, 'InvalidArgument'] };
+    expect(detectCopySell(failed, TARGET)).toBeUndefined();
+    const transfer = tx({
+      preLamports: 1e9,
+      postLamports: 1e9,
+      mint: TOKEN,
+      preToken: 100,
+      postToken: 75,
+    });
+    expect(detectCopySell(transfer, TARGET)).toBeUndefined();
+    const stable = tx({
+      preLamports: 1e9,
+      postLamports: 1.25e9,
+      mint: USDC,
+      preToken: 100,
+      postToken: 75,
+    });
+    expect(detectCopySell(stable, TARGET)).toBeUndefined();
+  });
+  it('rejects stablecoin proceeds and account-rent refunds without SOL swap proceeds', () => {
+    const stableProceeds = tx({
+      preLamports: 1e9,
+      postLamports: 1e9,
+      mint: TOKEN,
+      preToken: 100,
+      postToken: 75,
+    });
+    stableProceeds.meta!.preTokenBalances!.push({
+      owner: TARGET,
+      accountIndex: 2,
+      mint: USDC,
+      uiTokenAmount: { uiAmount: 0 },
+    } as never);
+    stableProceeds.meta!.postTokenBalances!.push({
+      owner: TARGET,
+      accountIndex: 2,
+      mint: USDC,
+      uiTokenAmount: { uiAmount: 5 },
+    } as never);
+    expect(detectCopySell(stableProceeds, TARGET)).toBeUndefined();
+
+    const rentRefund = tx({
+      preLamports: 1e9,
+      postLamports: 1_002_039_280,
+      mint: TOKEN,
+      preToken: 100,
+      postToken: 0,
+    });
+    rentRefund.meta!.preBalances.push(2_039_280);
+    rentRefund.meta!.postBalances.push(0);
+    rentRefund.meta!.preTokenBalances![0]!.accountIndex = 1;
+    rentRefund.meta!.postTokenBalances![0]!.accountIndex = 1;
+    expect(detectCopySell(rentRefund, TARGET)).toBeUndefined();
+  });
+});
+
 function watcherFixture() {
   const seen = new Set<string>();
   const mirror = vi.fn().mockResolvedValue(undefined);
+  const mirrorSell = vi.fn().mockResolvedValue(undefined);
   const redis = {
     exists: vi.fn(async (key: string) => Number(seen.has(key))),
     set: vi.fn(async (key: string, _value: string, _ex: string, _ttl: number, nx?: string) => {
@@ -184,6 +260,7 @@ function watcherFixture() {
   };
   const prisma = {
     copyTradeConfig: { findMany: vi.fn().mockResolvedValue([{ targetAddress: TARGET }]) },
+    position: { findMany: vi.fn().mockResolvedValue([]) },
     wallet: { findMany: vi.fn().mockResolvedValue([]) },
     token: { findUnique: vi.fn().mockResolvedValue({ id: 'token', mint: TOKEN }) },
   };
@@ -191,14 +268,14 @@ function watcherFixture() {
     prisma,
     redis,
     connection,
-    copyTrading: { mirror },
+    copyTrading: { mirror, mirrorSell },
     dexScreener: { getBestSolanaPair: async () => ({ priceUsd: '1' }) },
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     pollIntervalMs: 15_000,
     maxSignalAgeMs: 120_000,
     minSourceBuySol: 0.01,
   } as never);
-  return { watcher, mirror, connection, prisma, redis };
+  return { watcher, mirror, mirrorSell, connection, prisma, redis };
 }
 
 describe('copy watcher integration', () => {
@@ -234,5 +311,27 @@ describe('copy watcher integration', () => {
     f.redis.set.mockRejectedValue(new Error('redis down'));
     await f.watcher.tick();
     expect(f.mirror).not.toHaveBeenCalled();
+  });
+  it('mirrors a source sell and keeps targets with open mirrored positions under watch', async () => {
+    const f = watcherFixture();
+    const sell = tx({
+      preLamports: 1e9,
+      postLamports: 1.25e9,
+      mint: TOKEN,
+      preToken: 100,
+      postToken: 75,
+    });
+    f.connection.getParsedTransaction.mockResolvedValue(sell);
+    f.prisma.copyTradeConfig.findMany.mockResolvedValue([]);
+    f.prisma.position.findMany.mockResolvedValue([{ copyTradeTargetAddress: TARGET }]);
+    await f.watcher.tick();
+    expect(f.connection.getSignaturesForAddress).toHaveBeenCalled();
+    expect(f.mirrorSell).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetAddress: TARGET,
+        mint: TOKEN,
+        soldFraction: 0.25,
+      }),
+    );
   });
 });

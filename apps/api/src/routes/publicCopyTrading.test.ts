@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 import publicRoutes from './publicCopyTrading.js';
 vi.mock('../trading/copyWalletRanking.js', () => ({
-  loadRankedCopyWallets: async () => [],
+  loadRankedCopyWallets: vi.fn(async () => []),
   COPY_RECOMMENDATION_POLICY: {},
 }));
 
@@ -48,5 +48,27 @@ describe('public copy runtime status', () => {
       executionMode: 'disabled',
       liveExecutionEnabled: false,
     });
+  });
+
+  it('reuses the ranked-wallet query result for frequent public polls', async () => {
+    const { loadRankedCopyWallets } = await import('../trading/copyWalletRanking.js');
+    vi.mocked(loadRankedCopyWallets).mockClear();
+    const app = Fastify();
+    app.decorate('prisma', {} as never);
+    app.decorate('config', {
+      COPY_TRADING_MAX_BUY_SOL: 0.1,
+      COPY_TRADING_MAX_DAILY_BUYS: 10,
+      COPY_TRADING_MAX_OPEN_POSITIONS: 3,
+      COPY_TRADING_SLIPPAGE_BPS: 150,
+    } as never);
+    app.decorate('tradingMode', 'PAPER' as never);
+    await app.register(publicRoutes);
+    try {
+      await app.inject('/public/copy-trading');
+      await app.inject('/public/copy-trading');
+      expect(loadRankedCopyWallets).toHaveBeenCalledTimes(1);
+    } finally {
+      await app.close();
+    }
   });
 });

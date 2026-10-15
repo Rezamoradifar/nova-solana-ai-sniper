@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
-import copyRoutes, { createCopySchema } from './copyTrades.js';
+import copyRoutes, { createCopySchema, isInternalCopyTarget } from './copyTrades.js';
 const target = 'JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN';
 async function fixture() {
   const app = Fastify();
@@ -35,6 +35,16 @@ describe('copy account API', () => {
     expect(createCopySchema.parse({ targetAddress: target })).toMatchObject({
       maxAmountSol: 0.1,
       copyPercentSize: 25,
+    });
+  });
+  it('shares internal-wallet target detection with administrative setup', async () => {
+    const prisma = {
+      wallet: { findFirst: vi.fn().mockResolvedValue({ id: 'internal' }) },
+    };
+    await expect(isInternalCopyTarget(prisma as never, target)).resolves.toBe(true);
+    expect(prisma.wallet.findFirst).toHaveBeenCalledWith({
+      where: { publicKey: target },
+      select: { id: true },
     });
   });
   it('caps create requests on the server', async () => {

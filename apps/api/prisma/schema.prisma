@@ -314,6 +314,8 @@ model Token {
   decimals    Int      @default(9)
   dex         Dex
   poolAddress String?
+  /// Creator resolved by the discovery source. Copy buys fail closed when unknown.
+  deployerAddress String?
   createdAt   DateTime @default(now())
   firstSeenAt DateTime @default(now())
 
@@ -458,6 +460,8 @@ model Position {
   tokenId             String
   token               Token          @relation(fields: [tokenId], references: [id])
   status              PositionStatus @default(OPEN)
+  /// Source wallet for mirrored positions; manual/automatic positions stay null.
+  copyTradeTargetAddress String?
   entryPriceUsd       Float
   amountToken         Float
   amountSolInvested   Float
