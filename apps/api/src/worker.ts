@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 23189)
-Total output lines: 2096
-
 import {
   ConfirmationScheduler,
   evaluateConfirmation,
@@ -908,7 +905,277 @@ export async function startBackgroundWorkers(app: FastifyInstance) {
         name: riskFlags.name,
         symbol: riskFlags.symbol,
         liquidityUsd: riskFlags.liquidityUsd,
-        marketCapUs…3189 tokens truncated…rue;
+        marketCapUsd: riskFlags.marketCapUsd,
+        top10HolderPercent: riskFlags.top10HolderPercent,
+        holderCount: riskFlags.holderCount,
+        isHoneypotSuspected: riskFlags.isHoneypotSuspected,
+        imageUrl: riskFlags.imageUrl,
+        // Undefined leaves the existing stored value untouched (never
+        // overwrites a correct value with a guess) — see the `create` branch
+        // above for the same convention.
+        decimals: riskFlags.decimals,
+        ...(extra?.deployerAddress ? { deployerAddress: extra.deployerAddress } : {}),
+      },
+    });
+    eventBus.publish('token.created', { tokenId: token.id, mint, dex });
+    return token;
+  }
+
+  /**
+   * Shared by every detection source: computes + persists the Final
+   * Opportunity Score (Section 7, 2026-07-18) and evaluates the notify gate
+   * (notifyGate.ts — liquidity, honeypot, freeze authority, mint risk, LP
+   * lock, and AI/rule score, ALL must pass) for the "New Launch"/"AI High
+   * Score" Telegram alerts. Runs for EVERY token that reaches this point —
+   * including one candidatePipeline.ts already rejected — so a token that
+   * never becomes a Position still leaves a durable record of why it scored
+   * what it did. Never touches AutoTrader — that only ever runs for a
+   * candidate that has already passed candidatePipeline (see
+   * runCandidateThroughPipeline/processAiCall below), never from here.
+   */
+  async function recordOpportunityScoreAndNotify(
+    tokenId: string,
+    mint: string,
+    dex: LaunchableDex,
+    riskFlags: RiskFlags,
+    aiScoreValue: number,
+    // True only when aiScoreValue came from a real AI provider call, false
+    // when it's the ruleScore fallback (no AI provider configured, or the
+    // candidate never reached the AI stage at all) — see
+    // formatNewTokenMessage/formatAiHighScoreMessage, which label the score
+    // accordingly instead of always claiming "AI Score".
+    usedRealAi: boolean,
+    // Smart Money + Early Pump Detection (Sections 3-4, 2026-07-22): purely
+    // additive plug points calculateOpportunityScore was already built to
+    // accept — undefined for a failed candidate (momentum/wallet analysis
+    // never runs there) or when the relevant engine is disabled. Stays inert
+    // on finalScore while BusinessSettings.momentumWeightBps/walletWeightBps
+    // remain at their default of 0.
+    momentumWalletScores?: { momentumScore?: number; walletScore?: number },
+  ) {
+    const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
+    const businessSettings = await getOrCreateBusinessSettings(app.prisma);
+    const opportunityScore = calculateOpportunityScore(
+      {
+        safetyScore: ruleScore,
+        aiScore: usedRealAi ? aiScoreValue : undefined,
+        momentumScore: momentumWalletScores?.momentumScore,
+        walletScore: momentumWalletScores?.walletScore,
+        // DEX-agnostic adapter refactor (2026-07-29) — real liquidityUsd was
+        // already resolved by RiskAnalyzer for every candidate; this just
+        // bands it into a score. 0 weight by default (BusinessSettings.
+        // liquidityDepthWeightBps), so finalScore is unaffected until an
+        // operator deliberately turns it on.
+        liquidityDepthScore: bandLiquidityDepthScore(riskFlags.liquidityUsd),
+      },
+      businessSettings,
+    );
+    await app.prisma.opportunityScoreLog.create({
+      data: {
+        tokenId,
+        mint,
+        safetyScore: opportunityScore.breakdown.safetyScore,
+        momentumScore: opportunityScore.breakdown.momentumScore,
+        walletScore: opportunityScore.breakdown.walletScore,
+        socialScore: opportunityScore.breakdown.socialScore,
+        aiScore: opportunityScore.breakdown.aiScore,
+        liquidityDepthScore: opportunityScore.breakdown.liquidityDepthScore,
+        finalScore: opportunityScore.finalScore,
+        // Prisma's Json input type wants a plain index-signature object, not
+        // the named OpportunityScoreWeights interface — round-tripping
+        // through JSON is the simplest way to satisfy that structurally.
+        weightsSnapshot: JSON.parse(JSON.stringify(opportunityScore.weightsUsed)),
+      },
+    });
+
+    const notifyGate = evaluateNotifyGate(
+      {
+        liquidityUsd: riskFlags.liquidityUsd,
+        isHoneypotSuspected: riskFlags.isHoneypotSuspected,
+        freezeAuthorityRevoked: riskFlags.freezeAuthorityRevoked,
+        mintAuthorityRevoked: riskFlags.mintAuthorityRevoked,
+        lpBurnedOrLocked: riskFlags.lpBurnedOrLocked,
+        aiScore: aiScoreValue,
+      },
+      {
+        minLiquidityUsd: app.config.NOTIFY_MIN_LIQUIDITY_USD,
+        minAiScore: app.config.NOTIFY_MIN_AI_SCORE,
+      },
+    );
+
+    if (notifyGate.allowed) {
+      metrics.increment('launchNotificationsSent');
+      // NotificationService.notifyNewToken fans this out to the owner chat plus every
+      // user with a live snipe config (isActive + autoBuyOnLaunch — the exact set
+      // AutoTrader.evaluateAndMaybeBuy queries, when it runs at all) — see notifications.ts.
+      await notifier?.notifyNewToken({
+        mint,
+        dex,
+        name: riskFlags.name,
+        symbol: riskFlags.symbol,
+        liquidityUsd: riskFlags.liquidityUsd,
+        marketCapUsd: riskFlags.marketCapUsd,
+        aiScore: aiScoreValue,
+        isAiScore: usedRealAi,
+        isHoneypotSuspected: riskFlags.isHoneypotSuspected,
+        mintAuthorityRevoked: riskFlags.mintAuthorityRevoked,
+        freezeAuthorityRevoked: riskFlags.freezeAuthorityRevoked,
+        lpBurnedOrLocked: riskFlags.lpBurnedOrLocked,
+        top10HolderPercent: riskFlags.top10HolderPercent,
+        priceChangeH1: riskFlags.priceChangeH1,
+      });
+
+      // Distinct alert type, in addition to the New Launch alert above — only for
+      // the top slice of launches (see AI_HIGH_SCORE_THRESHOLD's own doc comment).
+      if (aiScoreValue >= AI_HIGH_SCORE_THRESHOLD) {
+        await notifier?.notifyAiHighScore({
+          mint,
+          dex,
+          name: riskFlags.name,
+          symbol: riskFlags.symbol,
+          aiScore: aiScoreValue,
+          isAiScore: usedRealAi,
+          liquidityUsd: riskFlags.liquidityUsd,
+        });
+      }
+    } else {
+      metrics.increment('launchNotificationsSuppressed');
+      app.log.debug(
+        { mint, dex, reasons: notifyGate.reasons },
+        'Notify Gate: rejected — no Telegram notification sent',
+      );
+    }
+
+    return opportunityScore;
+  }
+
+  interface AiQueueItem {
+    mint: string;
+    dex: LaunchableDex;
+    tokenId: string;
+    riskFlags: RiskFlags;
+    pipelineTimestamps: {
+      tokenDetectedAt: number;
+      analysisStartedAt: number;
+      dexValidatedAt: number;
+      safetyCompletedAt: number;
+      sellabilityVerifiedAt: number;
+    };
+    /** Telegram-source-specific post-AI quality gate (pre-existing
+     * cost-avoidance design — see handleTelegramSignal below). undefined for
+     * on-chain candidates, which have no equivalent extra filter. */
+    telegramPostAiGate?: { minScore: number; channel: string };
+  }
+
+  /**
+   * Two-stage discovery pipeline (2026-07-22): the one place the AI provider
+   * is ever called from, for BOTH on-chain and Telegram-sourced candidates —
+   * routed through `aiQueue` (see below) so concurrent AI-provider calls stay
+   * bounded and a momentum-flagged (FAST_PATH) candidate can jump ahead of
+   * ordinary ones waiting for theirs. By the time an item reaches here,
+   * candidatePipeline.ts has already unconditionally passed it — this
+   * function only ever calls AutoTrader for a candidate that already cleared
+   * every mandatory deterministic check.
+   */
+  async function processAiCall(item: AiQueueItem): Promise<void> {
+    const { mint, dex, tokenId, riskFlags, pipelineTimestamps } = item;
+    const ruleScore = RiskAnalyzer.ruleBasedScore(riskFlags);
+    let aiScoreValue = ruleScore;
+    let usedRealAi = false;
+    let aiScoringStartAt: number | undefined;
+    let aiScoringEndAt: number | undefined;
+    // Only set in consensus mode — used for the consensus gate below, after
+    // the Opportunity Score is known.
+    let openRouterResult: AiScore | undefined;
+    // Only set when ollamaProvider is configured — best-effort second vote,
+    // see evaluateMultiLlmConsensus's `ollama` param.
+    let ollamaResult: AiScore | undefined;
+
+    // Smart Money + Early Pump Detection (Sections 3-4, 2026-07-22): consumed
+    // (read + deleted) here, at the top, so the map entry is always cleaned
+    // up regardless of which branch below returns early — but not actually
+    // awaited until just before recordOpportunityScoreAndNotify, so it
+    // resolves concurrently with the AI-scoring call below rather than
+    // adding its own latency on top.
+    const pendingSmartMoneyMomentum = smartMoneyMomentumPromises.get(mint);
+    smartMoneyMomentumPromises.delete(mint);
+    const smartMoneyMomentumSettled: Promise<SmartMoneyMomentumResult | undefined> =
+      pendingSmartMoneyMomentum
+        ? Promise.race([
+            pendingSmartMoneyMomentum,
+            new Promise<undefined>((resolve) =>
+              setTimeout(() => resolve(undefined), SMART_MONEY_MOMENTUM_WAIT_MS),
+            ),
+          ])
+        : Promise.resolve(undefined);
+
+    const tokenInfo = {
+      mint,
+      // Production bug fix (2026-07-23 USOH post-mortem): was hardcoded to 9
+      // regardless of the mint's real decimals — see riskFlags.decimals' own
+      // doc comment. Falls back to 9 only when the mint-authority read itself
+      // failed (riskFlags.decimals undefined), same as before this fix in
+      // that one case.
+      decimals: riskFlags.decimals ?? 9,
+      createdAt: new Date(pipelineTimestamps.tokenDetectedAt).toISOString(),
+      dex: dex.toLowerCase() as Dex,
+    };
+
+    if (consensusModeActive) {
+      // Multi-LLM consensus (2026-07-27 redesign: Gemini removed entirely —
+      // see consensus.ts's module-level comment): OpenRouter and Ollama are
+      // called genuinely in parallel, neither waits on the other, and neither
+      // is a single point of failure — a hard failure or timeout on one
+      // never blocks the pipeline or delays a BUY; the remaining provider's
+      // result alone can still drive a decision (see evaluateMultiLlmConsensus).
+      aiScoringStartAt = Date.now();
+      // Ollama (2026-07-26): fired in the same Promise.all so it never adds
+      // its own latency on top of OpenRouter, but wrapped separately so
+      // "request sent"/"response received" are logged specifically for it,
+      // regardless of what OpenRouter is doing. undefined (not awaited at
+      // all) when unconfigured — a missing OLLAMA_HOST costs nothing here.
+      const ollamaCall = ollamaProvider
+        ? (async () => {
+            app.log.info(
+              { mint, host: app.config.OLLAMA_HOST, model: app.config.OLLAMA_MODEL },
+              'Ollama: request sent',
+            );
+            const result = await scoreToken(ollamaProvider, tokenInfo, riskFlags);
+            if (result.flags.includes('ai_call_error') || result.flags.includes('ai_parse_error')) {
+              app.log.warn(
+                { mint, flags: result.flags },
+                'Ollama: request failed — excluded from consensus this round (fails open, never blocks or delays a BUY)',
+              );
+            } else {
+              app.log.info(
+                { mint, score: result.score, decision: result.decision },
+                'Ollama: response received',
+              );
+            }
+            return result;
+          })()
+        : undefined;
+      [openRouterResult, ollamaResult] = await Promise.all([
+        scoreToken(openRouterProvider!, tokenInfo, riskFlags),
+        ollamaCall,
+      ]);
+      aiScoringEndAt = Date.now();
+      const openrouterParticipatedInScore =
+        !openRouterResult.flags.includes('ai_call_error') &&
+        !openRouterResult.flags.includes('ai_parse_error');
+      const ollamaParticipatedInScore =
+        ollamaResult !== undefined &&
+        !ollamaResult.flags.includes('ai_call_error') &&
+        !ollamaResult.flags.includes('ai_parse_error');
+      // Conservative combination when both participate — same Math.min
+      // convention already used for ruleScore vs. a single AI score elsewhere
+      // in this codebase. When only one participates, its score alone drives
+      // this (never blocked by the other's unavailability). Only when BOTH
+      // hard-fail is there no usable AI signal at all, which fails closed to
+      // 0 rather than silently falling back to the rule-based score.
+      if (openrouterParticipatedInScore && ollamaParticipatedInScore) {
+        aiScoreValue = Math.min(openRouterResult.score, ollamaResult!.score);
+        usedRealAi = true;
       } else if (openrouterParticipatedInScore) {
         aiScoreValue = openRouterResult.score;
         usedRealAi = true;
