@@ -1,10 +1,34 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon, PageHeading, TokenMark, useMarkets } from '../components/public/PublicLayout.js';
-import { dexLabel, money, pct, poolUrl } from '../lib/publicMarket.js';
+import { usePolling } from '../lib/usePolling.js';
+import { PUBLIC_API_BASE, dexLabel, money, pct, poolUrl } from '../lib/publicMarket.js';
+
+interface GmgnMarkets {
+  status: 'not_configured' | 'connected' | 'unavailable';
+  updatedAt: number | null;
+  tokens: {
+    address: string;
+    symbol: string;
+    name: string;
+    priceUsd: number;
+    volumeUsd: number | null;
+    liquidityUsd: number | null;
+    smartMoneyHolders: number | null;
+  }[];
+}
+async function fetchGmgnMarkets(): Promise<GmgnMarkets> {
+  const r = await fetch(`${PUBLIC_API_BASE}/public/gmgn/markets`, {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(12_000),
+  });
+  if (!r.ok) throw new Error('GMGN connection interrupted');
+  return r.json();
+}
 
 export default function PublicMarkets() {
   const { tokens, loading, error, updatedAt, refresh } = useMarkets();
+  const gmgn = usePolling(fetchGmgnMarkets, 15_000);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState('liquidity');
   const [selected, setSelected] = useState('SOL');
@@ -204,6 +228,81 @@ export default function PublicMarkets() {
           </span>
         </div>
       </div>
+      <section className="panel market-panel" aria-label="GMGN Solana trending tokens">
+        <div className="table-toolbar">
+          <div>
+            <h2>GMGN · Trending on Solana</h2>
+            <p>Top tokens by 1h volume · Refreshes every 15 seconds</p>
+          </div>
+          <span
+            className={`status-pill ${gmgn.error || gmgn.data?.status !== 'connected' ? 'is-offline' : ''}`}
+          >
+            {gmgn.error
+              ? 'Connection interrupted'
+              : gmgn.data?.status === 'connected'
+                ? 'GMGN connected'
+                : gmgn.data?.status === 'not_configured'
+                  ? 'Awaiting connection'
+                  : gmgn.data?.status === 'unavailable'
+                    ? 'Temporarily unavailable'
+                    : 'Connecting'}
+          </span>
+        </div>
+        {gmgn.data?.updatedAt && (
+          <p className="source-note">
+            Last received: {new Date(gmgn.data.updatedAt).toLocaleTimeString()}
+            {(gmgn.error || gmgn.data.status !== 'connected') && ' · Showing last received data'}
+          </p>
+        )}
+        {!!gmgn.data?.tokens.length && (
+          <div className="table-scroll">
+            <table className="nova-table">
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>USD price</th>
+                  <th>1h volume</th>
+                  <th>Liquidity</th>
+                  <th>Smart money holders</th>
+                </tr>
+              </thead>
+              <tbody>
+                {gmgn.data.tokens.map((t) => (
+                  <tr key={t.address}>
+                    <td>
+                      <a
+                        className="text-link"
+                        href={`https://gmgn.ai/sol/token/${t.address}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {t.symbol} ↗
+                      </a>
+                      <small className="muted"> {t.name}</small>
+                    </td>
+                    <td className="number">{money(t.priceUsd)}</td>
+                    <td className="number">{money(t.volumeUsd ?? undefined, true)}</td>
+                    <td className="number">{money(t.liquidityUsd ?? undefined, true)}</td>
+                    <td className="number">{t.smartMoneyHolders ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {!gmgn.data?.tokens.length && (
+          <div className="empty-state">
+            <p>
+              {gmgn.data?.status === 'not_configured'
+                ? 'GMGN market data will appear once the connection is ready.'
+                : gmgn.loading
+                  ? 'Loading GMGN markets…'
+                  : 'Waiting for GMGN market data.'}
+            </p>
+          </div>
+        )}
+        <p className="source-note">Source: GMGN · 1h volume ranking. Market data is indicative.</p>
+      </section>
       <section className="pool-section">
         <div className="section-heading compact">
           <div>

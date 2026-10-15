@@ -80,3 +80,14 @@ describe('public market feed', () => {
     }
   });
 });
+
+it('exposes GMGN connection state without requiring a configured key', async () => {
+  const app = await setup();
+  try {
+    const r = await app.inject('/public/gmgn/markets');
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ source: 'GMGN', status: 'not_configured', tokens: [] });
+  } finally {
+    await app.close();
+  }
+});

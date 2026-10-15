@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
+import { createGmgnMarketFeed } from '../integrations/gmgnMarket.js';
 import { JupiterClient, SOL_MINT } from '../solana/jupiter.js';
 
 const MARKET_MINTS = [
@@ -40,6 +41,15 @@ const winnersQuery = z.object({
 });
 
 export default async function publicNetworkRoutes(fastify: FastifyInstance) {
+  const gmgnMarket = createGmgnMarketFeed();
+  fastify.get(
+    '/public/gmgn/markets',
+    { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
+    async (_req, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      return gmgnMarket(fastify.config.GMGN_API_KEY);
+    },
+  );
   // Share one upstream request across viewers; never extend a failed snapshot's age.
   let marketSnapshot: { pairs: unknown[]; updatedAt: number } | undefined;
   let marketRequest: Promise<{ pairs: unknown[]; updatedAt: number }> | undefined;

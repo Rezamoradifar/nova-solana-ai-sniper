@@ -94,5 +94,12 @@ done
   if (!Array.isArray(pairs) || !pairs.some(p => p.chainId === "solana" && Number(p.priceUsd) > 0)) process.exit(1);
   console.log(JSON.stringify({marketFeed: "ok", updatedAt: r.headers.get("x-market-updated-at"), pools: pairs.length}));
 '
+"${dc[@]}" exec -T api node --input-type=module -e '
+  const r = await fetch("http://gsp-web/api/public/gmgn/markets", {signal: AbortSignal.timeout(15000)});
+  if (!r.ok) process.exit(1);
+  const feed = await r.json();
+  if (feed.source !== "GMGN" || !["connected", "not_configured", "unavailable"].includes(feed.status)) process.exit(1);
+  console.log(JSON.stringify({gmgn: feed.status, updatedAt: feed.updatedAt}));
+'
 trap - ERR INT TERM
 echo "MARKET_DISPLAY_READY: backup=$backup. Existing trading settings preserved."
