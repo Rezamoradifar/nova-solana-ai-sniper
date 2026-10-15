@@ -1273,3 +1273,87 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Research workspace and execution reports share the existing site theme. */
+.gmgn-tool-panel {
+  padding: 24px;
+  margin: 24px 0;
+  min-width: 0;
+}
+.gmgn-tool-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: end;
+}
+.gmgn-tool-form label {
+  display: flex;
+  flex: 1 1 210px;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+.gmgn-tool-form input,
+.gmgn-tool-form select {
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border, #37403b);
+  border-radius: 10px;
+  background: var(--panel, #141b18);
+  color: inherit;
+  font: inherit;
+}
+.gmgn-result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 16px;
+  min-width: 0;
+}
+.gmgn-result-field {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  border: 1px solid var(--border, #37403b);
+  border-radius: 10px;
+}
+.gmgn-result-field:has(table),
+.gmgn-result-field:has(.gmgn-result-grid) {
+  grid-column: 1/-1;
+}
+.gmgn-result-field h3 {
+  font-size: 12px;
+  opacity: 0.65;
+  margin: 0 0 10px;
+}
+.gmgn-result-field p {
+  font-size: 14px;
+  margin: 0;
+}
+.gmgn-chart {
+  width: 100%;
+  overflow-x: auto;
+  padding: 12px 0;
+}
+.gmgn-chart svg {
+  display: block;
+  width: 100%;
+  min-width: 480px;
+}
+.gmgn-tool-panel button:disabled,
+.table-bottom button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+@media (max-width: 600px) {
+  .gmgn-tool-panel {
+    padding: 16px;
+  }
+  .gmgn-tool-form label {
+    flex-basis: 100%;
+  }
+  .gmgn-tool-form > .nova-button {
+    width: 100%;
+  }
+}

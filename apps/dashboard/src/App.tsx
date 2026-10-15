@@ -13,6 +13,8 @@ import { WalletDetail } from './pages/WalletDetail.js';
 import { Snipes } from './pages/Snipes.js';
 import { Leaderboard } from './pages/Leaderboard.js';
 import { Logs } from './pages/Logs.js';
+import GmgnTools from './pages/GmgnTools.js';
+import Executions from './pages/Executions.js';
 import Landing from './pages/Landing.js';
 import { PublicLayout } from './components/public/PublicLayout.js';
 import PublicMarkets from './pages/PublicMarkets.js';
@@ -36,6 +38,8 @@ export function App() {
               <Route path="/arbitrage" element={<PublicArbitrage />} />
               <Route path="/flash-arbitrage" element={<PublicFlashArbitrage />} />
               <Route path="/copy-trading" element={<PublicCopyTrading />} />
+              <Route path="/research" element={<GmgnTools />} />
+              <Route path="/executions" element={<Executions />} />
               <Route path="/markets" element={<PublicMarkets />} />
               <Route path="/platform" element={<PublicPlatform />} />
               <Route path="/tools" element={<PublicPlatform />} />

@@ -11,6 +11,8 @@ const NAV_ITEMS = [
   { to: '/dashboard/snipes', label: 'Snipe Settings' },
   { to: '/dashboard/trading-lab', label: 'Trading Lab' },
   { to: '/dashboard/leaderboard', label: 'Leaderboard' },
+  { to: '/executions', label: 'Executed Trades & P&L' },
+  { to: '/research', label: 'GMGN Research Tools' },
   { to: '/dashboard/logs', label: 'Logs' },
 ];
 

@@ -421,6 +421,8 @@ export function PublicLayout() {
                 Arbitrage <span className="nav-new">LIVE</span>
               </NavLink>
               <NavLink to="/markets">Markets</NavLink>
+              <NavLink to="/research">GMGN Tools</NavLink>
+              <NavLink to="/executions">Executions</NavLink>
               <NavLink to="/flash-arbitrage">Flash Loan</NavLink>
               <NavLink to="/copy-trading">Copy Trading</NavLink>
               <span className="nav-divider" aria-hidden="true" />

@@ -101,5 +101,13 @@ done
   if (feed.source !== "GMGN" || !["connected", "not_configured", "unavailable"].includes(feed.status)) process.exit(1);
   console.log(JSON.stringify({gmgn: feed.status, updatedAt: feed.updatedAt}));
 '
+"${dc[@]}" exec -T api node --input-type=module -e '
+  const base = "http://gsp-web/api";
+  const report = await fetch(base + "/executions", {signal: AbortSignal.timeout(5000)});
+  if (report.status !== 401) throw new Error("Execution report must require sign-in");
+  const tool = await fetch(base + "/public/gmgn/tools", {method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({tool:"swap"}), signal: AbortSignal.timeout(5000)});
+  if (tool.status !== 400) throw new Error("Research route must reject trading commands");
+  console.log(JSON.stringify({researchRoute:"ready", executionReport:"authentication_required"}));
+'
 trap - ERR INT TERM
 echo "MARKET_DISPLAY_READY: backup=$backup. Existing trading settings preserved."
