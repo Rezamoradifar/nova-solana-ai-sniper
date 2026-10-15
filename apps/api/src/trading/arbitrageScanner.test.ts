@@ -72,10 +72,38 @@ describe('ArbitrageScanner', () => {
     expect(s.report().lastByMint[MINT]!.netSol).toBeLessThan(0);
   });
 
-  it('never quotes a sell on the same DEX it bought on, and only direct single-DEX routes', async () => {
+  it('quotes both cross-DEX directions with their own buy amounts', async () => {
     const { s, quote } = scanner({ A: { buy: 1000n, sell: 1n }, B: { buy: 900n, sell: 1n } });
     await s.scanOnce();
-    const sells = quote.mock.calls.map((c) => c[0]).filter((p) => p.inputMint !== SOL_MINT);
-    expect(sells.map((p) => p.dexes)).toEqual([['B']]);
+    expect(quote.mock.calls.map(([params]) => params)).toEqual([
+      {
+        inputMint: SOL_MINT,
+        outputMint: MINT,
+        amountLamports: 1_000_000_000n,
+        slippageBps: 50,
+        dexes: ['A'],
+      },
+      {
+        inputMint: MINT,
+        outputMint: SOL_MINT,
+        amountLamports: 1000n,
+        slippageBps: 50,
+        dexes: ['B'],
+      },
+      {
+        inputMint: SOL_MINT,
+        outputMint: MINT,
+        amountLamports: 1_000_000_000n,
+        slippageBps: 50,
+        dexes: ['B'],
+      },
+      {
+        inputMint: MINT,
+        outputMint: SOL_MINT,
+        amountLamports: 900n,
+        slippageBps: 50,
+        dexes: ['A'],
+      },
+    ]);
   });
 });

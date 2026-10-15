@@ -6,6 +6,69 @@ function makeRedis(claimResult: string | null = 'OK') {
 }
 
 describe('NetworkTradeScannerService', () => {
+  it('rotates past cooldown-skipped pages and wraps for later rescans', async () => {
+    const findMany = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 't1', mint: 'mint1' },
+        { id: 't2', mint: 'mint2' },
+      ])
+      .mockResolvedValueOnce([{ id: 't3', mint: 'mint3' }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const evaluateForToken = vi.fn().mockResolvedValue(undefined);
+    const redis = {
+      set: vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce('OK'),
+    };
+    const scanner = new NetworkTradeScannerService({
+      prisma: { token: { findMany } } as never,
+      dexScreener: { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never,
+      smartWalletTracker: { evaluateForToken } as never,
+      redis: redis as never,
+      logger: { debug: vi.fn(), error: vi.fn() } as never,
+      batchSize: 1,
+      minLiquidityUsd: 2_000,
+      tokenLookbackHours: 48,
+    });
+    await scanner.tick();
+    await scanner.tick();
+    await scanner.tick();
+    await scanner.tick();
+    expect(evaluateForToken).toHaveBeenCalledWith('mint3', 't3', undefined, undefined);
+    expect(findMany.mock.calls[1]![0].where.id).toEqual({ gt: 't2' });
+    expect(findMany.mock.calls[2]![0].where.id).toEqual({ gt: 't3' });
+    expect(findMany.mock.calls[3]![0].where.id).toBeUndefined();
+  });
+
+  it('resumes after the last processed mint when the batch ends mid-page', async () => {
+    const findMany = vi
+      .fn()
+      .mockResolvedValueOnce([
+        { id: 't1', mint: 'mint1' },
+        { id: 't2', mint: 'mint2' },
+      ])
+      .mockResolvedValueOnce([{ id: 't2', mint: 'mint2' }]);
+    const evaluateForToken = vi.fn().mockResolvedValue(undefined);
+    const scanner = new NetworkTradeScannerService({
+      prisma: { token: { findMany } } as never,
+      dexScreener: { getBestSolanaPair: vi.fn().mockResolvedValue(undefined) } as never,
+      smartWalletTracker: { evaluateForToken } as never,
+      redis: makeRedis() as never,
+      logger: { debug: vi.fn(), error: vi.fn() } as never,
+      batchSize: 1,
+      minLiquidityUsd: 2_000,
+      tokenLookbackHours: 48,
+    });
+    await scanner.tick();
+    await scanner.tick();
+    expect(findMany.mock.calls[1]![0].where.id).toEqual({ gt: 't1' });
+    expect(evaluateForToken).toHaveBeenCalledTimes(2);
+  });
+
   it('queries tokens across every DEX (no dex filter) within the lookback window', async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     const scanner = new NetworkTradeScannerService({

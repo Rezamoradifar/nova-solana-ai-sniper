@@ -6,8 +6,15 @@ on:
       - codex/full-admin-backoffice
       - codex/gsp-trading-port-8088
       - codex/gsp-trading-latest-8088
+      - codex/copy-trading-ranked-wallets-20261009
 
 jobs:
+  docker-rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Real Docker archived-image recovery
+        run: bash scripts/test_copy_rollback_docker.sh
   verify:
     runs-on: ubuntu-latest
     steps:
@@ -21,7 +28,15 @@ jobs:
       - name: TypeScript backend
         run: npx tsc -b packages/shared packages/ai apps/telegram-bot apps/api
       - name: Copy trading network tests
-        run: npx vitest run apps/api/src/trading/copyTradeWatcher.test.ts
+        run: npx vitest run apps/api/src/trading/copyTradeWatcher.test.ts apps/api/src/trading/copyTrading.test.ts apps/api/src/trading/copyWalletRanking.test.ts apps/api/src/routes/copyTrades.test.ts apps/api/src/routes/publicCopyTrading.test.ts apps/api/src/trading/networkTradeScanner.test.ts apps/api/src/trading/shadowModePriceSampler.test.ts apps/api/src/detection/candidatePipeline.test.ts apps/api/src/trading/safety.test.ts
+      - name: Copy rollout checks
+        run: |
+          bash -n scripts/enable-copy-trading.sh scripts/recover-copy-trading.sh
+          python3 scripts/test_enable_copy_trading.py
+      - name: RPC failover checks
+        run: |
+          npx vitest run apps/api/src/solana/resilientConnection.test.ts apps/api/src/solana/connection.test.ts
+          node --check scripts/check-solana-rpc.mjs
       - name: Dashboard build
         run: npm run build --workspace apps/dashboard
       - name: Compose validation

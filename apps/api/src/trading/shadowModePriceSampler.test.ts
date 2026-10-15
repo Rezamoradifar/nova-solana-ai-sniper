@@ -7,6 +7,70 @@ import {
 } from './shadowModePriceSampler.js';
 import type { DexScreenerPair } from '../solana/dexscreener.js';
 
+describe('wallet exit sampling fairness', () => {
+  it('checks later wallets after an RPC failure and wraps after the last page', async () => {
+    const row = (id: string) => ({
+      id,
+      mint: id,
+      walletAddress: id,
+      entryAt: new Date(),
+      entryAmountSol: 1,
+    });
+    const findMany = vi
+      .fn()
+      .mockResolvedValueOnce([row('a')])
+      .mockResolvedValueOnce([row('b')])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const checkAndRecordExit = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('RPC unavailable'))
+      .mockResolvedValueOnce(true);
+    const sampler = new ShadowModePriceSampler({
+      prisma: {
+        shadowModeDecisionLog: { findMany: vi.fn().mockResolvedValue([]) },
+        smartWalletTokenEntry: { findMany, update: vi.fn() },
+      } as never,
+      dexScreener: { getBestSolanaPair: vi.fn() } as never,
+      smartWalletTracker: { checkAndRecordExit } as never,
+      logger: { debug: vi.fn() } as never,
+    });
+    for (let i = 0; i < 4; i++) await sampler.tick();
+    expect(checkAndRecordExit).toHaveBeenCalledTimes(2);
+    expect(findMany.mock.calls[1]![0].where.id).toEqual({ gt: 'a' });
+    expect(findMany.mock.calls[2]![0].where.id).toEqual({ gt: 'b' });
+    expect(findMany.mock.calls[3]![0].where.id).toBeUndefined();
+  });
+
+  it('does not overlap slow sampling ticks', async () => {
+    let release!: (rows: never[]) => void;
+    const findMany = vi.fn().mockImplementation(
+      () =>
+        new Promise<never[]>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const sampler = new ShadowModePriceSampler({
+      prisma: {
+        shadowModeDecisionLog: { findMany: vi.fn().mockResolvedValue([]) },
+        smartWalletTokenEntry: { findMany },
+      } as never,
+      dexScreener: {} as never,
+      smartWalletTracker: {} as never,
+      logger: { debug: vi.fn() } as never,
+    });
+    const first = sampler.tick();
+    await sampler.tick();
+    expect(findMany).toHaveBeenCalledTimes(1);
+    release([]);
+    await first;
+    const next = sampler.tick();
+    release([]);
+    await next;
+    expect(findMany).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('computeDueOffsets', () => {
   it('returns no offsets when nothing has elapsed yet', () => {
     const detectedAt = new Date();

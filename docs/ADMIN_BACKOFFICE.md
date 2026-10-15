@@ -51,11 +51,18 @@ Scanner, Telegram Trend Source, Deposit Monitor and Shadow Mode.
 
 ## Copy Trading status
 
-The database/API contains CopyTradeConfig records and the backoffice can inspect
-or pause/resume those records. This does **not** claim that external-wallet signal
-execution is live: the current worker does not wire SmartWallet observations into
-CopyTradingService execution. Keep the UI warning until that path is implemented,
-tested and explicitly enabled.
+The on-chain watcher mirrors fresh SOL/wSOL-funded buys into active account
+configurations. Token blacklist, critical security and sell-route checks run
+before the common PositionManager safety gates. The copy-only caps and daily
+Tehran quota apply independently of the account/global/plan ceilings.
+
+`/copy-trading` displays the actual worker mode and health, up to three ranked
+review candidates from recorded 30-day exits, and account pause/resume controls.
+The watcher is an admin startup feature (`COPY_TRADING_EXECUTION_ENABLED`);
+changing it requires restarting the API. Source sells are **not** mirrored:
+positions use GSP's existing stop-loss/trailing exits.
+
+See [COPY_TRADING.md](COPY_TRADING.md) for activation and limitations.
 
 ## Secrets
 

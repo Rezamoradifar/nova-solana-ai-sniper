@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { fetchGmgnSmartMoney } from '../integrations/gmgn.js';
+import { loadRankedCopyWallets, COPY_RECOMMENDATION_POLICY } from '../trading/copyWalletRanking.js';
 
 export function publicWalletScore(wallet: {
   confidenceScore: number | null;
@@ -13,35 +14,35 @@ export function publicWalletScore(wallet: {
 }
 
 export default async function publicCopyTradingRoutes(fastify: FastifyInstance) {
+  const RANKED_WALLET_CACHE_TTL_MS = 60_000;
+  let rankedWalletCache:
+    { expiresAt: number; value: Awaited<ReturnType<typeof loadRankedCopyWallets>> } | undefined;
+  let rankedWalletLoad: Promise<Awaited<ReturnType<typeof loadRankedCopyWallets>>> | undefined;
+
+  async function getRankedWallets() {
+    if (rankedWalletCache && rankedWalletCache.expiresAt > Date.now()) {
+      return rankedWalletCache.value;
+    }
+    if (!rankedWalletLoad) {
+      rankedWalletLoad = loadRankedCopyWallets(fastify.prisma)
+        .then((value) => {
+          rankedWalletCache = { value, expiresAt: Date.now() + RANKED_WALLET_CACHE_TTL_MS };
+          return value;
+        })
+        .finally(() => {
+          rankedWalletLoad = undefined;
+        });
+    }
+    return rankedWalletLoad;
+  }
+
   fastify.get(
     '/public/copy-trading',
     { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
     async (_request, reply) => {
       reply.header('Cache-Control', 'no-store');
 
-      const wallets = await fastify.prisma.smartWallet.findMany({
-        where: { isTracked: true },
-        orderBy: [{ confidenceScore: 'desc' }, { lastActivityAt: 'desc' }],
-        take: 50,
-        select: {
-          address: true,
-          label: true,
-          confidenceScore: true,
-          sampleSize: true,
-          medianRoiPercent: true,
-          avgRoiPercent: true,
-          earlyEntryRatePct: true,
-          rugExposureRatePct: true,
-          realizedPnlUsd: true,
-          unrealizedPnlUsd: true,
-          lastActivityAt: true,
-          sybilConfidencePct: true,
-        },
-      });
-
-      const localWallets = wallets
-        .map((wallet) => ({ ...wallet, signalScore: publicWalletScore(wallet) }))
-        .sort((a, b) => b.signalScore - a.signalScore);
+      const localWallets = await getRankedWallets();
 
       const gmgnApiKey = fastify.config.GMGN_API_KEY?.trim();
       let gmgn:
@@ -107,8 +108,9 @@ export default async function publicCopyTradingRoutes(fastify: FastifyInstance) 
         }
       }
 
-      const watcherReady = fastify.copyTradingExecutionReady === true;
-      const executionMode = !watcherReady
+      const watcher = fastify.copyTradeWatcher?.getStatus();
+      const watcherReady = watcher?.healthy === true;
+      const executionMode = !watcher?.running
         ? 'disabled'
         : fastify.tradingMode === 'LIVE'
           ? 'live'
@@ -116,7 +118,16 @@ export default async function publicCopyTradingRoutes(fastify: FastifyInstance) 
 
       return {
         chain: 'solana',
-        mode: 'signal_only',
+        mode: 'buy_and_proportional_sell_mirror_independent_exits',
+        watcher: watcher ?? null,
+        recommendationPolicy: COPY_RECOMMENDATION_POLICY,
+        recommendations: localWallets.filter((w) => w.recommendation.eligible).slice(0, 3),
+        limits: {
+          maxBuySol: fastify.config.COPY_TRADING_MAX_BUY_SOL,
+          maxDailyBuys: fastify.config.COPY_TRADING_MAX_DAILY_BUYS,
+          maxOpenPositions: fastify.config.COPY_TRADING_MAX_OPEN_POSITIONS,
+          slippageBps: fastify.config.COPY_TRADING_SLIPPAGE_BPS,
+        },
         copyConfigEnabled: true,
         copyWatcherReady: watcherReady,
         executionMode,

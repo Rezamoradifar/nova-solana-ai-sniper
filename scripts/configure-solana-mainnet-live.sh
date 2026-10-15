@@ -69,8 +69,8 @@ set_env NETWORK_TRADE_FEED_MAX_POSTS_PER_DAY "10"
 set_env TELEGRAM_TRADES_ONLY "true"
 set_env TELEGRAM_DAILY_TRADE_CARD_LIMIT "10"
 
-# Real copy-trading signal watcher: fresh confirmed buys only, normal GSP
-# PositionManager/safety checks always apply.
+# Real copy-trading watcher: fresh buys and proportional source sells; normal
+# GSP PositionManager/safety checks always apply.
 set_env COPY_TRADING_EXECUTION_ENABLED "true"
 set_env COPY_TRADING_POLL_INTERVAL_MS "15000"
 set_env COPY_TRADING_MAX_SIGNAL_AGE_SECONDS "120"

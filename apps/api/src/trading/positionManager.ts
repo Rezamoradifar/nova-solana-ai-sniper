@@ -200,6 +200,8 @@ export interface OpenPositionParams {
   aiScore?: number;
   /** Institutional Mode — "max 3 simultaneous positions," see safety.ts's CheckOpenParams. */
   maxOpenPositionsOverride?: number;
+  /** Set only for positions whose buy was mirrored from a tracked source wallet. */
+  copyTradeTargetAddress?: string;
   /** Institutional Mode — gates safety.ts's capital-reserve + daily-loss-%
    * checks, AND is frozen onto the Position at open time (see schema.prisma). */
   institutionalModeEnabled?: boolean;
@@ -1264,6 +1266,7 @@ export class PositionManager {
     const positionData = {
       walletId: params.walletId,
       tokenId: params.tokenId,
+      copyTradeTargetAddress: params.copyTradeTargetAddress,
       entryPriceUsd,
       amountToken: Number(outAmount),
       amountSolInvested: params.amountSol,
