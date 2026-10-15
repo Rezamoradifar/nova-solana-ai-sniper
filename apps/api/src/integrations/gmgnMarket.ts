@@ -19,7 +19,14 @@ const tokenSchema = z.object({
   smart_degen_count: numeric.pipe(z.number().int().nonnegative()).optional(),
 });
 export function normalizeGmgnTrending(input: unknown) {
-  const response = z.object({ rank: z.array(z.unknown()).max(100) }).parse(input);
+  const rankSchema = z.object({ rank: z.array(z.unknown()).max(100) });
+  // CLI versions may emit either the data object or the successful API envelope.
+  // An envelope's data is usable only when its explicit success code is zero.
+  const payload =
+    input && typeof input === 'object' && 'code' in input
+      ? z.object({ code: z.literal(0), data: rankSchema }).parse(input).data
+      : input;
+  const response = rankSchema.parse(payload);
   return response.rank
     .flatMap((row) => {
       const token = tokenSchema.safeParse(row);

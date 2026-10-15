@@ -36,6 +36,21 @@ describe('GMGN market integration', () => {
     ).toEqual([]);
     expect(() => normalizeGmgnTrending({ data: { rank: [] } })).toThrow();
   });
+  it('accepts the successful CLI envelope observed on the production server', () => {
+    expect(normalizeGmgnTrending({ code: 0, data: { rank: [token] }, message: 'success' })).toEqual(
+      normalizeGmgnTrending({ rank: [token] }),
+    );
+  });
+  it('rejects error envelopes even when they contain plausible rank data', () => {
+    expect(() => normalizeGmgnTrending({ code: 403, data: { rank: [token] } })).toThrow();
+    expect(() => normalizeGmgnTrending({ code: 0, data: {} })).toThrow();
+  });
+  it('connects the website feed with enveloped CLI output', async () => {
+    const read = createGmgnMarketFeed(async () => ({ code: 0, data: { rank: [token] } }));
+    const result = await read('test-key');
+    expect(result.status).toBe('connected');
+    expect(result.tokens[0]).toMatchObject({ symbol: 'SOL', priceUsd: 150.12 });
+  });
   it('does not run the CLI when a key is absent', async () => {
     const run = vi.fn();
     expect(await createGmgnMarketFeed(run)()).toMatchObject({
