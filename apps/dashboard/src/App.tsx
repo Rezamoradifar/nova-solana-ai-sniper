@@ -23,6 +23,9 @@ import { PublicPlatform, PublicPricing, PublicSecurity } from './pages/PublicPla
 import PublicTelegram from './pages/PublicTelegram.js';
 import PublicWallet from './pages/PublicWallet.js';
 import { Admin } from './pages/Admin.js';
+import { Subscriptions } from './pages/Subscriptions.js';
+import { Referrals } from './pages/Referrals.js';
+import { Tools } from './pages/Tools.js';
 import { TradingLab } from './pages/TradingLab.js';
 
 export function App() {
@@ -62,6 +65,9 @@ export function App() {
               <Route path="wallets/:id" element={<WalletDetail />} />
               <Route path="snipes" element={<Snipes />} />
               <Route path="trading-lab" element={<TradingLab />} />
+              <Route path="tools" element={<Tools />} />
+              <Route path="subscription" element={<Subscriptions />} />
+              <Route path="referrals" element={<Referrals />} />
               <Route path="admin" element={<Admin />} />
               <Route path="leaderboard" element={<Leaderboard />} />
               <Route path="logs" element={<Logs />} />

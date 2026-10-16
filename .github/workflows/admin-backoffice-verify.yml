@@ -7,6 +7,7 @@ on:
       - codex/gsp-trading-port-8088
       - codex/gsp-trading-latest-8088
       - codex/copy-trading-ranked-wallets-20261009
+      - codex/platform-integration-20261010
 
 jobs:
   docker-rollback:
@@ -37,6 +38,11 @@ jobs:
         run: |
           npx vitest run apps/api/src/solana/resilientConnection.test.ts apps/api/src/solana/connection.test.ts
           node --check scripts/check-solana-rpc.mjs
+      - name: Platform integration and payment checks
+        run: |
+          npx vitest run apps/api/src/lib/workerLifecycle.test.ts apps/api/src/lib/integrationHealth.test.ts apps/api/src/business/reviewedPlanPurchase.test.ts apps/api/src/business/planPurchase.test.ts apps/api/src/routes/health.test.ts apps/api/src/routes/integrations.test.ts
+          bash -n scripts/deploy-platform.sh scripts/deploy-gsp-trading-latest-8088.sh
+          python3 scripts/test_deploy_platform.py
       - name: Dashboard build
         run: npm run build --workspace apps/dashboard
       - name: Compose validation

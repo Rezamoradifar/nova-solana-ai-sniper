@@ -268,7 +268,7 @@ interface Plan {
   feeBps: number;
   maxBuySol: number;
   maxOpenPositions: number;
-  features: Record<string, unknown>;
+  features: string[];
 }
 const TIERS = [
   {
@@ -373,14 +373,12 @@ export function PublicPricing() {
                   </>
                 )}
               </div>
-              <a
+              <Link
                 className={`nova-button ${i === 1 ? '' : 'button-outline'}`}
-                href={BOT_URL}
-                target="_blank"
-                rel="noreferrer"
+                to="/dashboard/subscription"
               >
-                Explore {tier.name} <span aria-hidden="true">↗</span>
-              </a>
+                Review {tier.name} <span aria-hidden="true">↗</span>
+              </Link>
               <div className="plan-details">
                 {plan ? (
                   <>

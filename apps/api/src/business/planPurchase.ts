@@ -31,7 +31,7 @@ export interface PlanPurchaseDeps {
 
 export type PlanPurchaseResult =
   | { ok: true; planKey: string; expiresAt: Date; txSignature: string; amountSol: number }
-  | { ok: false; error: string };
+  | { ok: false; error: string; paymentUncertain?: boolean };
 
 const inFlight = new Set<string>();
 
@@ -43,7 +43,7 @@ const inFlight = new Set<string>();
  */
 export async function purchasePlan(
   deps: PlanPurchaseDeps,
-  params: { userId: string; planKey: string; walletId?: string },
+  params: { userId: string; planKey: string; walletId?: string; expectedPriceSol?: number },
 ): Promise<PlanPurchaseResult> {
   if (inFlight.has(params.userId)) return { ok: false, error: 'A purchase is already in progress' };
   inFlight.add(params.userId);
@@ -56,12 +56,18 @@ export async function purchasePlan(
 
 async function purchaseLocked(
   deps: PlanPurchaseDeps,
-  params: { userId: string; planKey: string; walletId?: string },
+  params: { userId: string; planKey: string; walletId?: string; expectedPriceSol?: number },
 ): Promise<PlanPurchaseResult> {
   const { prisma } = deps;
   const plan = await prisma.subscriptionPlan.findUnique({ where: { key: params.planKey } });
   if (!plan || !plan.active) return { ok: false, error: 'This package is not available' };
   if (plan.priceSol <= 0) return { ok: false, error: 'This package is free; nothing to buy' };
+  if (params.expectedPriceSol !== undefined && plan.priceSol !== params.expectedPriceSol) {
+    return {
+      ok: false,
+      error: 'The plan price changed. Refresh and review the new price before paying.',
+    };
+  }
 
   const user = await prisma.user.findUnique({
     where: { id: params.userId },
@@ -128,6 +134,7 @@ async function purchaseLocked(
     deps.logger.error({ err, userId: user.id, txSignature }, 'PLAN PURCHASE: payment failed');
     return {
       ok: false,
+      paymentUncertain: true,
       error: `Payment did not confirm. Check ${txSignature} on Solscan before trying again.`,
     };
   }

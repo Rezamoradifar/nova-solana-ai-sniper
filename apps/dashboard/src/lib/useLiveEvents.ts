@@ -10,7 +10,8 @@ export interface LiveEvent {
   at: string;
 }
 
-const API_BASE: string = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000';
+const API_BASE: string =
+  import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://localhost:4000' : '/api');
 
 function toWsUrl(apiBase: string, token: string): string {
   // Same-origin relative base (production, e.g. "/api") resolves against the

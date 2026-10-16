@@ -1,12 +1,16 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext.js';
 import { ApiError } from '../lib/api.js';
 
 export function Login() {
   const { login, register } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [search] = useSearchParams();
+  const next = search.get('next');
+  const destination = next && /^\/dashboard(?:\/|\?|$)/.test(next) ? next : '/dashboard';
+  const [referralCode, setReferralCode] = useState(search.get('ref') ?? '');
+  const [mode, setMode] = useState<'login' | 'register'>(search.has('ref') ? 'register' : 'login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | undefined>();
@@ -20,9 +24,9 @@ export function Login() {
       if (mode === 'login') {
         await login(email, password);
       } else {
-        await register(email, password);
+        await register(email, password, referralCode.trim() || undefined);
       }
-      navigate('/dashboard', { replace: true });
+      navigate(destination, { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong');
     } finally {
@@ -63,7 +67,7 @@ export function Login() {
               id="password"
               type="password"
               required
-              minLength={10}
+              minLength={mode === 'register' ? 10 : 1}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="input-field"
@@ -71,6 +75,21 @@ export function Login() {
             />
           </div>
 
+          {mode === 'register' && (
+            <div>
+              <label className="label" htmlFor="referral">
+                Referral code (optional)
+              </label>
+              <input
+                id="referral"
+                className="input-field"
+                value={referralCode}
+                minLength={4}
+                maxLength={32}
+                onChange={(e) => setReferralCode(e.target.value)}
+              />
+            </div>
+          )}
           {error && <div className="text-sm text-loss">{error}</div>}
 
           <button type="submit" disabled={submitting} className="btn-primary w-full">
@@ -78,6 +97,9 @@ export function Login() {
           </button>
         </form>
 
+        <Link to="/" className="mt-4 block text-center text-xs text-slate-400">
+          Back to website
+        </Link>
         <button
           onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
           className="mt-4 w-full text-center text-xs text-slate-500 hover:text-slate-300"
