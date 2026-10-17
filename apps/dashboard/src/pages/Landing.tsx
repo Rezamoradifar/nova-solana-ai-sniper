@@ -5,72 +5,174 @@ import { WebsiteTools } from '../components/public/WebsiteTools.js';
 import { NetworkWinners } from '../components/public/NetworkWinners.js';
 
 export default function Landing() {
-  const { tokens, loading, error } = useMarkets();
+  const { tokens, loading, error, updatedAt, refresh } = useMarkets();
   return (
     <>
-      <section className="nova-hero">
-        <img
-          className="hero-art"
-          src="/images/gsp-trading-hero.svg"
-          alt="GSP TRADING Solana execution matrix with market routes and smart-wallet nodes"
-          width="1536"
-          height="1024"
-          fetchPriority="high"
-        />
-        <div className="hero-shade" />
-        <div className="site-container hero-content">
-          <div className="hero-brand-lockup" aria-label="GSP TRADING platform">
-            <span>GSP</span>
-            <strong>TRADING</strong>
-            <i>GLOBAL SOLANA EXECUTION PLATFORM</i>
-          </div>
-          <div className="eyebrow">
-            <span /> INSTITUTIONAL MARKET INTELLIGENCE
-          </div>
-          <h1>
-            Trade the spread.
-            <br />
-            <span>Control the execution.</span>
-          </h1>
-          <p>
-            Multi-venue Solana intelligence for market discovery, arbitrage analysis, and
-            simulation-gated execution workflows.
-          </p>
-          <div className="button-row">
-            <Link className="nova-button" to="/arbitrage">
-              Open arbitrage terminal <Icon name="external" size={17} />
-            </Link>
-            <Link className="nova-button button-ghost" to="/tools">
-              Explore GSP TRADING
-            </Link>
-          </div>
-          <div className="hero-system-strip" aria-label="Platform capabilities">
-            <div>
-              <span>NETWORK</span>
-              <strong>Solana Mainnet</strong>
+      <section className="ml-hero" aria-labelledby="ml-hero-title">
+        <div className="ml-hero-grid-overlay" aria-hidden="true" />
+        <div className="site-container ml-hero-grid">
+          <div className="ml-hero-copy">
+            <div className="ml-hero-chip">
+              <span className="ml-hero-signal" />
+              SOLANA OPERATIONS INTELLIGENCE
+              <span className="ml-chip-divider" />
+              01 / MONEYLAND
             </div>
-            <div>
-              <span>ROUTING</span>
-              <strong>Multi-venue</strong>
+            <p className="ml-hero-overline">GSP TRADING / OBSERVE · EVALUATE · ACT</p>
+            <h1 id="ml-hero-title">
+              Read the market.
+              <br />
+              <span>Own the next move.</span>
+            </h1>
+            <p className="ml-hero-lead">
+              Your command center for Solana markets, cross-venue route analysis, and informed
+              trading decisions. See the data, understand the assumptions, then decide what
+              happens next.
+            </p>
+            <div className="button-row ml-hero-actions">
+              <Link className="nova-button ml-primary-action" to="/arbitrage">
+                Explore the terminal <Icon name="external" size={16} />
+              </Link>
+              <Link className="nova-button button-outline ml-secondary-action" to="/markets">
+                View live markets <span aria-hidden="true">↗</span>
+              </Link>
             </div>
-            <div>
-              <span>RISK LAYER</span>
-              <strong>Simulation gated</strong>
+            <div className="ml-hero-footnotes">
+              <span><Icon name="check" size={15} /> Public market research</span>
+              <span><Icon name="check" size={15} /> Transparent route assumptions</span>
+              <span><Icon name="check" size={15} /> Risk-aware tools</span>
             </div>
-            <div>
-              <span>PLATFORM</span>
-              <strong>GSP TRADING</strong>
+          </div>
+          <div className="ml-console" aria-label="GSP trading observation console">
+            <div className="ml-console-topbar">
+              <div className="ml-console-identity">
+                <span className="ml-console-emblem" aria-hidden="true">◈</span>
+                <span><strong>GSP / MARKET MIRROR</strong><small>READ-ONLY OBSERVATION LAYER</small></span>
+              </div>
+              <span
+                className={tokens.length ? 'ml-feed-status ml-feed-ready' : error ? 'ml-feed-status ml-feed-error' : 'ml-feed-status ml-feed-wait'}
+              >
+                <span className="ml-status-signal" />
+                {tokens.length ? 'FEED CONNECTED' : error ? 'SOURCE UNAVAILABLE' : 'CONNECTING'}
+              </span>
+            </div>
+            <div className="ml-console-body">
+              <div className="ml-monitor">
+                <div className="ml-monitor-header">
+                  <span>NETWORK TOPOLOGY</span>
+                  <span>VIEW · SOLANA</span>
+                </div>
+                <div className="ml-monitor-art" aria-hidden="true">
+                  <svg viewBox="0 0 480 420" fill="none" preserveAspectRatio="xMidYMid meet">
+                    <defs>
+                      <pattern id="ml-grid" width="28" height="28" patternUnits="userSpaceOnUse">
+                        <path d="M28 0H0V28" stroke="#5a8371" strokeOpacity=".12" strokeWidth="1" />
+                      </pattern>
+                      <linearGradient id="ml-arc" x1="54" y1="190" x2="442" y2="230" gradientUnits="userSpaceOnUse">
+                        <stop stopColor="#8be5b8" stopOpacity=".16" />
+                        <stop offset=".5" stopColor="#c5f5a2" />
+                        <stop offset="1" stopColor="#6de0cf" stopOpacity=".25" />
+                      </linearGradient>
+                    </defs>
+                    <rect width="480" height="420" fill="url(#ml-grid)" />
+                    <circle cx="240" cy="212" r="145" stroke="#72958a" strokeOpacity=".25" strokeDasharray="3 8" />
+                    <circle cx="240" cy="212" r="103" stroke="#a8f5b8" strokeOpacity=".16" />
+                    <circle cx="240" cy="212" r="60" stroke="#a8f5b8" strokeOpacity=".18" strokeDasharray="4 7" />
+                    <path d="M76 263L174 148L290 225L393 118" stroke="url(#ml-arc)" strokeWidth="2" />
+                    <path d="M76 263L240 310L393 118" stroke="#79c0bc" strokeOpacity=".38" strokeDasharray="5 9" />
+                    <path d="M174 148L240 310L290 225" stroke="#7fd9a8" strokeOpacity=".38" strokeDasharray="4 8" />
+                    <circle cx="76" cy="263" r="6" fill="#83dbc0" />
+                    <circle cx="174" cy="148" r="8" fill="#c3f0a0" />
+                    <circle cx="290" cy="225" r="9" fill="#c3f0a0" />
+                    <circle cx="240" cy="310" r="6" fill="#83dbc0" />
+                    <circle cx="393" cy="118" r="6" fill="#83dbc0" />
+                    <circle cx="290" cy="225" r="22" stroke="#c3f0a0" strokeOpacity=".55" />
+                    <circle cx="174" cy="148" r="18" stroke="#c3f0a0" strokeOpacity=".35" />
+                    <path d="M18 36H78M18 36V76M462 344H402M462 344V384" stroke="#9aceaa" strokeOpacity=".3" />
+                  </svg>
+                  <span className="ml-node-label ml-node-a">MARKET DATA</span>
+                  <span className="ml-node-label ml-node-b">RISK GATE</span>
+                  <span className="ml-node-label ml-node-c">ROUTE ANALYSIS</span>
+                  <div className="ml-monitor-orb" />
+                </div>
+                <div className="ml-monitor-footer">
+                  <span>OBSERVATION GRAPH</span>
+                  <span>ILLUSTRATION · NOT A LIVE TRADE</span>
+                </div>
+              </div>
+              <div className="ml-feed-card">
+                <div className="ml-feed-card-header">
+                  <div>
+                    <span>01 / MARKET SNAPSHOT</span>
+                    <strong>Selected Solana assets</strong>
+                  </div>
+                  <button type="button" onClick={refresh} aria-label="Refresh market observations" title="Refresh observations">
+                    <Icon name="refresh" size={16} />
+                  </button>
+                </div>
+                {tokens.length ? (
+                  <div className="ml-feed-list">
+                    {tokens.slice(0, 3).map((token) => (
+                      <div className="ml-feed-row" key={token.mint}>
+                        <TokenMark symbol={token.symbol} color={token.color} />
+                        <div className="ml-feed-name">
+                          <strong>{token.symbol}</strong>
+                          <span>{token.name}</span>
+                        </div>
+                        <div className="ml-feed-values">
+                          <strong>{money(token.price)}</strong>
+                          <small className={token.change != null && token.change < 0 ? 'negative' : 'positive'}>
+                            {pct(token.change)} / 24H
+                          </small>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="ml-feed-empty" role="status">
+                    <Icon name={loading ? 'refresh' : 'globe'} size={25} />
+                    <strong>{loading ? 'Connecting to live data' : 'Market feed unavailable'}</strong>
+                    <p>{error ?? 'Market observations will appear when the data source responds.'}</p>
+                  </div>
+                )}
+                <div className="ml-feed-card-footer">
+                  <span>Market snapshots are not executable quotes.</span>
+                  <Link to="/markets">DETAILS ↗</Link>
+                </div>
+              </div>
+            </div>
+            <div className="ml-console-bottombar">
+              <span>GSP / SOLANA MAINNET · RESEARCH MODE</span>
+              <span>{updatedAt ? 'UPDATED ' + new Date(updatedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'AWAITING FEED'}</span>
             </div>
           </div>
         </div>
-        <div className="site-container hero-bottom">
-          <span>01 / THE NEXT PERSPECTIVE</span>
-          <a href="#market-watch">
-            SCROLL TO EXPLORE <span aria-hidden="true">↓</span>
-          </a>
+        <div className="site-container ml-hero-meta">
+          <span>MARKETS / ROUTES / RISK</span>
+          <a href="#market-watch">EXPLORE THE WORKSPACE <span aria-hidden="true">↓</span></a>
         </div>
       </section>
       <MarketTicker />
+      <div className="site-container ml-operation-band" aria-label="Explore the Moneyland workflow">
+        <Link to="/markets" className="ml-operation-item">
+          <span>01 / OBSERVE</span>
+          <strong>Watch the flow</strong>
+          <small>Market prices, liquidity and volume</small>
+          <span aria-hidden="true">↗</span>
+        </Link>
+        <Link to="/arbitrage" className="ml-operation-item">
+          <span>02 / EVALUATE</span>
+          <strong>Model the route</strong>
+          <small>Compare quotes, costs and freshness</small>
+          <span aria-hidden="true">↗</span>
+        </Link>
+        <Link to="/security" className="ml-operation-item">
+          <span>03 / UNDERSTAND</span>
+          <strong>Protect your decisions</strong>
+          <small>Review risks before committing capital</small>
+          <span aria-hidden="true">↗</span>
+        </Link>
+      </div>
       <div className="site-container venue-strip">
         <span>
           Market & quote

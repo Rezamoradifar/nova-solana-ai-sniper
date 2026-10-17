@@ -1,0 +1,506 @@
+/* Moneyland's original operations-console design, inspired by modern infrastructure UIs.
+ * Overrides stay scoped to public GSP pages; trading/account dashboards are unchanged.
+ */
+.nova-site.moneyland-theme {
+  --bg: #07100f;
+  --panel: #0b1715;
+  --panel-2: #12201d;
+  --line: #29403a;
+  --lime: #baf4a2;
+  --text: #eef7f1;
+  --muted: #a1b5ac;
+  --dim: #758b80;
+  --deep-green: #13251d;
+  background: #07100f;
+  color: var(--text);
+}
+.nova-site.moneyland-theme .site-container {
+  max-width: 1416px;
+}
+.nova-site.moneyland-theme .nova-header {
+  height: 76px;
+  background: #070d0ceF;
+  border-bottom: 1px solid #c4ecd320;
+  box-shadow: none;
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+.nova-site.moneyland-theme .header-inner {gap: 24px}
+.nova-site.moneyland-theme .nova-brand {
+  font-size: 21px;
+  letter-spacing: .03em;
+}
+.nova-site.moneyland-theme .nova-brand > svg {
+  filter: drop-shadow(0 0 10px #a5ecc236);
+}
+.nova-site.moneyland-theme .main-nav {gap: clamp(12px, 1.3vw, 24px)}
+.nova-site.moneyland-theme .main-nav > a {
+  font-size: 12px;
+  color: #b3c2bb;
+}
+.nova-site.moneyland-theme .main-nav > a:hover,
+.nova-site.moneyland-theme .main-nav > a.active {color: #e6f6eb}
+.nova-site.moneyland-theme .header-actions {gap: 12px}
+.nova-site.moneyland-theme .network-header-status {
+  border-color: #355246;
+  background: #0c1915;
+  color: #aac4b6;
+}
+.nova-site.moneyland-theme .nova-button {
+  border-radius: 4px;
+  font-size: 12px;
+  letter-spacing: .01em;
+}
+.nova-site.moneyland-theme .button-outline {
+  border-color: #577769;
+}
+.nova-site.moneyland-theme .button-outline:hover {
+  border-color: #adf2aa;
+}
+.nova-site.moneyland-theme .panel,
+.nova-site.moneyland-theme .feature-card {
+  border-radius: 7px;
+  box-shadow: inset 0 1px #ffffff08;
+}
+.nova-site.moneyland-theme .toolkit-section {background: #0c1513}
+.nova-site.moneyland-theme .section-heading h2 {
+  letter-spacing: -.05em;
+}
+.nova-site.moneyland-theme .nova-footer {border-top-color: #244035}
+.nova-site.moneyland-theme .nova-footer .footer-top {border-color: #223b31}
+
+.nova-site.moneyland-theme .ml-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 48% 62% at 81% 45%, #2354406b, transparent 74%),
+    radial-gradient(ellipse 58% 66% at 6% 95%, #102b2480, transparent 75%),
+    #07100f;
+  border-bottom: 1px solid #365346;
+}
+.nova-site.moneyland-theme .ml-hero::before {
+  content: '';
+  position: absolute;
+  left: -26%;
+  top: -57%;
+  width: 78%;
+  aspect-ratio: 1;
+  background: radial-gradient(circle, #4b806c17, transparent 67%);
+  pointer-events: none;
+}
+.nova-site.moneyland-theme .ml-hero-grid-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .6;
+  background-image: linear-gradient(#a2ddc008 1px, transparent 1px),
+                    linear-gradient(90deg, #a2ddc008 1px, transparent 1px);
+  background-size: 78px 78px;
+  mask-image: linear-gradient(90deg, transparent 0%, #000 36%, #000 90%);
+}
+.nova-site.moneyland-theme .ml-hero-grid {
+  position: relative;
+  z-index: 1;
+  min-height: 745px;
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+  align-items: center;
+  gap: clamp(35px, 4.4vw, 80px);
+  padding-top: 86px;
+  padding-bottom: 78px;
+}
+.nova-site.moneyland-theme .ml-hero-copy {min-width: 0}
+.nova-site.moneyland-theme .ml-hero-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border: 1px solid #3c6958;
+  background: #1732268c;
+  padding: 8px 11px;
+  color: #c0ebce;
+  font: 550 9px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .095em;
+}
+.nova-site.moneyland-theme .ml-hero-signal {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #a3f4ba;
+  box-shadow: 0 0 0 3px #a3f4ba1e, 0 0 13px #a3f4ba76;
+}
+.nova-site.moneyland-theme .ml-chip-divider {
+  height: 14px;
+  width: 1px;
+  background: #577968;
+}
+.nova-site.moneyland-theme .ml-hero-overline {
+  margin: 48px 0 19px;
+  font: 550 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: #8dad9c;
+  letter-spacing: .18em;
+}
+.nova-site.moneyland-theme .ml-hero-copy h1 {
+  max-width: 720px;
+  font-size: clamp(54px, 5.1vw, 82px);
+  line-height: 1.04;
+  font-weight: 520;
+  letter-spacing: -.058em;
+  text-wrap: balance;
+}
+.nova-site.moneyland-theme .ml-hero-copy h1 span {
+  color: #baf4a2;
+  background: linear-gradient(120deg, #d2f6b5, #8bd9bd);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.nova-site.moneyland-theme .ml-hero-lead {
+  max-width: 535px;
+  font-size: 16px;
+  line-height: 1.85;
+  color: #b2c5b9;
+  margin: 32px 0 33px;
+}
+.nova-site.moneyland-theme .ml-hero-actions {gap: 11px}
+.nova-site.moneyland-theme .ml-hero-actions .nova-button {
+  padding: 16px 21px;
+  min-height: 51px;
+}
+.nova-site.moneyland-theme .ml-primary-action {
+  background: #baf4a2;
+  border-color: #baf4a2;
+  box-shadow: 0 0 30px #91ff7c13;
+}
+.nova-site.moneyland-theme .ml-secondary-action {background: #0b1a15a6}
+.nova-site.moneyland-theme .ml-hero-footnotes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding-top: 36px;
+  font-size: 11px;
+  color: #94ad9c;
+}
+.nova-site.moneyland-theme .ml-hero-footnotes span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.nova-site.moneyland-theme .ml-hero-footnotes svg {color: #baf4a2}
+.nova-site.moneyland-theme .ml-console {
+  position: relative;
+  background: linear-gradient(165deg, #13241e 0%, #080e0d 56%, #0d1915 100%);
+  border: 1px solid #5e83663d;
+  border-radius: 9px;
+  min-width: 0;
+  overflow: hidden;
+  box-shadow: 0 35px 115px #0009, inset 0 1px #ffffff13, 0 0 0 8px #b3f3ae07;
+}
+.nova-site.moneyland-theme .ml-console::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg, #e8ffc308, transparent 24%, transparent 75%, #8ee2a209);
+  z-index: 2;
+}
+.nova-site.moneyland-theme .ml-console-topbar,
+.nova-site.moneyland-theme .ml-console-bottombar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 20px;
+  background: #0b1513;
+  border-bottom: 1px solid #254236;
+}
+.nova-site.moneyland-theme .ml-console-identity {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.nova-site.moneyland-theme .ml-console-emblem {font-size: 30px;color:#baf4a2;line-height:1}
+.nova-site.moneyland-theme .ml-console-identity strong,
+.nova-site.moneyland-theme .ml-console-identity small {display: block}
+.nova-site.moneyland-theme .ml-console-identity strong {
+  color: #e3f1e4;
+  font: 650 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .06em;
+}
+.nova-site.moneyland-theme .ml-console-identity small {
+  margin-top: 3px;
+  color: #759789;
+  font: 10px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .02em;
+}
+.nova-site.moneyland-theme .ml-feed-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  color: #c6eccc;
+  background: #173424;
+  border: 1px solid #385d45;
+  border-radius: 3px;
+  white-space: nowrap;
+  font: 600 9px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.nova-site.moneyland-theme .ml-status-signal {height:6px;width:6px;border-radius:50%;background:#c9ff94}
+.nova-site.moneyland-theme .ml-feed-wait {color:#dbd5af;background:#3e38231c;border-color:#655a3d}
+.nova-site.moneyland-theme .ml-feed-wait .ml-status-signal {background:#f8d785}
+.nova-site.moneyland-theme .ml-feed-error {color:#efb4b4;background:#4d24251c;border-color:#794d4d}
+.nova-site.moneyland-theme .ml-feed-error .ml-status-signal {background:#efa3a3}
+.nova-site.moneyland-theme .ml-console-body {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(205px,.79fr);
+  min-height: 400px;
+}
+.nova-site.moneyland-theme .ml-monitor {
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  background: radial-gradient(circle at 52% 50%, #1d44362c, #081310 70%);
+  border-right: 1px solid #264034;
+}
+.nova-site.moneyland-theme .ml-monitor-header,
+.nova-site.moneyland-theme .ml-monitor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 17px 18px;
+  font: 600 9px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .05em;
+  color: #8caa9b;
+}
+.nova-site.moneyland-theme .ml-monitor-header span:last-child,
+.nova-site.moneyland-theme .ml-monitor-footer span:last-child {color:#667e74}
+.nova-site.moneyland-theme .ml-monitor-art {height: 310px; position: relative; overflow: hidden;}
+.nova-site.moneyland-theme .ml-monitor-art svg {width:100%;height:100%;display:block;}
+.nova-site.moneyland-theme .ml-node-label {
+  position: absolute;
+  font: 650 9px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: #b6d7c3;
+  letter-spacing: .035em;
+  background: #0b1d18de;
+  padding: 6px 7px;
+  border: 1px solid #42604f;
+}
+.nova-site.moneyland-theme .ml-node-a {left:12%;top:58%}
+.nova-site.moneyland-theme .ml-node-b {left:44%;top:32%}
+.nova-site.moneyland-theme .ml-node-c {right:7%;top:62%}
+.nova-site.moneyland-theme .ml-monitor-orb {
+  position: absolute;
+  width: 23px;
+  height: 23px;
+  border: 1px solid #baffaa;
+  border-radius: 50%;
+  left: 63%;
+  top: 46%;
+  box-shadow: 0 0 0 8px #baffaa0a, 0 0 24px #baffaa35;
+  animation: ml-pulse 4s ease-in-out infinite;
+  pointer-events: none;
+}
+.nova-site.moneyland-theme .ml-monitor-footer {padding-top: 9px; padding-bottom: 16px; flex-wrap:wrap;}
+.nova-site.moneyland-theme .ml-feed-card {min-width:0; display:flex; flex-direction:column; background:#0c1613}
+.nova-site.moneyland-theme .ml-feed-card-header {
+  padding: 18px 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid #254236;
+}
+.nova-site.moneyland-theme .ml-feed-card-header span {
+  font: 650 9px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace;
+  color: #8cae98;
+  display: block;
+  margin-bottom: 6px;
+}
+.nova-site.moneyland-theme .ml-feed-card-header strong {font-weight: 540;font-size:13px}
+.nova-site.moneyland-theme .ml-feed-card-header button {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border: 1px solid #345243;
+  color: #bfddc9;
+  background: #15231b;
+  width: 34px;height:34px;
+  border-radius: 4px;
+}
+.nova-site.moneyland-theme .ml-feed-card-header button:hover {border-color:#a9f7ae;color:#e4ffdd}
+.nova-site.moneyland-theme .ml-feed-list {flex:1}
+.nova-site.moneyland-theme .ml-feed-row {
+  display: flex;align-items:center;gap:8px;
+  padding:18px 12px;
+  border-bottom: 1px solid #233a31;
+}
+.nova-site.moneyland-theme .ml-feed-row .token-mark {width:29px;height:29px;font-size:15px}
+.nova-site.moneyland-theme .ml-feed-name {min-width:0;flex:1}
+.nova-site.moneyland-theme .ml-feed-name strong {display:block;font-size:12px;font-weight:580}
+.nova-site.moneyland-theme .ml-feed-name span {display:block;color:#80958a;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nova-site.moneyland-theme .ml-feed-values {text-align:right;min-width:0}
+.nova-site.moneyland-theme .ml-feed-values strong {display:block;font: 600 11px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap}
+.nova-site.moneyland-theme .ml-feed-values small {display:block;font:10px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace;white-space:nowrap;margin-top:4px}
+.nova-site.moneyland-theme .ml-feed-empty {
+  min-height: 220px;
+  padding: 22px 16px;
+  display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:10px;
+  color:#acc1b3;
+}
+.nova-site.moneyland-theme .ml-feed-empty strong {color:#e1efe4;font-size:13px}
+.nova-site.moneyland-theme .ml-feed-empty p {color:#8ba496;font-size:12px;line-height:1.65}
+.nova-site.moneyland-theme .ml-feed-card-footer {
+  margin-top:auto;
+  padding: 16px 14px;
+  border-top: 1px solid #254236;
+  display: flex;flex-wrap:wrap;gap:10px;
+  align-items:center;justify-content:space-between;
+  font-size:10px;color:#8da899;
+}
+.nova-site.moneyland-theme .ml-feed-card-footer a {
+  color:#baf4a2;
+  font:650 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+.nova-site.moneyland-theme .ml-console-bottombar {
+  border-top: 1px solid #254236;
+  border-bottom: none;
+  color: #86a392;
+  flex-wrap: wrap;
+  font: 600 9px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .07em;
+}
+.nova-site.moneyland-theme .ml-hero-meta {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #799589;
+  padding-bottom: 20px;
+  font: 600 10px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: .1em;
+}
+.nova-site.moneyland-theme .ml-hero-meta a {color:#c2dfc7}
+.nova-site.moneyland-theme .ml-hero-meta a span {padding-left:10px;font-size:14px}
+.nova-site.moneyland-theme .ml-operation-band {
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  border: 1px solid #284537;
+  border-top: none;
+  background: linear-gradient(120deg,#0e1915,#0e201a);
+}
+.nova-site.moneyland-theme .ml-operation-item {
+  display: flex;flex-direction:column;
+  position:relative;
+  padding:27px 30px 30px;
+  min-width:0;
+  border-right:1px solid #2c4739;
+  transition: background .2s ease;
+}
+.nova-site.moneyland-theme .ml-operation-item:last-child {border-right:none}
+.nova-site.moneyland-theme .ml-operation-item:hover {background:#2342346e}
+.nova-site.moneyland-theme .ml-operation-item > span:first-child {
+  color:#8cafa0;
+  font:600 10px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing:.08em;
+}
+.nova-site.moneyland-theme .ml-operation-item > strong {
+  margin-top:14px;
+  font-size:20px;font-weight:560;letter-spacing:-.04em;
+}
+.nova-site.moneyland-theme .ml-operation-item > small {
+  margin-top:9px;
+  color:#91ae9e;
+  font-size:12px;
+}
+.nova-site.moneyland-theme .ml-operation-item > span:last-child {
+  position:absolute;top:22px;right:25px;font-size:20px;color:#b7ed9c;
+}
+
+@keyframes ml-pulse {
+  0%,100% {transform:scale(.9);opacity:.65}
+  50% {transform:scale(1.15);opacity:1}
+}
+@media(max-width: 1380px) {
+  .nova-site.moneyland-theme .network-header-status {display:none}
+}
+@media(max-width: 1160px) {
+  .nova-site.moneyland-theme .menu-toggle {display:inline-flex !important}
+  .nova-site.moneyland-theme .main-nav {
+    display:none;
+    position:absolute;
+    top:calc(100% + 1px);
+    left:0;right:0;
+    z-index: 45;
+    flex-direction:column;
+    align-items:stretch;
+    gap:0;
+    padding:12px clamp(20px,5vw,56px) 22px;
+    background:#0a1513;
+    border-bottom:1px solid #355c48;
+    max-height:calc(100vh - 77px);
+    overflow:auto;
+  }
+  .nova-site.moneyland-theme .main-nav.is-open {display:flex}
+  .nova-site.moneyland-theme .main-nav > a {
+    padding:13px 4px;
+    font-size:14px;
+    min-height:44px;
+    border-bottom:1px solid #233a31;
+  }
+  .nova-site.moneyland-theme .nav-divider {display:none}
+  .nova-site.moneyland-theme .ml-hero-grid {gap:28px}
+}
+@media(max-width: 960px) {
+  .nova-site.moneyland-theme .ml-hero-grid {
+    grid-template-columns:1fr;
+    min-height:0;
+    padding-top:65px;
+    gap:44px;
+    padding-bottom:65px;
+  }
+  .nova-site.moneyland-theme .ml-hero-copy h1 {max-width:840px}
+  .nova-site.moneyland-theme .ml-hero-lead {max-width:680px}
+  .nova-site.moneyland-theme .ml-console {max-width:820px;width:100%}
+}
+@media(max-width: 700px) {
+  .nova-site.moneyland-theme .nova-header {height:66px}
+  .nova-site.moneyland-theme .header-inner {gap:10px}
+  .nova-site.moneyland-theme .header-actions {gap:7px}
+  .nova-site.moneyland-theme .wallet-header-link {padding:9px 11px;min-height:40px;font-size:11px}
+  .nova-site.moneyland-theme .nova-brand {font-size:17px}
+  .nova-site.moneyland-theme .nova-brand > svg {width:27px;height:27px}
+  .nova-site.moneyland-theme .ml-hero-grid {padding-top:49px;padding-bottom:48px}
+  .nova-site.moneyland-theme .ml-hero-chip {font-size:8px;gap:7px}
+  .nova-site.moneyland-theme .ml-chip-divider {display:none}
+  .nova-site.moneyland-theme .ml-hero-overline {margin-top:34px;font-size:9px}
+  .nova-site.moneyland-theme .ml-hero-copy h1 {font-size:clamp(44px,9vw,66px)}
+  .nova-site.moneyland-theme .ml-hero-lead {font-size:15px;line-height:1.75;margin:24px 0 28px}
+  .nova-site.moneyland-theme .ml-hero-actions .nova-button {width:100%;white-space:normal}
+  .nova-site.moneyland-theme .ml-hero-footnotes {padding-top:26px;gap:13px 19px}
+  .nova-site.moneyland-theme .ml-console-body {grid-template-columns:1fr}
+  .nova-site.moneyland-theme .ml-monitor {border-right:0;border-bottom:1px solid #254236}
+  .nova-site.moneyland-theme .ml-monitor-art {height:230px}
+  .nova-site.moneyland-theme .ml-feed-card {min-height:0}
+  .nova-site.moneyland-theme .ml-feed-row {padding:12px 17px}
+  .nova-site.moneyland-theme .ml-operation-band {grid-template-columns:1fr}
+  .nova-site.moneyland-theme .ml-operation-item {padding:18px 22px;border-right:0;border-bottom:1px solid #294537}
+  .nova-site.moneyland-theme .ml-operation-item:last-child {border-bottom:0}
+  .nova-site.moneyland-theme .ml-operation-item > strong {margin-top:8px;font-size:18px}
+  .nova-site.moneyland-theme .ml-hero-meta {font-size:9px}
+}
+@media(max-width: 420px) {
+  .nova-site.moneyland-theme .ml-console-topbar {padding:11px 10px}
+  .nova-site.moneyland-theme .ml-feed-status {font-size:8px;padding:5px}
+  .nova-site.moneyland-theme .ml-console-identity strong {font-size:9px}
+  .nova-site.moneyland-theme .ml-console-identity small {font-size:8px}
+  .nova-site.moneyland-theme .ml-node-label {font-size:7px;padding:4px}
+  .nova-site.moneyland-theme .ml-hero-copy h1 {font-size:42px}
+}
+@media(prefers-reduced-motion: reduce) {
+  .nova-site.moneyland-theme .ml-monitor-orb {animation:none}
+  .nova-site.moneyland-theme .ml-operation-item {transition:none}
+}
