@@ -1,0 +1,30 @@
+name: Moneyland release checks
+
+on:
+  push:
+    branches:
+      - codex/moneyland-tenderly-inspired-20261017
+  workflow_dispatch:
+
+jobs:
+  frontend:
+    name: Dashboard build and deployment syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Dashboard typecheck
+        run: npx tsc --noEmit -p apps/dashboard/tsconfig.json
+      - name: Frontend production build
+        run: npm run build --workspace @nova/dashboard
+      - name: Deployment shell syntax
+        run: bash -n scripts/deploy-moneyland.sh
+      - name: Docker Compose configuration
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml config --quiet
