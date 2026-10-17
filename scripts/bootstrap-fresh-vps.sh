@@ -119,15 +119,6 @@ else
   else
     upsert_env 'CORS_ORIGIN' 'http://localhost:8088'
   fi
-  treasury="${NOVA_TREASURY_WALLET:-}"
-  if [[ -z "$treasury" && -t 0 ]]; then
-    read -r -p 'Operator-controlled Solana treasury PUBLIC address (required): ' treasury
-  fi
-  if [[ ! "$treasury" =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$ ]]; then
-    fail 'A real base58 treasury public address is required. No private key should be entered. Edit .env before retrying.'
-  fi
-  upsert_env 'PLATFORM_TREASURY_WALLET_ADDRESS' "$treasury"
-  unset treasury db_password
   telegram_token="${NOVA_TELEGRAM_BOT_TOKEN:-}"
   gmgn_key="${NOVA_GMGN_API_KEY:-}"
   if [[ -t 0 ]]; then
@@ -144,6 +135,20 @@ else
   if [[ -n "$gmgn_key" ]]; then upsert_env 'GMGN_API_KEY' "$gmgn_key"; fi
   unset telegram_token gmgn_key
 fi
+
+# A retry after a failed/interrupted first setup must resume prompting for the
+# required PUBLIC treasury address without regenerating the encryption key.
+treasury="$(get_env PLATFORM_TREASURY_WALLET_ADDRESS)"
+if [[ -z "$treasury" ]]; then
+  treasury="${NOVA_TREASURY_WALLET:-}"
+  if [[ -z "$treasury" && -t 0 ]]; then
+    read -r -p 'Operator-controlled Solana treasury PUBLIC address (required): ' treasury
+  fi
+  [[ "$treasury" =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$ ]] || fail 'Provide a real Solana PUBLIC address (not a private key) via the prompt or NOVA_TREASURY_WALLET.'
+  upsert_env 'PLATFORM_TREASURY_WALLET_ADDRESS' "$treasury"
+fi
+[[ "$treasury" =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$ ]] || fail 'Invalid Solana treasury public address in .env.'
+unset treasury
 
 [[ -n "$(get_env JWT_SECRET)" && -n "$(get_env ENCRYPTION_KEY)" ]] || fail 'Missing JWT_SECRET / ENCRYPTION_KEY in .env.'
 [[ -n "$(get_env PLATFORM_TREASURY_WALLET_ADDRESS)" ]] || fail 'Missing required PLATFORM_TREASURY_WALLET_ADDRESS in .env.'
