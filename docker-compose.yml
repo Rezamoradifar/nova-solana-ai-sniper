@@ -139,7 +139,7 @@ services:
       dockerfile: apps/dashboard/Dockerfile
     restart: unless-stopped
     ports:
-      - '${GSP_WEB_PORT:-8088}:80'
+      - '${GSP_WEB_BIND_HOST:-0.0.0.0}:${GSP_WEB_PORT:-8088}:80'
     volumes:
       - ./docker/nginx/gsp-port.conf.template:/etc/nginx/templates/default.conf.template:ro
     depends_on:
