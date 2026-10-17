@@ -19,6 +19,7 @@ import {
 import { useWalletConnection } from '../../lib/WalletContext.js';
 import '../../landing.css';
 import '../../workspace.css';
+import '../../moneyland.css';
 
 export function Icon({
   name,
@@ -359,7 +360,14 @@ export function PublicLayout() {
       '/pricing': 'Packages',
       '/copy-trading': 'Solana copy trading',
     };
-    document.title = `GSP TRADING — ${titles[location.pathname] ?? 'Solana trading'}`;
+    document.title = `Moneyland | GSP TRADING — ${titles[location.pathname] ?? 'Solana trading'}`;
+    let canonical = document.head.querySelector('link[rel="canonical"]');
+    if (!canonical) {
+      canonical = document.createElement('link');
+      canonical.setAttribute('rel', 'canonical');
+      document.head.appendChild(canonical);
+    }
+    canonical.setAttribute('href', 'https://moneyland.tr' + location.pathname);
   }, [location.pathname]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -402,7 +410,7 @@ export function PublicLayout() {
   }, []);
   return (
     <MarketProvider>
-      <div className="nova-site">
+      <div className="nova-site moneyland-theme">
         <a href="#main-content" className="skip-link">
           Skip to content
         </a>
@@ -519,7 +527,7 @@ export function PublicLayout() {
               </div>
             </div>
             <div className="footer-bottom">
-              <span>© {new Date().getFullYear()} GSP TRADING. All rights reserved.</span>
+              <span>© {new Date().getFullYear()} GSP TRADING · moneyland.tr. All rights reserved.</span>
               <span>Clarity before execution.</span>
             </div>
             <p className="risk-note">
