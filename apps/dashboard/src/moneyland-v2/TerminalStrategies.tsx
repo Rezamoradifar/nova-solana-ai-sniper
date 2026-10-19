@@ -56,6 +56,7 @@ export function CopyScreen() {
   const [allocation, setAllocation] = useState('0.10');
   const [maxDaily, setMaxDaily] = useState('0.5');
   const [ack, setAck] = useState(false);
+  const [demoPlans, setDemoPlans] = useState<Record<string, { perTradeSol: number; dailySol: number }>>({});
   useEffect(() => {
     const c = new AbortController();
     const load = async () => {
@@ -116,11 +117,14 @@ export function CopyScreen() {
             <td className="ml2-mono">{num(wallet.recommendation.winRatePct, '%')}</td>
             <td>—</td><td>—</td>
             <td><Pill color={wallet.recommendation.eligible ? 'green' : 'red'}>{wallet.recommendation.eligible ? 'Eligible' : 'Caution'}</Pill></td>
-            <td><button className="ml2-table-action" type="button" onClick={() => { setChosen(wallet); setAck(false); }}>{lang === 'fa' ? 'بررسی' : 'Inspect'} ↗</button></td>
+            <td><button className="ml2-table-action" type="button" onClick={() => { setChosen(wallet); setAck(false); }}>{demoPlans[wallet.address] ? (lang === 'fa' ? 'ویرایش دمو' : 'Edit demo') : (lang === 'fa' ? 'بررسی' : 'Inspect')} ↗</button></td>
           </tr>)}</tbody></table></div>}
       <div className="ml2-table-foot"><span>{feed ? 'Updated ' + new Date(feed.updatedAt).toLocaleString() : t('notAvailable')}</span>
         <span>Drawdown and follower counts not returned by API.</span></div>
     </Panel>
+    {Object.keys(demoPlans).length > 0 && <Notice tone="safe" title="Local demo allocations saved">
+      {Object.keys(demoPlans).length} wallet profiles configured for UI demonstration only. No live copy engine is enabled.
+    </Notice>}
     <div className="ml2-lower-grid">
       <Panel title="Leader profile / risk signals">
         <div className="ml2-panel-pad"><div className="ml2-profile-placeholder"><Glyph name="users" size={30}/><strong>{lang === 'fa' ? 'ابتدا یک کیف پول را انتخاب کنید' : 'Select a wallet to inspect'}</strong>
@@ -138,7 +142,8 @@ export function CopyScreen() {
       <form className="ml2-modal-body" onSubmit={(event: FormEvent) => {
         event.preventDefault();
         if (!ack) return;
-        toast(lang === 'fa' ? 'تنظیم نمایشی ثبت شد؛ کپی واقعی فعال نیست.' : 'Demo allocation saved; no live copying enabled.');
+        if (chosen) setDemoPlans((prev) => ({ ...prev, [chosen.address]: { perTradeSol: Number(allocation), dailySol: Number(maxDaily) } }));
+    toast(lang === 'fa' ? 'تنظیم نمایشی ثبت شد؛ کپی واقعی فعال نیست.' : 'Demo allocation saved; no live copying enabled.');
         setChosen(null);
       }}>
         <Notice tone="warn">A copy profile here is a local UI demonstration; no account, strategy or trade is activated.</Notice>
