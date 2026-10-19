@@ -743,3 +743,14 @@
 .ml2-root .ml2-wallet-connected p,.ml2-root .ml2-wallet-not-detected p{font-size:12px;color:#91a0b7;line-height:1.75}
 .ml2-root .ml2-wallet-not-detected strong{font-size:15px}
 .ml2-root .ml2-wallet-pending{padding:12px 14px;border:1px solid #8b5cf64f;border-radius:9px;color:#cabaff;background:#8b5cf60f;font-size:12px}
+
+/* Accessible editable nodes in the flash-loan strategy map. */
+.ml2-root .ml2-strategy-node{text-align:start;color:var(--ml2-text)}
+.ml2-root .ml2-strategy-node:hover{border-color:#00e5ff8a;background:#18263d}
+.ml2-root .ml2-strategy-node.selected{border-color:#00e5ffab;box-shadow:0 0 28px #00e5ff23;background:#17283a}
+.ml2-root .ml2-strategy-editor{display:flex;align-items:center;gap:18px;flex-wrap:wrap;border-top:1px solid var(--ml2-border);padding:16px 24px;background:#101622}
+.ml2-root .ml2-strategy-editor>span{font:600 9px 'JetBrains Mono',monospace;color:#8293b4}
+.ml2-root .ml2-strategy-editor>strong{font-size:13px}
+.ml2-root .ml2-strategy-editor>label{display:flex;align-items:center;gap:9px;margin-inline-start:auto;font-size:11px;color:#98a8bd}
+.ml2-root .ml2-strategy-editor select{background:#171d2a;border:1px solid #566585;border-radius:7px;color:#e5f1ff;padding:8px 12px}
+.ml2-root .ml2-strategy-editor>p{font-size:11px;color:#8699b2;line-height:1.7}
