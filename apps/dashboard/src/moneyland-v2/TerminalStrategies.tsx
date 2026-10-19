@@ -361,6 +361,9 @@ const strategyBlocks = [
 export function FlashScreen() {
   const { lang, t } = useML();
   const [provider, setProvider] = useState<(typeof providers)[number]>('Aave');
+  const [activeStep, setActiveStep] = useState(0);
+  const [venueA, setVenueA] = useState('Raydium');
+  const [venueB, setVenueB] = useState('Orca');
   const [principal, setPrincipal] = useState('10000');
   const [edge, setEdge] = useState('0.4');
   const [fee, setFee] = useState('0.05');
@@ -388,10 +391,26 @@ export function FlashScreen() {
       <Panel title="Visual strategy builder" className="ml2-flash-builder">
         <div className="ml2-strategy-nodes">
           {strategyBlocks.map((node, index) => <div className="ml2-strategy-node-wrap" key={node.label}>
-            <div className="ml2-strategy-node"><span className="ml2-strategy-node-icon"><Glyph name={node.icon} size={21}/></span>
-              <small>{node.label}</small><strong>{node.title}</strong></div>
+            <button type="button" aria-pressed={activeStep === index} onClick={() => setActiveStep(index)}
+              className={'ml2-strategy-node' + (activeStep === index ? ' selected' : '')}>
+              <span className="ml2-strategy-node-icon"><Glyph name={node.icon} size={21}/></span>
+              <small>{node.label}</small>
+              <strong>{index === 1 ? venueA : index === 2 ? venueB : node.title}</strong>
+            </button>
             {index !== strategyBlocks.length - 1 && <div className="ml2-strategy-connector"><Glyph name="arrow" size={19}/></div>}
           </div>)}
+        </div>
+        <div className="ml2-strategy-editor" aria-live="polite">
+          <span>EDIT BLOCK / {strategyBlocks[activeStep]?.label || '01'}</span>
+          <strong>{strategyBlocks[activeStep]?.title || 'Borrow'}</strong>
+          {(activeStep === 1 || activeStep === 2) ? <label>
+            <span>Illustrative venue</span>
+            <select aria-label={'Edit venue for stage ' + activeStep}
+              value={activeStep === 1 ? venueA : venueB}
+              onChange={(e) => activeStep === 1 ? setVenueA(e.target.value) : setVenueB(e.target.value)}>
+              {['Raydium','Orca','Meteora','Jupiter'].map((v) => <option key={v}>{v}</option>)}
+            </select>
+          </label> : <p>{activeStep === 0 ? 'Choose the borrowing provider and assumptions in the form alongside.' : 'Repayment requires the principal plus verified fees inside the same transaction.'}</p>}
         </div>
         <div className="ml2-block-details"><span><Glyph name="lock" size={16}/> ATOMIC TX REQUIRED</span>
           <span><Glyph name="shield" size={16}/> EXECUTION NOT CONNECTED</span>
