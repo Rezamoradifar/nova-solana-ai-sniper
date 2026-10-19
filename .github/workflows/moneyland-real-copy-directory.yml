@@ -26,8 +26,8 @@ jobs:
         run: npx tsc -b apps/api
       - name: Dashboard TypeScript check
         run: npx tsc --noEmit -p apps/dashboard/tsconfig.json
-      - name: Ranking, ingestion and existing copy route regression tests
-        run: npx vitest run apps/api/src/trading/copyLeaderboardFeed.test.ts apps/api/src/trading/copyWalletRanking.test.ts apps/api/src/routes/copyTrades.test.ts apps/api/src/routes/publicCopyTrading.test.ts
+      - name: Ranking, ingestion, identity and existing copy route regression tests
+        run: npx vitest run apps/api/src/trading/copyLeaderboardFeed.test.ts apps/api/src/trading/copyLeaderboardIdentity.test.ts apps/api/src/trading/copyWalletRanking.test.ts apps/api/src/routes/copyTrades.test.ts apps/api/src/routes/publicCopyTrading.test.ts
       - name: Verify trading engine and permissions were not altered
         run: |
           git fetch --no-tags origin 2121d5a26bb5a53326fc45f1c6a346679ed32a73
