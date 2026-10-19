@@ -63,7 +63,7 @@ export function DemoLabel() { const { t } = useExperience(); return <Badge tone=
 export function PageTitle({ title, text, eyebrow, children }: { title: string; text: string; eyebrow?: string; children?: ReactNode }) { return <div className="n-page-title"><div>{eyebrow && <span className="n-eyebrow">{eyebrow}</span>}<h1>{title}</h1><p>{text}</p></div>{children}</div>; }
 export function Modal({ open, close, title, children }: { open: boolean; close: () => void; title: string; children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null); const id = useId(); const { t } = useExperience();
-  useEffect(() => { const d = ref.current; if (!d) return; const trigger = document.activeElement; if (open && !d.open) d.showModal(); else if (!open && d.open) d.close(); return () => { if (d.open) d.close(); if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus(); }; }, [open]);
+  useEffect(() => { const d = ref.current; if (!open || !d) return; const trigger = document.activeElement; if (!d.open) d.showModal(); return () => { if (d.open) d.close(); if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus(); }; }, [open]);
   return <dialog ref={ref} className="n-modal" aria-labelledby={id} onCancel={close} onClick={e => { if (e.target === ref.current) close(); }}><div className="n-modal-inner"><div className="n-modal-head"><h2 id={id}>{title}</h2><button type="button" className="n-icon-button" aria-label={t('Close dialog', 'بستن پنجره')} onClick={close}><Icon name="close" /></button></div>{children}</div></dialog>;
 }
 export function Sparkline({ seed = 1, color = 'cyan', height = 40 }: { seed?: number; color?: string; height?: number }) {
