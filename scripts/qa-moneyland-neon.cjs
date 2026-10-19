@@ -33,7 +33,13 @@ async function test(name, fn) { try { await fn(); report.interactions.push({ nam
         await page.evaluate(()=>Promise.race([document.fonts.ready,new Promise(r=>setTimeout(r,1500))]));
         const sizes=await page.evaluate(()=>({width:window.innerWidth,scroll:document.documentElement.scrollWidth,dir:document.documentElement.dir}));
         const good=sizes.scroll<=sizes.width+1&&sizes.dir===(lang==='fa'?'rtl':'ltr');
-        if(!good)report.failures.push(`${device}/${lang}/${name} layout ${JSON.stringify(sizes)}`);
+        if(!good) {
+          const diagnostics = await page.evaluate(() => [...document.querySelectorAll('body *')].map(el => {
+            const r = el.getBoundingClientRect();
+            return { tag: el.tagName.toLowerCase(), className: typeof el.className === 'string' ? el.className : '', right: Math.round(r.right), left: Math.round(r.left), width: Math.round(r.width), text: (el.textContent || '').trim().slice(0,65) };
+          }).filter(x => x.right > innerWidth + 2 || x.left < -2).sort((a,b) => b.right - a.right).slice(0,30));
+          report.failures.push(`${device}/${lang}/${name} layout ${JSON.stringify(sizes)} offenders=${JSON.stringify(diagnostics)}`);
+        }
         const file=`${device}-${name}-${lang}.png`;
         await page.screenshot({path:path.join(out,'screenshots',file),fullPage:true,animations:'disabled'});
         report.captures.push({file,route,lang,viewport:width,rootScrollWidth:sizes.scroll,passed:good});
