@@ -183,7 +183,7 @@ export default function MoneylandLanding() {
       </div>
       <div className="ml2-product-grid">
         {landingProducts.map((p, i) => {
-          const item = productDetails[p.key];
+          const item = productDetails[p.key] ?? { en: p.hint, fa: p.hint, accent: 'cyan' };
           return <Link to={p.route} key={p.key} className={'ml2-product-card ml2-accent-' + item.accent}>
             <div className="ml2-product-card-head"><span className="ml2-product-icon"><Glyph name={p.icon} size={24}/></span><span className="ml2-mono">0{i + 1} / 08</span></div>
             <div className="ml2-product-card-body"><h3>{t(p.key)}</h3><p>{lang === 'fa' ? item.fa : item.en}</p></div>
