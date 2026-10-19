@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Glyph, Panel, Pill, Skeleton, productLinks, useML, useMLFeed } from './core.js';
+import { Glyph, Panel, Pill, Skeleton, productLinks, useML, useMLFeed, useWalletDialog } from './core.js';
 import { money, pct } from '../lib/publicMarket.js';
 
 const productDetails: Record<string, { en: string; fa: string; accent: string }> = {
@@ -113,6 +113,7 @@ function HeroChart() {
 
 export default function MoneylandLanding() {
   const { lang, t } = useML();
+  const openWallet = useWalletDialog();
   const { tokens, loading, error, updatedAt, refresh } = useMLFeed();
   const [activeSymbol, setActiveSymbol] = useState('SOL');
   const activeToken = tokens.find((token) => token.symbol === activeSymbol) || tokens[0];
@@ -140,7 +141,7 @@ export default function MoneylandLanding() {
               : 'DEX, exchange, copy trading, arbitrage, meme coins, flash loans and automated strategies — built into one beautifully focused command center.'}
           </p>
           <div className="ml2-hero-buttons">
-            <Link to="/wallet" className="ml2-primary-button ml2-button-xl"><Glyph name="wallet" size={19}/>{t('connect')}</Link>
+            <button type="button" onClick={openWallet} className="ml2-primary-button ml2-button-xl"><Glyph name="wallet" size={19}/>{t('connect')}</button>
             <Link to="/terminal" className="ml2-outline-button ml2-button-xl">{t('startTrading')} <Glyph name="arrow" size={18}/></Link>
           </div>
           <div className="ml2-hero-proof"><span><Glyph name="shield" size={16}/>{lang === 'fa' ? 'شفافیت ریسک' : 'Risk-first tools'}</span>
@@ -291,7 +292,7 @@ export default function MoneylandLanding() {
       <div><Pill color="cyan">MONEYLAND / WORKSPACE V2</Pill>
         <h2>{t('readyToExplore')}</h2><p>{t('bridgeText')}</p></div>
       <div className="ml2-last-buttons"><Link to="/terminal" className="ml2-primary-button ml2-button-xl">{t('launch')} <Glyph name="arrow" size={17}/></Link>
-        <Link to="/wallet" className="ml2-outline-button ml2-button-xl"><Glyph name="wallet" size={18}/>{t('connect')}</Link></div>
+        <button type="button" onClick={openWallet} className="ml2-outline-button ml2-button-xl"><Glyph name="wallet" size={18}/>{t('connect')}</button></div>
     </section>
   </>;
 }
