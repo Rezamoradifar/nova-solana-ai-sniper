@@ -1,3 +1,4 @@
+import { lazy, Suspense, type ReactNode } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './lib/AuthContext.js';
 import { WalletConnectionProvider } from './lib/WalletContext.js';
@@ -31,7 +32,26 @@ import { NeonHome } from './neon/Home.js';
 import { NeonTrade, NeonExchange } from './neon/Trade.js';
 import { NeonCopy, NeonTraderProfile, NeonArbitrage, NeonMemes } from './neon/Research.js';
 import { NeonFlashLoans, NeonBots, NeonPortfolio, NeonDesignSystem } from './neon/Automation.js';
+import { MoneylandFrame } from './moneyland-v2/core.js';
 import './neon/refinements.css';
+const MoneylandLanding = lazy(() => import('./moneyland-v2/Landing.js'));
+const OverviewScreen = lazy(() => import('./moneyland-v2/TerminalCorePages.js').then((m) => ({ default: m.OverviewScreen })));
+const DexScreen = lazy(() => import('./moneyland-v2/TerminalCorePages.js').then((m) => ({ default: m.DexScreen })));
+const ExchangeScreen = lazy(() => import('./moneyland-v2/TerminalCorePages.js').then((m) => ({ default: m.ExchangeScreen })));
+const PortfolioScreen = lazy(() => import('./moneyland-v2/TerminalCorePages.js').then((m) => ({ default: m.PortfolioScreen })));
+const CopyScreen = lazy(() => import('./moneyland-v2/TerminalStrategies.js').then((m) => ({ default: m.CopyScreen })));
+const ArbitrageScreen = lazy(() => import('./moneyland-v2/TerminalStrategies.js').then((m) => ({ default: m.ArbitrageScreen })));
+const MemesScreen = lazy(() => import('./moneyland-v2/TerminalStrategies.js').then((m) => ({ default: m.MemesScreen })));
+const FlashScreen = lazy(() => import('./moneyland-v2/TerminalStrategies.js').then((m) => ({ default: m.FlashScreen })));
+const BotsScreen = lazy(() => import('./moneyland-v2/TerminalStrategies.js').then((m) => ({ default: m.BotsScreen })));
+
+function MLAsyncPage({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<div className="ml2-route-loading" role="status" aria-label="Loading workspace view">
+    <div className="ml2-skeleton-set"><span className="ml2-skeleton"/><span className="ml2-skeleton"/><span className="ml2-skeleton"/></div>
+  </div>}>{children}</Suspense>;
+}
+
+
 
 export function App() {
   return (
@@ -51,6 +71,19 @@ export function App() {
               <Route path="/bots" element={<NeonBots />} />
               <Route path="/portfolio" element={<NeonPortfolio />} />
               <Route path="/design-system" element={<NeonDesignSystem />} />
+            </Route>
+            {/* Preserve the existing independently built Moneyland V2 terminal. */}
+            <Route element={<MoneylandFrame />}>
+              <Route path="/v2" element={<MLAsyncPage><MoneylandLanding /></MLAsyncPage>} />
+              <Route path="/terminal" element={<MLAsyncPage><OverviewScreen /></MLAsyncPage>} />
+              <Route path="/terminal/dex" element={<MLAsyncPage><DexScreen /></MLAsyncPage>} />
+              <Route path="/terminal/exchange" element={<MLAsyncPage><ExchangeScreen /></MLAsyncPage>} />
+              <Route path="/terminal/copy" element={<MLAsyncPage><CopyScreen /></MLAsyncPage>} />
+              <Route path="/terminal/arbitrage" element={<MLAsyncPage><ArbitrageScreen /></MLAsyncPage>} />
+              <Route path="/terminal/memes" element={<MLAsyncPage><MemesScreen /></MLAsyncPage>} />
+              <Route path="/terminal/flash" element={<MLAsyncPage><FlashScreen /></MLAsyncPage>} />
+              <Route path="/terminal/bots" element={<MLAsyncPage><BotsScreen /></MLAsyncPage>} />
+              <Route path="/terminal/portfolio" element={<MLAsyncPage><PortfolioScreen /></MLAsyncPage>} />
             </Route>
             {/* Existing connected tools and all account workflows remain unchanged. */}
             <Route element={<PublicLayout />}>
