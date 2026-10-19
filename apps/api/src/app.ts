@@ -1,3 +1,4 @@
+import realCopyDirectory from './routes/realCopyDirectory.js';
 import Fastify, { type FastifyError } from 'fastify';
 import { ZodError } from 'zod';
 import cors from '@fastify/cors';
@@ -65,6 +66,7 @@ export async function buildApp() {
   await app.register(metricsRoutes);
   await app.register(publicArbitrageRoutes);
   await app.register(publicCopyTradingRoutes);
+  await app.register(realCopyDirectory);
   await app.register(publicNetworkRoutes);
   await app.register(gmgnToolsRoutes);
   await app.register(executionRoutes);
