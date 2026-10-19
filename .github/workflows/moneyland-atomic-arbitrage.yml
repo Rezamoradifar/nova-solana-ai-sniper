@@ -18,6 +18,8 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      - name: Secret-safe simulation setup tests (offline)
+        run: python3 -m unittest discover -s scripts/atomic-arbitrage -p 'test_*.py' -v
       - name: Install existing locked dependencies without project hooks
         run: HUSKY=0 npm ci --ignore-scripts --no-audit --no-fund
       - name: Syntax and offline default
