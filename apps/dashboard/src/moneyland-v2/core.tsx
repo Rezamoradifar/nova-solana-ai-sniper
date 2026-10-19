@@ -99,10 +99,12 @@ const LocaleContext = createContext<{
   t: (key: string) => string;
 }>({ lang: 'en', setLang: () => {}, t: (key) => key });
 const ToastContext = createContext<(message: string) => void>(() => {});
+const WalletDialogContext = createContext<() => void>(() => {});
 
 export function useML() { return useContext(LocaleContext); }
 export function useMLFeed() { return useContext(FeedContext); }
 export function useMLToast() { return useContext(ToastContext); }
+export function useWalletDialog() { return useContext(WalletDialogContext); }
 
 export function Glyph({ name, size = 20, className = '' }: { name: IconName; size?: number; className?: string }) {
   const paths: Record<IconName, ReactNode> = {
@@ -247,6 +249,8 @@ function ContextProviders({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [walletOpen, setWalletOpen] = useState(false);
+  const { state: walletState, connect, disconnect, refresh: refreshWallets } = useWalletConnection();
   const inFlight = useRef<AbortController | null>(null);
   const t = useCallback((key: string) => dictionary[lang][key] || dictionary.en[key] || key, [lang]);
   const setLang = (next: Language) => {
@@ -296,7 +300,46 @@ function ContextProviders({ children }: { children: ReactNode }) {
   return <LocaleContext.Provider value={{ lang, setLang, t }}>
     <FeedContext.Provider value={{ tokens, loading, error, updatedAt, refresh }}>
       <ToastContext.Provider value={setToast}>
-        {children}
+        <WalletDialogContext.Provider value={() => setWalletOpen(true)}>
+          {children}
+          <Modal title={t('connect')} open={walletOpen} onClose={() => setWalletOpen(false)}>
+            <div className="ml2-modal-body ml2-wallet-chooser">
+              {walletState.account ? <>
+                <Pill color="green"><Glyph name="check" size={14}/>{t('connected')}</Pill>
+                <div className="ml2-wallet-connected"><Glyph name="wallet" size={28}/>
+                  <strong dir="ltr">{walletState.account.address.slice(0, 8)}…{walletState.account.address.slice(-8)}</strong>
+                  <p>{lang === 'fa' ? 'اتصال فقط آدرس عمومی کیف پول را به سایت می‌دهد.' : 'Your wallet approved access to its public address. Keys remain in the wallet.'}</p>
+                </div>
+                <button className="ml2-outline-button ml2-full-width" type="button" onClick={() => void disconnect()}>
+                  {lang === 'fa' ? 'قطع اتصال' : 'Disconnect wallet'}</button>
+                <Link to="/terminal/portfolio" className="ml2-primary-button ml2-full-width" onClick={() => setWalletOpen(false)}>
+                  {t('portfolio')} <Glyph name="arrow" size={16}/>
+                </Link>
+              </> : <>
+                <Notice title={lang === 'fa' ? 'اتصال ایمن' : 'Secure wallet connection'} tone="info">
+                  {lang === 'fa' ? 'تنها کیف پول‌های موجود در مرورگر نمایش داده می‌شوند. هیچ کلید خصوصی یا امضای تراکنش دریافت نمی‌شود.' : 'Only wallets detected in this browser are shown. Connecting does not authorize payments or share private keys.'}
+                </Notice>
+                {walletState.available.length ? <div className="ml2-wallet-option-list">
+                  {walletState.available.map((wallet, index) => <button key={wallet.name + index} type="button"
+                    disabled={walletState.status === 'connecting' || walletState.status === 'disconnecting'}
+                    className="ml2-wallet-option" onClick={() => void connect(wallet)}>
+                    <img src={wallet.icon} width="36" height="36" alt=""/><span><strong>{wallet.name}</strong><small>{lang === 'fa' ? 'در این مرورگر شناسایی شده' : 'Detected in this browser'}</small></span>
+                    <Glyph name="arrow" size={17}/>
+                  </button>)}
+                </div> : <div className="ml2-wallet-not-detected"><Glyph name="wallet" size={31}/>
+                  <strong>{lang === 'fa' ? 'کیف پول سازگار پیدا نشد' : 'No supported wallet detected'}</strong>
+                  <p>{lang === 'fa' ? 'مرورگر داخل اپلیکیشن Phantom یا Solflare را باز کنید، یا افزونه کیف‌پول نصب کنید.' : 'Open the site inside Phantom/Solflare in-app browser, or install a supported browser wallet.'}</p>
+                  <button className="ml2-outline-button" type="button" onClick={() => refreshWallets()}><Glyph name="refresh" size={16}/>{t('refresh')}</button>
+                </div>}
+                {walletState.status === 'connecting' && <p className="ml2-wallet-pending" role="status">{lang === 'fa' ? 'در انتظار تأیید داخل کیف پول…' : 'Waiting for approval in your wallet…'}</p>}
+                {walletState.error && <Notice tone="warn">{walletState.error}</Notice>}
+                <Link to="/wallet" onClick={() => setWalletOpen(false)} className="ml2-text-link">
+                  {lang === 'fa' ? 'راهنمای اتصال موبایل' : 'Mobile wallet connection guide'} <Glyph name="arrow" size={16}/>
+                </Link>
+              </>}
+            </div>
+          </Modal>
+        </WalletDialogContext.Provider>
         {toast && <div className="ml2-toast" role="status"><Glyph name="check" size={17} />{toast}</div>}
       </ToastContext.Provider>
     </FeedContext.Provider>
@@ -306,6 +349,7 @@ function ContextProviders({ children }: { children: ReactNode }) {
 function MLNavigation() {
   const { t, lang, setLang } = useML();
   const { state } = useWalletConnection();
+  const openWallet = useWalletDialog();
   const [menu, setMenu] = useState(false);
   const [mega, setMega] = useState(false);
   const location = useLocation();
@@ -347,10 +391,10 @@ function MLNavigation() {
           aria-label={lang === 'en' ? 'Switch to Persian' : 'Switch to English'}>
           <Glyph name="globe" size={16}/><span>{lang === 'en' ? 'FA' : 'EN'}</span>
         </button>
-        <Link to="/wallet" className="ml2-outline-button ml2-wallet-top">
+        <button type="button" onClick={openWallet} className="ml2-outline-button ml2-wallet-top">
           <Glyph name="wallet" size={17} />
           {state.account ? state.account.address.slice(0, 5) + '…' : t('connect')}
-        </Link>
+        </button>
         <Link to="/terminal" className="ml2-primary-button ml2-launch">{t('launch')} <Glyph name="arrow" size={16} /></Link>
         <button className="ml2-icon-button ml2-mobile-toggle" aria-label={menu ? 'Close menu' : 'Open menu'}
           aria-expanded={menu} aria-controls="ml2-mobile-nav" onClick={() => setMenu(!menu)}>
