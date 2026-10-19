@@ -8,7 +8,7 @@ describe('Moneyland input guards', () => {
 describe('Flash and arbitrage arithmetic', () => {
   it('deducts explicit gas and basis-point fees', () => { expect(routeEstimate(10000,.5,8,5)).toBeCloseTo(37); });
   it('does not clamp a negative estimate into a profit', () => { expect(routeEstimate(100,.1,10,5)).toBeCloseTo(-9.95); });
-  it('recalculates at a different notional', () => { expect(routeEstimate(20000,.5,8,5)).toBeCloseTo(87); });
+  it('scales both the gross spread and the provider fee with notional', () => { expect(routeEstimate(20000,.5,8,5)).toBeCloseTo(82); });
 });
 describe('Design model invariants', () => {
   it('all fixture mints are visibly synthetic', () => { expect(DEMO_MARKETS.every(m=>m.mint.startsWith('demo-'))).toBe(true); });

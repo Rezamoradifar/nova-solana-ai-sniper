@@ -39,13 +39,7 @@ jobs:
         run: node scripts/qa-moneyland-neon.cjs
       - name: Package source and built frontend without secrets or fonts
         if: always()
-        run: |
-          mkdir -p moneyland-deliverables
-          git archive --format=zip --output=moneyland-deliverables/moneyland-neon-source.zip HEAD
-          if [ -d apps/dashboard/dist ]; then
-            (cd apps/dashboard/dist && zip -qr ../../../moneyland-deliverables/moneyland-neon-built-ui.zip .)
-          fi
-          if [ -f docs/MONEYLAND_NEON_HANDOFF.md ]; then cp docs/MONEYLAND_NEON_HANDOFF.md moneyland-deliverables/; fi
+        run: python3 scripts/package-moneyland-neon.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
