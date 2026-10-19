@@ -188,6 +188,8 @@ export function Modal({ children, title, open, onClose }: {
   children: ReactNode; title: string; open: boolean; onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLElement | null>(null);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -199,7 +201,7 @@ export function Modal({ children, title, open, onClose }: {
     const handleKeys = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        closeRef.current();
       } else if (event.key === 'Tab') {
         const focusable = getFocusable();
         if (!focusable.length) return;
@@ -219,7 +221,7 @@ export function Modal({ children, title, open, onClose }: {
       window.removeEventListener('keydown', handleKeys);
       previous?.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return <div className="ml2-modal-backdrop" onMouseDown={(event) => {
     if (event.target === event.currentTarget) onClose();
