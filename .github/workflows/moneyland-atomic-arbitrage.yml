@@ -1,0 +1,35 @@
+name: Moneyland atomic arbitrage verification
+on:
+  push:
+    branches: [codex/moneyland-atomic-arbitrage-20261019]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: moneyland-atomic-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  guarded-executor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Secret-safe simulation setup tests (offline)
+        run: python3 -m unittest discover -s scripts/atomic-arbitrage -p 'test_*.py' -v
+      - name: Install existing locked dependencies without project hooks
+        run: HUSKY=0 npm ci --ignore-scripts --no-audit --no-fund
+      - name: Syntax and offline default
+        run: |
+          bash -n scripts/install-moneyland-arbitrage.sh
+          node --check scripts/atomic-arbitrage/engine.mjs
+          node scripts/atomic-arbitrage/engine.mjs status
+      - name: Validation, persistence, real SDK compilation and mocked transmission tests
+        run: node --test scripts/atomic-arbitrage/*.test.mjs
+      - name: Build isolated image
+        run: docker build --build-arg RELEASE_SHA=${{ github.sha }} -f scripts/atomic-arbitrage/Dockerfile -t moneyland-arbitrage-ci .
+      - name: Container is off and sends nothing by default
+        run: docker run --rm --network none --read-only moneyland-arbitrage-ci status
