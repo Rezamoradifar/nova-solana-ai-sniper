@@ -221,7 +221,7 @@ function ContextProviders({ children }: { children: ReactNode }) {
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const inFlight = useRef<AbortController | null>(null);
-  const t = (key: string) => dictionary[lang][key] || dictionary.en[key] || key;
+  const t = useCallback((key: string) => dictionary[lang][key] || dictionary.en[key] || key, [lang]);
   const setLang = (next: Language) => {
     setLangState(next);
     try { window.localStorage.setItem('moneyland-language', next); } catch { /* storage optional */ }
