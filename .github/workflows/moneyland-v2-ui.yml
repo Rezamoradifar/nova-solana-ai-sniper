@@ -1,0 +1,35 @@
+name: Moneyland V2 UI validation
+on:
+  push:
+    branches:
+      - codex/moneyland-v2-multi-product-ui-20261019
+  pull_request:
+    branches:
+      - codex/nova-fresh-vps-recovery-20261017
+  workflow_dispatch:
+
+jobs:
+  moneyland-web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install workspace dependencies
+        run: npm ci
+      - name: Dashboard typecheck
+        run: npx tsc --noEmit -p apps/dashboard/tsconfig.json
+      - name: Production dashboard build
+        run: npm run build --workspace @nova/dashboard
+      - name: Frontend unit tests
+        run: npm run test --workspace @nova/dashboard
+      - name: Docker Compose syntax
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml config --quiet
+      - name: Release script syntax
+        run: bash -n scripts/deploy-moneyland.sh
