@@ -4,6 +4,7 @@ import { Glyph, Modal, Panel, Pill, Skeleton, productLinks, useML, useMLFeed, us
 import { EmptyState, FormField, LinkedTool, ModeTag, Notice, Sparkline, Stat, ToolHeading } from './WorkspaceCommon.js';
 import { TradingViewWidget } from '../components/TradingViewWidget.js';
 import { PUBLIC_API_BASE, money, pct } from '../lib/publicMarket.js';
+import { indicativeSwapOutput } from './math.js';
 import { useWalletConnection } from '../lib/WalletContext.js';
 
 const CHAINS = ['Solana', 'Ethereum', 'BNB Chain', 'Arbitrum', 'Base'] as const;
@@ -77,7 +78,7 @@ export function DexScreen() {
   const tokenPrice = (symbol: string) => symbol === 'USDC' ? 1 : tokens.find((token) => token.symbol === symbol)?.price;
   const fromPx = tokenPrice(inputToken);
   const toPx = tokenPrice(outputToken);
-  const estimate = connected && fromPx && toPx && inputToken !== outputToken ? finite(amount) * fromPx / toPx : null;
+  const estimate = connected && inputToken !== outputToken ? indicativeSwapOutput(finite(amount), fromPx, toPx) : null;
   return <>
     <ToolHeading eyebrow="TRADE / DEX" title={t('dex')}
       description={lang === 'fa' ? 'پیش‌نمایش سواپ چندشبکه‌ای با مشاهده داده بازار؛ اجرای معاملات واقعی اینجا فعال نیست.' : 'Multi-chain swap research with live Solana reference prices. An executable route requires a separate verified quote and wallet approval.'}
