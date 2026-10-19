@@ -1,0 +1,16 @@
+/* Browser-verified refinements. Keep these scoped to the redesigned interface. */
+/* A positioned scroll viewport contains absolute screen-reader-only table labels.
+   Without it, the Action header escapes mobile clipping and enlarges the page. */
+.neon .n-table-scroll {
+  position: relative;
+}
+
+/* Shared icon-button display must not expose the mobile menu on desktop. */
+.neon .n-header-actions .n-mobile-menu {
+  display: none;
+}
+@media (max-width: 960px) {
+  .neon .n-header-actions .n-mobile-menu {
+    display: inline-flex;
+  }
+}

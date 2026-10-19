@@ -31,6 +31,7 @@ import { NeonHome } from './neon/Home.js';
 import { NeonTrade, NeonExchange } from './neon/Trade.js';
 import { NeonCopy, NeonTraderProfile, NeonArbitrage, NeonMemes } from './neon/Research.js';
 import { NeonFlashLoans, NeonBots, NeonPortfolio, NeonDesignSystem } from './neon/Automation.js';
+import './neon/refinements.css';
 
 export function App() {
   return (
