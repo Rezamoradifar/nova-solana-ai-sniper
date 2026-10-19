@@ -1,0 +1,133 @@
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type ButtonHTMLAttributes } from 'react';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useWalletConnection } from '../lib/WalletContext.js';
+import { fetchMarkets, BOT_URL, type MarketToken } from '../lib/publicMarket.js';
+import { DEMO_MARKETS, PRODUCTS, type Language, dollars, percent } from './model.js';
+import './neon.css';
+
+type T = (en: string, fa: string) => string;
+interface Experience {
+  lang: Language; t: T; setLang: (l: Language) => void; demo: boolean; setDemo: (v: boolean) => void;
+  tokens: MarketToken[]; loading: boolean; error: string | null; updated: number | null;
+  refresh: () => void; notify: (s: string) => void; openWallet: () => void;
+}
+const Context = createContext<Experience | null>(null);
+export function useExperience() { const v = useContext(Context); if (!v) throw new Error('Moneyland provider is required'); return v; }
+export function Icon({ name = 'arrow', size = 20 }: { name?: string; size?: number }) {
+  const paths: Record<string, ReactNode> = {
+    arrow: <path d="m7 17 10-10M7 7h10v10" />, right: <path d="M4 12h16m-6-6 6 6-6 6" />,
+    chevron: <path d="m7 10 5 5 5-5" />, close: <path d="m6 6 12 12M6 18 18 6" />,
+    menu: <path d="M4 6h16M4 12h16M4 18h16" />, swap: <path d="M4 7h16l-4-4M20 17H4l4 4M20 7l-4 4M4 17l4-4" />,
+    chart: <><path d="M4 3v18h17M7 14l4-5 4 3 6-8" /><path d="M16 4h5v5" /></>,
+    copy: <><rect x="8" y="8" width="12" height="12" rx="3" /><path d="M15 8V4H4v11h4" /></>,
+    arbitrage: <><path d="M3 8h16l-4-4M21 16H5l4 4" /><circle cx="5" cy="16" r="2" /><circle cx="19" cy="8" r="2" /></>,
+    spark: <path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z" />,
+    bolt: <path d="m13 2-9 12h7l-1 8 10-13h-7l0-7Z" />,
+    bot: <><rect x="4" y="7" width="16" height="13" rx="4" /><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8M1 12h3m16 0h3" /></>,
+    wallet: <><path d="M20 8V4H5a2 2 0 0 0 0 4h16v12H5a2 2 0 0 1-2-2V6" /><path d="M21 12h-6v5h6m-3-2.5h.01" /></>,
+    shield: <><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z" /><path d="m8 12 3 3 5-6" /></>,
+    globe: <><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><path d="M3 12h18" /></>,
+    check: <path d="m5 12 4 4L19 6" />, search: <><circle cx="10" cy="10" r="6" /><path d="m15 15 5 5" /></>,
+    settings: <><path d="M4 7h5m4 0h7M4 17h9m4 0h3" /><circle cx="11" cy="7" r="2" /><circle cx="15" cy="17" r="2" /></>,
+    grid: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
+    layers: <><path d="m12 3 10 5-10 5L2 8l10-5ZM2 12l10 5 10-5M2 16l10 5 10-5" /></>,
+    target: <><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="3" /><path d="M12 1v4m0 14v4M1 12h4m14 0h4" /></>,
+    pause: <path d="M8 5v14M16 5v14" />, play: <path d="m8 4 12 8-12 8V4Z" />,
+    alert: <><path d="m12 3 10 18H2L12 3Z" /><path d="M12 9v5m0 3h.01" /></>,
+    refresh: <><path d="M20 8a8 8 0 1 0 .5 7M20 3v5h-5" /></>,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6l4 2" /></>,
+    home: <><path d="m3 10 9-7 9 7v11h-7v-7h-4v7H3V10Z" /></>,
+    plus: <path d="M12 4v16M4 12h16" />, eye: <><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></>,
+    telegram: <path d="m21 3-4 18-6-5-4 4v-7L21 3 3 10l4 3m4 3 6-8" />,
+  };
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name] ?? paths.arrow}</svg>;
+}
+export function Logo() { return <span className="n-logo"><span className="n-logo-mark"><svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M6 30V10l14 14 14-14v20" stroke="currentColor" strokeWidth="4.5" strokeLinejoin="round" /><path d="m20 24 14-14v20" stroke="#8B5CF6" strokeWidth="4.5" strokeLinejoin="round" /></svg></span><span>moneyland<span className="n-logo-dot">.</span><small>POWERED BY GSP TRADING</small></span></span>; }
+export function NLink({ to, children, className = '', ...rest }: { to: string; children: ReactNode; className?: string; 'aria-label'?: string }) {
+  const { demo } = useExperience(); const dest = to + (demo ? (to.includes('?') ? '&demo=1' : '?demo=1') : '');
+  return <Link to={dest} className={className} {...rest}>{children}</Link>;
+}
+export function Button({ children, variant = 'primary', className = '', ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'ghost' | 'danger' }) {
+  return <button type="button" className={`n-btn n-btn-${variant} ${className}`} {...rest}>{children}</button>;
+}
+export function Badge({ children, tone = '' }: { children: ReactNode; tone?: string }) { return <span className={`n-badge ${tone}`}>{children}</span>; }
+export function Panel({ children, className = '', title, action }: { children: ReactNode; className?: string; title?: ReactNode; action?: ReactNode }) { return <section className={`n-panel ${className}`}>{title && <div className="n-panel-head"><h2>{title}</h2>{action}</div>}{children}</section>; }
+const TAB_FA: Record<string,string> = { 'Order book':'دفتر سفارش','Recent trades':'معاملات اخیر','Spot':'نقدی','Futures':'آتی','Buy':'خرید','Sell':'فروش','Limit':'محدود','Market':'بازار','Stop':'توقف','Open orders':'سفارش‌های باز','Positions':'پوزیشن‌ها','Trade history':'تاریخچه معاملات','Trending':'پرطرفدار','New launches':'عرضه‌های جدید','All strategies':'همه استراتژی‌ها','Beginner':'مقدماتی','Advanced':'پیشرفته','Default':'پیش‌فرض','Selected':'انتخاب‌شده','History':'تاریخچه' };
+export function Tabs({ values, value, onChange, label }: { values: string[]; value: string; onChange: (v: string) => void; label: string }) { const { t }=useExperience(); return <div className="n-tabs" role="group" aria-label={label}>{values.map(v => <button type="button" key={v} aria-pressed={value === v} className={value === v ? 'active' : ''} onClick={() => onChange(v)}>{t(v,TAB_FA[v]??v)}</button>)}</div>; }
+export function Toggle({ checked, onChange, children, disabled = false }: { checked: boolean; onChange: (v: boolean) => void; children: ReactNode; disabled?: boolean }) { return <button type="button" className="n-switch-label" role="switch" aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)}><span className={`n-switch ${checked ? 'on' : ''}`}><i /></span>{children}</button>; }
+export function Token({ symbol, color }: { symbol: string; color?: string }) { return <span aria-hidden="true" className="n-token" style={{ '--coin': color ?? '#8B5CF6' } as CSSProperties}>{symbol === 'SOL' ? '≋' : symbol === 'ETH' ? '♦' : symbol === 'BTC' ? '₿' : symbol.charAt(0)}</span>; }
+export function Change({ value }: { value: number | null | undefined }) { return <span dir="ltr" className={`n-number ${value != null && value < 0 ? 'n-negative' : value == null ? '' : 'n-positive'}`}>{percent(value)}</span>; }
+export function Empty({ title, text, children }: { title: string; text: string; children?: ReactNode }) { return <div className="n-empty"><span className="n-empty-icon"><Icon name="layers" size={30} /></span><h3>{title}</h3><p>{text}</p>{children}</div>; }
+export function Risk({ children }: { children: ReactNode }) { return <div className="n-risk"><Icon name="alert" size={19} /><p>{children}</p></div>; }
+export function DemoLabel() { const { t } = useExperience(); return <Badge tone="amber">{t('SAMPLE DATA', 'داده نمونه')}</Badge>; }
+export function PageTitle({ title, text, eyebrow, children }: { title: string; text: string; eyebrow?: string; children?: ReactNode }) { return <div className="n-page-title"><div>{eyebrow && <span className="n-eyebrow">{eyebrow}</span>}<h1>{title}</h1><p>{text}</p></div>{children}</div>; }
+export function Modal({ open, close, title, children }: { open: boolean; close: () => void; title: string; children: ReactNode }) {
+  const ref = useRef<HTMLDialogElement>(null); const id = useId(); const { t } = useExperience();
+  useEffect(() => { const d = ref.current; if (!open || !d) return; const trigger = document.activeElement; if (!d.open) d.showModal(); return () => { if (d.open) d.close(); if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus(); }; }, [open]);
+  return <dialog ref={ref} className="n-modal" aria-labelledby={id}
+    onCancel={e => { e.preventDefault(); close(); }}
+    onKeyDown={e => {
+      if (e.key !== 'Tab') return;
+      const items = [...e.currentTarget.querySelectorAll<HTMLElement>('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(node => node.getClientRects().length > 0);
+      if (!items.length) { e.preventDefault(); return; }
+      const first = items[0]!, last = items[items.length - 1]!;
+      if (e.shiftKey && (document.activeElement === first || !e.currentTarget.contains(document.activeElement))) {
+        e.preventDefault(); last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || !e.currentTarget.contains(document.activeElement))) {
+        e.preventDefault(); first.focus();
+      }
+    }}
+    onClick={e => { if (e.target === ref.current) close(); }}><div className="n-modal-inner"><div className="n-modal-head"><h2 id={id}>{title}</h2><button type="button" className="n-icon-button" aria-label={t('Close dialog', 'بستن پنجره')} onClick={close}><Icon name="close" /></button></div>{children}</div></dialog>;
+}
+export function Sparkline({ seed = 1, color = 'cyan', height = 40 }: { seed?: number; color?: string; height?: number }) {
+  const points = Array.from({ length: 27 }, (_, i) => `${i * 6},${30 - i * .65 + Math.sin(i * 1.1 + seed) * 6 + Math.cos(i * 2 + seed) * 3}`).join(' ');
+  return <svg className={`n-sparkline ${color}`} width="162" height={height} viewBox="0 0 162 42" fill="none" aria-hidden="true"><polyline points={points} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" /></svg>;
+}
+export function CandleChart({ compact = false, period = '1H' }: { compact?: boolean; period?: string }) {
+  const id = useId().replace(/:/g, ''); const { t } = useExperience(); const seed = period.length * 3 + period.charCodeAt(0);
+  const candles = Array.from({ length: 47 }, (_, i) => { const y = 204 - i * 2.8 + Math.sin(i * .48 + seed) * 29 + Math.cos(i * 1.13) * 8; const up = Math.sin(i * 2.13) > -.24; return { x: i * 12 + 18, y, up, body: 7 + (i * 7 % 19), volume: 10 + i * 11 % 39 }; });
+  return <div className={`n-candle-chart ${compact ? 'compact' : ''}`}><span className="n-chart-disclosure">{t('ILLUSTRATIVE CANDLES · NOT MARKET HISTORY', 'کندل نمایشی · تاریخچه واقعی بازار نیست')}</span><svg viewBox="0 0 650 320" role="img" aria-label={t('Illustrative candlestick chart. Not real historical prices.', 'نمودار کندل نمایشی؛ قیمت‌های تاریخی واقعی نیستند.')} preserveAspectRatio="none"><defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#00E5FF" stopOpacity=".1" /><stop offset="1" stopColor="#00E5FF" stopOpacity="0" /></linearGradient></defs>{[50,100,150,200,250].map(y => <g key={y}><line x1="10" x2="598" y1={y} y2={y} stroke="#ffffff0b" /><text x="605" y={y + 4} fill="#94a0b7" fontSize="10" fontFamily="monospace">{(154-y*.047).toFixed(2)}</text></g>)}{[80,200,320,440,560].map(x => <line key={x} x1={x} x2={x} y1="20" y2="290" stroke="#ffffff08" />)}<path d="M10 230Q70 218 140 210T260 180T400 137T565 102V295H10Z" fill={`url(#${id})`} /><path d="M10 230Q70 218 140 210T260 180T400 137T565 102" stroke="#8B5CF6" opacity=".65" fill="none" strokeWidth="1.3" />{candles.map(c => <g key={c.x} fill={c.up ? '#22C55E' : '#EF4444'} stroke={c.up ? '#22C55E' : '#EF4444'}><line x1={c.x+3.5} x2={c.x+3.5} y1={c.y-8} y2={c.y+c.body+8} /><rect x={c.x} y={c.y} width="7" height={c.body} rx=".7" stroke="none" /><rect x={c.x} y={292-c.volume} width="7" height={c.volume} opacity=".2" stroke="none" /></g>)}<line x1="10" x2="600" y1="94" y2="94" stroke="#00E5FF" strokeDasharray="4 5" opacity=".6" /><rect x="601" y="84" width="48" height="19" fill="#00E5FF" rx="2" /><text x="604" y="97" fill="#051316" fontSize="10" fontFamily="monospace">148.32</text>{['04:00','08:00','12:00','16:00','20:00'].map((v,i) => <text key={v} x={20+i*127} y="312" fill="#94a0b7" fontSize="10" fontFamily="monospace">{v}</text>)}</svg></div>;
+}
+function WalletDialog({ open, close }: { open: boolean; close: () => void }) {
+  const { t } = useExperience(); const w = useWalletConnection();
+  return <Modal open={open} close={close} title={t('Connect your wallet', 'اتصال کیف پول')}><p className="n-muted n-modal-copy">{t('Connect an installed Solana wallet. Only your approved public address is requested; this does not sign transactions.', 'کیف پول نصب‌شده سولانا را متصل کن. فقط آدرس عمومی تأییدشده خوانده می‌شود؛ تراکنشی امضا نمی‌شود.')}</p>{w.state.account ? <><Badge tone="green">{t('CONNECTED', 'متصل')}</Badge><p className="n-address" dir="ltr">{w.state.account.address}</p><Button variant="secondary" onClick={() => void w.disconnect()}>{t('Disconnect', 'قطع اتصال')}</Button></> : w.state.available.length ? w.state.available.map(wallet => <button type="button" className="n-wallet-option" key={wallet.name} onClick={() => void w.connect(wallet)} disabled={w.state.status !== 'disconnected'}><img src={wallet.icon} alt="" width="32" height="32" /><span>{wallet.name}</span><Icon /></button>) : <Empty title={t('No wallet detected', 'کیف پول شناسایی نشد')} text={t('Open this site inside your Solana wallet browser, or enable a compatible browser extension.', 'سایت را در مرورگر کیف پول سولانا باز کن یا افزونه سازگار مرورگر را فعال کن.')}><Button variant="secondary" onClick={w.refresh}><Icon name="refresh" />{t('Check again', 'بررسی دوباره')}</Button></Empty>}{w.state.status === 'connecting' && <p role="status">{t('Approve the connection in your wallet.', 'اتصال را در کیف پول تأیید کن.')}</p>}{w.state.error && <Risk>{w.state.error}</Risk>}<div className="n-safe-line"><Icon name="shield" />{t('Never share your seed phrase or private key.', 'هرگز عبارت بازیابی یا کلید خصوصی را به اشتراک نگذار.')}</div></Modal>;
+}
+function Shell() {
+  const { t, lang, setLang, demo, setDemo, openWallet } = useExperience(); const location = useLocation(); const [menu, setMenu] = useState(false); const trigger = useRef<HTMLButtonElement>(null); const wallet = useWalletConnection(); const isHome = location.pathname === '/';
+  useEffect(() => { setMenu(false); window.scrollTo(0, 0); }, [location.pathname]);
+  useEffect(() => { const f = (e: KeyboardEvent) => { if (e.key === 'Escape' && menu) { setMenu(false); trigger.current?.focus(); } }; document.addEventListener('keydown', f); return () => document.removeEventListener('keydown', f); }, [menu]);
+  return <><a className="n-skip" href="#neon-main">{t('Skip to content', 'رفتن به محتوا')}</a><header className="n-header"><div className="n-container n-header-inner"><NLink to="/" aria-label={t('Moneyland home', 'صفحه اصلی مانی‌لند')}><Logo /></NLink><nav className="n-desktop-nav" aria-label={t('Main navigation', 'منوی اصلی')}><NLink to="/trade">{t('Trade', 'معامله')}</NLink><button type="button" ref={trigger} aria-expanded={menu} aria-controls="n-products-menu" onClick={() => setMenu(!menu)}>{t('Products', 'محصولات')}<Icon name="chevron" size={14} /></button><NLink to="/copy">{t('Copy Trading', 'کپی ترید')}</NLink><NLink to="/bots">{t('Bots', 'ربات‌ها')}<span className="n-mini-tag">{t('NEW', 'جدید')}</span></NLink></nav><div className="n-header-actions"><button type="button" className="n-language" onClick={() => setLang(lang === 'en' ? 'fa' : 'en')} aria-label={lang === 'en' ? 'تغییر زبان به فارسی' : 'Switch language to English'}><Icon name="globe" size={17} /><span>{lang === 'en' ? 'FA' : 'EN'}</span></button><button type="button" className="n-btn n-btn-primary n-header-wallet" onClick={openWallet} aria-label={t('Connect or manage wallet','اتصال یا مدیریت کیف پول')}><Icon name="wallet" size={17} /><span>{wallet.state.account ? wallet.state.account.address.slice(0,4)+'…'+wallet.state.account.address.slice(-4) : t('Connect Wallet', 'اتصال کیف پول')}</span></button><button type="button" className="n-icon-button n-mobile-menu" onClick={() => setMenu(!menu)} aria-expanded={menu} aria-controls="n-products-menu" aria-label={t('Toggle navigation', 'باز و بسته کردن منو')}><Icon name={menu ? 'close' : 'menu'} /></button></div></div>{menu && <nav id="n-products-menu" className="n-mega" aria-label={t('Products', 'محصولات')}><div className="n-container n-mega-grid">{PRODUCTS.map(p => <NLink key={p.id} to={p.path}><span className="n-product-icon"><Icon name={p.icon} /></span><span><strong>{t(p.en,p.fa)}</strong><small>{t(p.sub,p.subFa)}</small></span><Icon size={15} /></NLink>)}</div></nav>}</header><div className={`n-mode-strip ${demo ? 'demo' : ''}`}><div className="n-container"><span><i />{demo ? t('DESIGN PREVIEW — sample data. No real orders or funds.', 'پیش‌نمایش طراحی — داده نمونه؛ بدون سفارش یا دارایی واقعی.') : t('Research workspace. Execution availability is shown per product.', 'محیط پژوهش؛ وضعیت اجرای واقعی در هر محصول مشخص است.')}</span><button type="button" onClick={() => setDemo(!demo)}>{demo ? t('Exit preview', 'خروج از پیش‌نمایش') : t('Explore demo', 'مشاهده دمو')}<Icon name="arrow" size={13} /></button></div></div>{!isHome && <nav className="n-workspace-nav n-container" aria-label={t('Workspace navigation', 'منوی محیط کار')}>{PRODUCTS.map(p => <NLink to={p.path} key={p.id} className={location.pathname === p.path ? 'active' : ''}><Icon name={p.icon} size={17} />{t(p.en,p.fa)}</NLink>)}</nav>}<main id="neon-main" className={isHome ? '' : 'n-container n-app-main'}><Outlet /></main><Footer compact={!isHome} /><nav className="n-bottom-nav" aria-label={t('Mobile navigation', 'منوی موبایل')}>{[['/','home','Home','خانه'],['/trade','swap','Trade','معامله'],['/copy','copy','Copy','کپی'],['/portfolio','wallet','Portfolio','دارایی']].map(([path,icon,en,fa]) => <NLink key={path} to={path!} className={location.pathname === path ? 'active' : ''}><Icon name={icon!} size={20} /><span>{t(en!,fa!)}</span></NLink>)}</nav></>;
+}
+function Footer({ compact }: { compact: boolean }) {
+  const { t } = useExperience();
+  return <footer className={`n-footer ${compact ? 'compact' : ''}`}><div className="n-container">{!compact && <div className="n-footer-grid"><div><Logo /><p>{t('One connected workspace.\nA world of opportunity.', 'یک محیط یکپارچه.\nدنیایی از فرصت‌ها.')}</p><a href={BOT_URL} target="_blank" rel="noreferrer" className="n-social"><Icon name="telegram" /> Telegram <Icon size={13} /></a><span className="n-community-note">{t('X & Discord links: not configured', 'لینک‌های X و Discord هنوز تنظیم نشده‌اند')}</span></div><div><h3>{t('Trade', 'معامله')}</h3>{PRODUCTS.slice(0,4).map(p => <NLink key={p.id} to={p.path}>{t(p.en,p.fa)}</NLink>)}</div><div><h3>{t('Explore', 'کاوش')}</h3>{PRODUCTS.slice(4).map(p => <NLink key={p.id} to={p.path}>{t(p.en,p.fa)}</NLink>)}</div><div><h3>{t('Resources', 'منابع')}</h3><NLink to="/security">{t('Risk & security', 'ریسک و امنیت')}</NLink><NLink to="/dashboard">{t('Account dashboard', 'پنل حساب')}</NLink><NLink to="/design-system">{t('Design system', 'سیستم طراحی')}</NLink><NLink to="/tools">{t('Connected GSP tools', 'ابزارهای متصل GSP')}</NLink></div></div>}<div className="n-footer-bottom"><span>© {new Date().getFullYear()} Moneyland · GSP TRADING</span><span>{t('Clarity before execution.', 'شفافیت پیش از اجرا.')}</span></div><p className="n-disclaimer">{t('Digital assets are high risk. You may lose your capital. Past performance, sample data and estimates do not predict returns. Wallet connection is address-only; paper orders and strategy models do not submit transactions. No audit or partner endorsement is claimed.', 'دارایی‌های دیجیتال پرریسک‌اند و ممکن است سرمایه خود را از دست بدهید. عملکرد گذشته، داده نمونه و برآوردها بازده آینده را پیش‌بینی نمی‌کنند. اتصال کیف پول فقط آدرس عمومی را می‌خواند؛ سفارش آزمایشی و مدل استراتژی تراکنش ارسال نمی‌کنند. ادعای ممیزی یا تأیید شرکا ارائه نمی‌شود.')}</p></div></footer>;
+}
+export function NeonLayout() {
+  const location = useLocation(); const navigate = useNavigate();
+  const [lang, setLanguage] = useState<Language>(() => { try { return localStorage.getItem('moneyland-language') === 'fa' ? 'fa' : 'en'; } catch { return 'en'; } });
+  const demo = new URLSearchParams(location.search).get('demo') === '1'; const [tokens, setTokens] = useState<MarketToken[]>([]); const [loading, setLoading] = useState(false); const [error, setError] = useState<string | null>(null); const [updated, setUpdated] = useState<number | null>(null); const [tick,setTick] = useState(0); const [toast,setToast] = useState(''); const [walletOpen,setWalletOpen] = useState(false);
+  const t: T = (en,fa) => lang === 'fa' ? fa : en;
+  const refresh = useCallback(() => setTick(v => v+1), []);
+  useEffect(() => { document.documentElement.lang = lang; document.documentElement.dir = lang === 'fa' ? 'rtl' : 'ltr'; try { localStorage.setItem('moneyland-language', lang); } catch { /* Private browsing may deny storage. */ } return () => { document.documentElement.dir = 'ltr'; }; }, [lang]);
+  useEffect(() => {
+    const product = PRODUCTS.find(p => p.path === location.pathname);
+    document.title = (product ? (lang === 'fa' ? product.fa : product.en) + ' | ' : '') + 'Moneyland · GSP TRADING';
+    let canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]');
+    if (!canonical) { canonical=document.createElement('link'); canonical.rel='canonical'; document.head.appendChild(canonical); }
+    canonical.href='https://moneyland.tr'+location.pathname;
+  }, [location.pathname, lang]);
+  useEffect(() => {
+    if (demo) { setTokens([]); setLoading(false); setError(null); setUpdated(null); return; }
+    let alive = true; let controller: AbortController | undefined; let inFlight = false;
+    const load = async () => { if (document.hidden || inFlight) return; inFlight = true; controller = new AbortController(); setLoading(true); try { const data = await fetchMarkets(controller.signal); if (alive) { setTokens(data); setUpdated(Date.now()); setError(data.length ? null : 'No market observations returned.'); } } catch (e) { if (alive && !controller.signal.aborted) { setTokens([]); setError(e instanceof Error ? e.message : 'Market feed unavailable.'); } } finally { inFlight = false; if (alive) setLoading(false); } };
+    void load(); const timer = window.setInterval(() => void load(), 15000); const visible = () => { if (!document.hidden) void load(); }; document.addEventListener('visibilitychange', visible);
+    return () => { alive = false; controller?.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', visible); };
+  }, [demo,tick]);
+  useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 6000); return () => clearTimeout(timer); }, [toast]);
+  const setDemo = (v: boolean) => { const p = new URLSearchParams(location.search); if(v) p.set('demo','1'); else p.delete('demo'); navigate({ pathname: location.pathname, search: p.toString() }); };
+  return <Context.Provider value={{ lang,t,setLang:setLanguage,demo,setDemo,tokens: demo ? DEMO_MARKETS : tokens,loading,error,updated,refresh,notify:setToast,openWallet:() => setWalletOpen(true) }}><div className="neon" dir={lang === 'fa' ? 'rtl' : 'ltr'}><Shell /><WalletDialog open={walletOpen} close={() => setWalletOpen(false)} /><div className="n-toast-region" role="status" aria-live="polite" aria-atomic="true">{toast && <div className="n-toast"><Icon name="check" />{toast}<button type="button" aria-label={t('Dismiss notification','بستن اعلان')} onClick={() => setToast('')}><Icon name="close" size={16} /></button></div>}</div></div></Context.Provider>;
+}
+export function MarketTable({ limit = 6 }: { limit?: number }) {
+  const { tokens, loading, error, t, demo, refresh } = useExperience();
+  return <div className="n-market-table"><div className="n-table-scroll"><table><thead><tr><th>{t('Asset','دارایی')}</th><th>{t('Price','قیمت')}</th><th>{t('24h change','تغییر ۲۴ساعته')}</th><th>{t('Observed liquidity','نقدینگی مشاهده‌شده')}</th><th>{t('Sample trend','روند نمونه')}</th><th><span className="sr-only">{t('Action','عملیات')}</span></th></tr></thead><tbody>{tokens.slice(0,limit).map((token,i) => <tr key={token.mint}><td><NLink to="/trade" className="n-asset"><Token symbol={token.symbol} color={token.color} /><span><strong>{token.symbol}</strong><small>{token.name}</small></span></NLink></td><td dir="ltr" className="n-number">{dollars(token.price)}</td><td><Change value={token.change} /></td><td className="n-number" dir="ltr">{dollars(token.liquidity,true)}</td><td>{demo ? <Sparkline seed={i+1} color={token.change != null && token.change < 0 ? 'red' : 'green'} /> : <span className="n-muted">—</span>}</td><td><NLink to="/trade" className="n-small-action">{t('Explore','بررسی')}<Icon size={13} /></NLink></td></tr>)}</tbody></table></div>{!tokens.length && (loading ? <div aria-label={t('Loading market data','دریافت داده بازار')} aria-busy="true" className="n-skeleton-stack">{[1,2,3].map(i => <div className="n-skeleton" key={i} />)}</div> : <Empty title={t('Waiting for market data','در انتظار داده بازار')} text={error ? t('The market source is unavailable. No sample prices have been substituted.','منبع بازار در دسترس نیست. قیمت نمونه جایگزین نشده است.') : t('No observations available.','داده‌ای موجود نیست.')}><Button variant="secondary" onClick={refresh}><Icon name="refresh" />{t('Retry','تلاش دوباره')}</Button></Empty>)}</div>;
+}

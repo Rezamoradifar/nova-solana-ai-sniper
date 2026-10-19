@@ -27,7 +27,13 @@ import PublicTelegram from './pages/PublicTelegram.js';
 import PublicWallet from './pages/PublicWallet.js';
 import { Admin } from './pages/Admin.js';
 import { TradingLab } from './pages/TradingLab.js';
+import { NeonLayout } from './neon/ui.js';
+import { NeonHome } from './neon/Home.js';
+import { NeonTrade, NeonExchange } from './neon/Trade.js';
+import { NeonCopy, NeonTraderProfile, NeonArbitrage, NeonMemes } from './neon/Research.js';
+import { NeonFlashLoans, NeonBots, NeonPortfolio, NeonDesignSystem } from './neon/Automation.js';
 import { MoneylandFrame } from './moneyland-v2/core.js';
+import './neon/refinements.css';
 const MoneylandLanding = lazy(() => import('./moneyland-v2/Landing.js'));
 const OverviewScreen = lazy(() => import('./moneyland-v2/TerminalCorePages.js').then((m) => ({ default: m.OverviewScreen })));
 const DexScreen = lazy(() => import('./moneyland-v2/TerminalCorePages.js').then((m) => ({ default: m.DexScreen })));
@@ -46,14 +52,29 @@ function MLAsyncPage({ children }: { children: ReactNode }) {
 }
 
 
+
 export function App() {
   return (
     <AuthProvider>
       <WalletConnectionProvider>
         <BrowserRouter>
           <Routes>
+            <Route element={<NeonLayout />}>
+              <Route path="/" element={<NeonHome />} />
+              <Route path="/trade" element={<NeonTrade />} />
+              <Route path="/exchange" element={<NeonExchange />} />
+              <Route path="/copy" element={<NeonCopy />} />
+              <Route path="/copy/:traderId" element={<NeonTraderProfile />} />
+              <Route path="/opportunities" element={<NeonArbitrage />} />
+              <Route path="/meme-hub" element={<NeonMemes />} />
+              <Route path="/flash-loans" element={<NeonFlashLoans />} />
+              <Route path="/bots" element={<NeonBots />} />
+              <Route path="/portfolio" element={<NeonPortfolio />} />
+              <Route path="/design-system" element={<NeonDesignSystem />} />
+            </Route>
+            {/* Preserve the existing independently built Moneyland V2 terminal. */}
             <Route element={<MoneylandFrame />}>
-              <Route path="/" element={<MLAsyncPage><MoneylandLanding /></MLAsyncPage>} />
+              <Route path="/v2" element={<MLAsyncPage><MoneylandLanding /></MLAsyncPage>} />
               <Route path="/terminal" element={<MLAsyncPage><OverviewScreen /></MLAsyncPage>} />
               <Route path="/terminal/dex" element={<MLAsyncPage><DexScreen /></MLAsyncPage>} />
               <Route path="/terminal/exchange" element={<MLAsyncPage><ExchangeScreen /></MLAsyncPage>} />
@@ -64,7 +85,9 @@ export function App() {
               <Route path="/terminal/bots" element={<MLAsyncPage><BotsScreen /></MLAsyncPage>} />
               <Route path="/terminal/portfolio" element={<MLAsyncPage><PortfolioScreen /></MLAsyncPage>} />
             </Route>
+            {/* Existing connected tools and all account workflows remain unchanged. */}
             <Route element={<PublicLayout />}>
+              <Route path="/classic" element={<Landing />} />
               <Route path="/arbitrage" element={<PublicArbitrage />} />
               <Route path="/flash-arbitrage" element={<PublicFlashArbitrage />} />
               <Route path="/copy-trading" element={<PublicCopyTrading />} />
@@ -80,14 +103,7 @@ export function App() {
               <Route path="*" element={<Landing />} />
             </Route>
             <Route path="/login" element={<Login />} />
-            <Route
-              path="/dashboard"
-              element={
-                <ProtectedRoute>
-                  <Layout />
-                </ProtectedRoute>
-              }
-            >
+            <Route path="/dashboard" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
               <Route index element={<Overview />} />
               <Route path="tokens" element={<Tokens />} />
               <Route path="positions" element={<Positions />} />
