@@ -35,3 +35,21 @@
 @keyframes n-skeleton{0%{background-position:100% 0}100%{background-position:-100% 0}}
 @media(prefers-reduced-motion:reduce){.neon *,.neon *:before,.neon *:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 @media(forced-colors:active){.neon .n-btn,.neon .n-panel,.neon .n-product-card,.neon .n-badge{border:1px solid CanvasText}.neon .n-gradient-text,.neon .n-hero h1>span{background:none;-webkit-text-fill-color:CanvasText}.neon .n-switch{border:1px solid CanvasText}}
+
+
+/* Moneyland responsive quote summary: show the three useful columns on phones.
+   Asset labels remain links, so hiding secondary columns never removes navigation. */
+@media (max-width: 700px) {
+  .neon .n-market-table .n-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; }
+  .neon .n-market-table th:nth-child(n+4),
+  .neon .n-market-table td:nth-child(n+4) { display: none; }
+  .neon .n-market-table table { width: 100%; min-width: 0; table-layout: auto; }
+  .neon .n-market-table th,
+  .neon .n-market-table td { padding: 14px 9px; }
+  .neon .n-market-table th:first-child,
+  .neon .n-market-table td:first-child { padding-inline-start: 12px; }
+  .neon .n-market-table td .n-number { font-size: 10px; }
+  .neon .n-market-table .n-asset { gap: 6px; }
+  .neon .n-market-table .n-asset strong { font-size: 10px; }
+  .neon .n-market-table .n-asset small { font-size: 8px; }
+}
