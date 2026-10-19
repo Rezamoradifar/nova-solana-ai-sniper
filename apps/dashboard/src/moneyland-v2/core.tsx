@@ -187,19 +187,44 @@ export function Skeleton({ lines = 3 }: { lines?: number }) {
 export function Modal({ children, title, open, onClose }: {
   children: ReactNode; title: string; open: boolean; onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const getFocusable = () =>
+      Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ) || []);
+    getFocusable()[0]?.focus();
+    const handleKeys = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      } else if (event.key === 'Tab') {
+        const focusable = getFocusable();
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
     };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+    window.addEventListener('keydown', handleKeys);
+    return () => {
+      window.removeEventListener('keydown', handleKeys);
+      previous?.focus();
+    };
   }, [open, onClose]);
   if (!open) return null;
   return <div className="ml2-modal-backdrop" onMouseDown={(event) => {
     if (event.target === event.currentTarget) onClose();
   }}>
-    <section className="ml2-modal" role="dialog" aria-modal="true" aria-label={title}>
+    <section className="ml2-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1}>
       <div className="ml2-modal-heading"><h2>{title}</h2>
         <button type="button" className="ml2-icon-button" aria-label="Close" onClick={onClose}>
           <Glyph name="close" />
