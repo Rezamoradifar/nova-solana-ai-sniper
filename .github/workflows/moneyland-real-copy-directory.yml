@@ -1,0 +1,48 @@
+name: Moneyland real-data directory verification
+on:
+  push:
+    branches: [codex/moneyland-live-copy-real-data-20261019]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: real-copy-directory-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  read-only-directory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: HUSKY=0 npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate types without migrating any database
+        run: npm run prisma:generate
+      - name: API TypeScript build
+        run: npx tsc -b apps/api
+      - name: Dashboard TypeScript check
+        run: npx tsc --noEmit -p apps/dashboard/tsconfig.json
+      - name: Ranking, ingestion, identity and existing copy route regression tests
+        run: npx vitest run apps/api/src/trading/copyLeaderboardFeed.test.ts apps/api/src/trading/copyLeaderboardIdentity.test.ts apps/api/src/trading/copyWalletRanking.test.ts apps/api/src/routes/copyTrades.test.ts apps/api/src/routes/publicCopyTrading.test.ts
+      - name: Verify trading engine and permissions were not altered
+        run: |
+          git fetch --no-tags origin 2121d5a26bb5a53326fc45f1c6a346679ed32a73
+          git diff --exit-code 2121d5a26bb5a53326fc45f1c6a346679ed32a73 HEAD -- apps/api/src/routes/copyTrades.ts apps/api/src/trading/copyTrading.ts apps/api/src/trading/copyTradeWatcher.ts apps/api/src/worker.ts apps/api/src/trading/positionManager.ts packages/shared/src/env.ts .env.example docker-compose.yml
+      - name: Build public frontend
+        run: npm run build --workspace @nova/dashboard
+      - name: Install isolated browser tests
+        run: |
+          npm install --prefix /tmp/moneyland-real-browser --no-audit --no-fund playwright@1.56.1
+          node /tmp/moneyland-real-browser/node_modules/playwright/cli.js install --with-deps chromium
+      - name: Test real response rendering, no financial writes and removed demo paths
+        run: node scripts/qa-real-copy-directory.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-copy-directory-verification
+          path: real-copy-verification/
+          retention-days: 14
