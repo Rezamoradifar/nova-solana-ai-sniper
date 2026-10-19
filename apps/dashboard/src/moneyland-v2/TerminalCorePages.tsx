@@ -82,7 +82,7 @@ export function DexScreen() {
   return <>
     <ToolHeading eyebrow="TRADE / DEX" title={t('dex')}
       description={lang === 'fa' ? 'پیش‌نمایش سواپ چندشبکه‌ای با مشاهده داده بازار؛ اجرای معاملات واقعی اینجا فعال نیست.' : 'Multi-chain swap research with live Solana reference prices. An executable route requires a separate verified quote and wallet approval.'}
-      badge={<ModeTag mode={chain === 'Solana' ? 'connected' : 'preview'}/>} action={<LinkedTool to="/arbitrage"/>}/>
+      badge={<ModeTag mode={chain !== 'Solana' ? 'preview' : error ? 'offline' : tokens.length ? 'connected' : 'preview'}/>} action={<LinkedTool to="/arbitrage"/>}/>
     <div className="ml2-chain-strip">
       <span>{lang === 'fa' ? 'انتخاب شبکه' : 'SELECT NETWORK'}</span>
       {CHAINS.map((name) => <button className={chain === name ? 'selected' : ''} key={name} type="button" onClick={() => setChain(name)}>
