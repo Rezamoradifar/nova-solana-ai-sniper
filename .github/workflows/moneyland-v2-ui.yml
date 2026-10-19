@@ -23,6 +23,8 @@ jobs:
         run: npm ci
       - name: Dashboard typecheck
         run: npx tsc --noEmit -p apps/dashboard/tsconfig.json
+      - name: Moneyland UI lint
+        run: npx eslint apps/dashboard/src/moneyland-v2
       - name: Production dashboard build
         run: npm run build --workspace @nova/dashboard
       - name: Frontend unit tests
