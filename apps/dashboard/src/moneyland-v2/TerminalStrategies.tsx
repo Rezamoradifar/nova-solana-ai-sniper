@@ -4,6 +4,7 @@ import { Glyph, Modal, Panel, Pill, Skeleton, useML, useMLToast } from './core.j
 import { EmptyState, FormField, LinkedTool, ModeTag, Notice, Stat, ToolHeading } from './WorkspaceCommon.js';
 import { ARB_TOKENS, scanLiveRoutes, isRouteFresh, type LiveRoute, type ScanProgress } from '../lib/liveArbitrage.js';
 import { PUBLIC_API_BASE, money, pct } from '../lib/publicMarket.js';
+import { evaluateFlashCosts } from './math.js';
 
 interface CopyCandidate {
   address: string;
@@ -362,12 +363,15 @@ export function FlashScreen() {
   const [slippage, setSlippage] = useState('0.15');
   const [simulation, setSimulation] = useState(false);
   const n = Number(principal), e = Number(edge), f = Number(fee), g = Number(gas), s = Number(slippage);
-  const valid = [n,e,f,g,s].every((v) => Number.isFinite(v) && v >= 0) && n > 0 && n <= 1_000_000
-    && e <= 30 && f <= 10 && s <= 10;
-  const spreadValue = valid ? n * e / 100 : 0;
-  const feeValue = valid ? n * f / 100 : 0;
-  const slipValue = valid ? n * s / 100 : 0;
-  const net = valid ? spreadValue - feeValue - g - slipValue : 0;
+  const modeled = evaluateFlashCosts({
+    principal: n, edgePercent: e, loanFeePercent: f,
+    gasAllowanceUsd: g, slippagePercent: s,
+  });
+  const valid = modeled !== null;
+  const spreadValue = modeled?.grossUsd ?? 0;
+  const feeValue = modeled?.loanFeeUsd ?? 0;
+  const slipValue = modeled?.slippageAllowanceUsd ?? 0;
+  const net = modeled?.netUsd ?? 0;
   return <>
     <ToolHeading eyebrow="STRATEGY / FLASH LOANS" title={t('flash')}
       description={lang === 'fa' ? 'سازنده استراتژی بصری با محاسبه کارمزدهای فرضی، هزینه شبکه و اسلیپیج؛ هیچ وام واقعی گرفته نمی‌شود.' : 'Model an atomic borrow → route → repay flow and test assumptions before any smart-contract integration.'}
