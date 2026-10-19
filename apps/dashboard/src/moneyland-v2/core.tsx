@@ -316,9 +316,10 @@ function ContextProviders({ children }: { children: ReactNode }) {
                   {t('portfolio')} <Glyph name="arrow" size={16}/>
                 </Link>
               </> : <>
-                <Notice title={lang === 'fa' ? 'اتصال ایمن' : 'Secure wallet connection'} tone="info">
-                  {lang === 'fa' ? 'تنها کیف پول‌های موجود در مرورگر نمایش داده می‌شوند. هیچ کلید خصوصی یا امضای تراکنش دریافت نمی‌شود.' : 'Only wallets detected in this browser are shown. Connecting does not authorize payments or share private keys.'}
-                </Notice>
+                <div className="ml2-notice ml2-notice-info" role="note">
+                  <Glyph name="shield" size={19}/><div><strong>{lang === 'fa' ? 'اتصال ایمن' : 'Secure wallet connection'}</strong>
+                    <p>{lang === 'fa' ? 'تنها کیف پول‌های موجود در مرورگر نمایش داده می‌شوند. هیچ کلید خصوصی یا امضای تراکنش دریافت نمی‌شود.' : 'Only wallets detected in this browser are shown. Connecting does not authorize payments or share private keys.'}</p></div>
+                </div>
                 {walletState.available.length ? <div className="ml2-wallet-option-list">
                   {walletState.available.map((wallet, index) => <button key={wallet.name + index} type="button"
                     disabled={walletState.status === 'connecting' || walletState.status === 'disconnecting'}
@@ -332,7 +333,7 @@ function ContextProviders({ children }: { children: ReactNode }) {
                   <button className="ml2-outline-button" type="button" onClick={() => refreshWallets()}><Glyph name="refresh" size={16}/>{t('refresh')}</button>
                 </div>}
                 {walletState.status === 'connecting' && <p className="ml2-wallet-pending" role="status">{lang === 'fa' ? 'در انتظار تأیید داخل کیف پول…' : 'Waiting for approval in your wallet…'}</p>}
-                {walletState.error && <Notice tone="warn">{walletState.error}</Notice>}
+                {walletState.error && <div className="ml2-notice ml2-notice-warn" role="alert"><Glyph name="warning" size={19}/><p>{walletState.error}</p></div>}
                 <Link to="/wallet" onClick={() => setWalletOpen(false)} className="ml2-text-link">
                   {lang === 'fa' ? 'راهنمای اتصال موبایل' : 'Mobile wallet connection guide'} <Glyph name="arrow" size={16}/>
                 </Link>
@@ -407,7 +408,7 @@ function MLNavigation() {
       {productLinks.map((p) => <Link to={p.route} key={p.route}>
         <Glyph name={p.icon} size={17} />{t(p.key)}
       </Link>)}
-      <Link to="/wallet"><Glyph name="wallet" size={17}/>{t('connectAction')}</Link>
+      <button type="button" onClick={() => { setMenu(false); openWallet(); }}><Glyph name="wallet" size={17}/>{t('connectAction')}</button>
     </nav>}
   </header>;
 }
