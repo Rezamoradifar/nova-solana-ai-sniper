@@ -42,6 +42,16 @@ export function providerWallet(raw: unknown, allowed: Map<string, number>, now: 
     distinctTokens: tokens, lastActivityAt: allowed.get(r.wallet_address)!, qualifiedSample: qualified,
     riskAssessment: 'not_available', drawdownPct: null, followers: null };
 }
+/** Stats may omit the echoed address. Bind only a SINGLE requested wallet to a
+ * SINGLE response object, never guess batch-array order or infer another identity. */
+export function bindSingleWalletStats(value: unknown, requested: string): Record<string, unknown> {
+  const row = Array.isArray(value) && value.length === 1 ? value[0] : value;
+  if (!walletAddress(requested) || !row || typeof row !== 'object' || Array.isArray(row)) throw new Error('SOURCE_SCHEMA');
+  const record = row as Record<string, unknown>;
+  if (!['realized_profit', 'total_cost', 'winrate', 'sell_count', 'buy_count'].some(k => Object.hasOwn(record, k))) throw new Error('SOURCE_SCHEMA');
+  if (Object.hasOwn(record, 'wallet_address') && record.wallet_address !== requested) throw new Error('SOURCE_IDENTITY');
+  return { ...record, wallet_address: requested };
+}
 export function rankProviderWallets(rows: ProviderWallet[]) {
   return [...rows].sort((a,b) => Number(b.qualifiedSample) - Number(a.qualifiedSample) ||
     (b.score ?? -1) - (a.score ?? -1) || a.address.localeCompare(b.address))
@@ -82,7 +92,7 @@ export function createCopyLeaderboard(prisma: PrismaClient, apiKey: () => string
         const seen = new Set<string>();
         for (const t of activity) {
           const timestamp = (t.timestamp ?? 0) * 1000;
-          if (!walletAddress(t.maker) || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(t.transactionHash) ||
+          if (!Number.isFinite(timestamp) || !walletAddress(t.maker) || !/^[1-9A-HJ-NP-Za-km-z]{64,88}$/.test(t.transactionHash) ||
               seen.has(t.transactionHash + ':' + t.maker) || timestamp > clock() || clock() - timestamp > 72 * 3_600_000) continue;
           seen.add(t.transactionHash + ':' + t.maker);
           candidates.set(t.maker, Math.max(timestamp, candidates.get(t.maker) ?? 0));
@@ -91,16 +101,18 @@ export function createCopyLeaderboard(prisma: PrismaClient, apiKey: () => string
         for (const w of internal) candidates.delete(w.publicKey);
         const selected = new Map([...candidates].sort((a,b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, MAX_CANDIDATES));
         if (!selected.size) { if (!stopped) { provider = []; providerAt = clock(); providerStatus = 'empty'; } return; }
-        // Fixed read-only CLI, bounded batch, no shell, no private key or trade command.
-        await new Promise(r => setTimeout(r, 2100));
-        if (stopped) return;
-        const response = await run(['portfolio','stats','--chain','sol','--period','30d', ...[...selected.keys()].flatMap(a => ['--wallet', a]), '--raw'], key);
-        const rawRows = Array.isArray(response) ? response : [response];
-        if (rawRows.length > 100) throw new Error('SOURCE_SCHEMA');
-        const unique = new Map<string, ProviderWallet>();
-        for (const raw of rawRows) { const w = providerWallet(raw, selected, clock()); if (w) unique.set(w.address, w); }
-        if (!unique.size) throw new Error('SOURCE_SCHEMA');
-        if (!stopped) { provider = rankProviderWallets([...unique.values()]); providerAt = clock(); providerStatus = 'ready'; }
+        const rows: ProviderWallet[] = [];
+        for (const address of selected.keys()) {
+          // Bounded read-only CLI requests. Individual requests avoid assigning
+          // statistics to the wrong wallet when a provider omits batch identities.
+          await new Promise(r => setTimeout(r, 2100));
+          if (stopped) return;
+          const response = await run(['portfolio','stats','--chain','sol','--period','30d','--wallet',address,'--raw'], key);
+          const row = providerWallet(bindSingleWalletStats(response, address), selected, clock());
+          if (!row) throw new Error('SOURCE_SCHEMA');
+          rows.push(row);
+        }
+        if (!stopped) { provider = rankProviderWallets(rows); providerAt = clock(); providerStatus = 'ready'; }
       } catch { if (!stopped) { provider = []; providerStatus = 'unavailable'; } }
     })().finally(() => { providerFlight = undefined; });
     return providerFlight;
@@ -119,7 +131,7 @@ export function createCopyLeaderboard(prisma: PrismaClient, apiKey: () => string
           wallets: freshLocal && localStatus === 'ready' ? local.map((w,i) => ({ ...w, rank: i+1 })) : [] },
         gmgn: { status: freshProvider ? providerStatus : providerStatus === 'ready' ? 'stale' : providerStatus,
           updatedAt: providerAt, wallets: freshProvider && providerStatus === 'ready' ? provider : [],
-          scoreMethod: '40% win rate + 30% realized return/buy-cost + 20% sell sample + 10% token diversity; not risk or guaranteed returns',
+          scoreMethod: '40% win rate + 30% realized return/buy-cost + 20% sell sample + up to 10% reported token diversity; unknown diversity earns no bonus. Not risk or guaranteed returns.',
           nextRefreshAt: apiKey()?.trim() ? Math.max(clock(), providerAttempt + 5 * MINUTE) : null },
       };
     },
