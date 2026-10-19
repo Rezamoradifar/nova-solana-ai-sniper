@@ -291,29 +291,54 @@ export async function buildCycle(c, deps) {
       guardedEndingWsolLamports: String(minimumEnding), feeLamports: fee, computeUnits: units,
       bytes: tx.serialize().length, simulationIsNotProfitGuarantee: true } };
 }
-async function reconcile(c, deps, journal) {
-  const state = journal.get(); must(state.owner === c.owner && state.network === MAINNET_GENESIS, 'JOURNAL_IDENTITY');
-  const pending = state.attempts.filter(a => a.status === 'pending');
-  for (const a of pending) {
+/** Require complete indexed receipts, never treat absent balances as zero profit. */
+export function settledRecord(receipt, attempt, owner, sourceAddress, middleAddress) {
+  const meta = receipt?.meta;
+  must(meta && receipt.transaction?.signatures?.[0] === attempt.signature, 'RECEIPT_SIGNATURE');
+  must(Number.isSafeInteger(meta.fee) && meta.fee >= 0, 'RECEIPT_FEE');
+  must(Object.hasOwn(meta, 'err'), 'RECEIPT_OUTCOME_MISSING');
+  const record = { ...attempt, status: meta.err === null ? 'finalized' : 'failed', actualFeeLamports: meta.fee };
+  if (meta.err !== null) return record;
+  const index = receipt.transaction.message.getAccountKeys({
+    accountKeysFromLookups: meta.loadedAddresses ?? { writable: [], readonly: [] },
+  });
+  must(Number.isSafeInteger(index.length) && index.length > 0 && index.get(0)?.toBase58() === owner, 'RECEIPT_OWNER_MISSING');
+  const addresses = Array.from({ length: index.length }, (_, i) => index.get(i)?.toBase58());
+  const sourceIndex = addresses.indexOf(sourceAddress), middleIndex = addresses.indexOf(middleAddress);
+  must(sourceIndex > 0 && middleIndex > 0 && sourceIndex !== middleIndex, 'RECEIPT_ACCOUNTS_MISSING');
+  must(Array.isArray(meta.preBalances) && Array.isArray(meta.postBalances) &&
+    meta.preBalances.length === index.length && meta.postBalances.length === index.length &&
+    [meta.preBalances[0], meta.postBalances[0]].every(n => Number.isSafeInteger(n) && n >= 0), 'RECEIPT_SOL_BALANCES');
+  const read = (balances, accountIndex, mint, decimals) => {
+    must(Array.isArray(balances), 'RECEIPT_TOKEN_BALANCES_MISSING');
+    const rows = balances.filter(b => b.accountIndex === accountIndex);
+    must(rows.length === 1 && rows[0].mint === mint && rows[0].uiTokenAmount?.decimals === decimals &&
+      (rows[0].owner === undefined || rows[0].owner === owner) &&
+      (rows[0].programId === undefined || rows[0].programId === TOKEN), 'RECEIPT_TOKEN_BALANCE_INVALID');
+    return raw(rows[0].uiTokenAmount.amount, 'RECEIPT_BALANCE', true);
+  };
+  const wsolDelta = read(meta.postTokenBalances, sourceIndex, WSOL, 9) - read(meta.preTokenBalances, sourceIndex, WSOL, 9);
+  const usdcDelta = read(meta.postTokenBalances, middleIndex, USDC, 6) - read(meta.preTokenBalances, middleIndex, USDC, 6);
+  const solDelta = BigInt(meta.postBalances[0]) - BigInt(meta.preBalances[0]);
+  record.realizedNetLamports = String(wsolDelta + solDelta);
+  record.residualUsdcRaw = String(usdcDelta); // No price assumption for residual USDC.
+  return record;
+}
+export async function reconcile(c, deps, journal) {
+  const current = journal.get();
+  must(current.owner === c.owner && current.network === MAINNET_GENESIS && Array.isArray(current.attempts), 'JOURNAL_IDENTITY');
+  const source = deps.k.getAssociatedTokenAddressSync(new deps.k.PublicKey(WSOL), deps.owner).toBase58();
+  const middle = deps.k.getAssociatedTokenAddressSync(new deps.k.PublicKey(USDC), deps.owner).toBase58();
+  for (let i = 0; i < current.attempts.length; i++) {
+    const a = journal.get().attempts[i];
+    if (a.status !== 'pending') continue;
     const receipt = await deps.rpc.getTransaction(a.signature, { commitment: 'finalized', maxSupportedTransactionVersion: 0 });
-    if (!receipt?.meta) continue; // Never infer failure or create a new signature after a timeout.
-    const meta = receipt.meta;
-    a.status = meta.err ? 'failed' : 'finalized'; a.actualFeeLamports = meta.fee;
-    if (!meta.err) {
-      const index = receipt.transaction.message.getAccountKeys({ accountKeysFromLookups: meta.loadedAddresses });
-      const delta = (mint) => {
-        const sum = xs => (xs || []).filter(b => b.owner === c.owner && b.mint === mint)
-          .reduce((n,b) => n + raw(b.uiTokenAmount.amount, 'BALANCE', true), 0n);
-        return sum(meta.postTokenBalances) - sum(meta.preTokenBalances);
-      };
-      const payerIndex = Array.from({length: index.length}, (_, i) => i).find(i => index.get(i)?.toBase58() === c.owner);
-      must(payerIndex !== undefined, 'RECEIPT_OWNER_MISSING');
-      const solDelta = BigInt(meta.postBalances[payerIndex]) - BigInt(meta.preBalances[payerIndex]);
-      a.realizedNetLamports = String(delta(WSOL) + solDelta);
-      a.residualUsdcRaw = String(delta(USDC)); // Conservatively excluded from SOL profit.
-    }
-    journal.write(state);
+    if (!receipt?.meta) continue; // An absent finalized receipt is NOT a failed trade.
+    const next = structuredClone(journal.get());
+    next.attempts[i] = settledRecord(receipt, a, c.owner, source, middle);
+    journal.write(next); // Incomplete receipt leaves the prior pending reservation intact.
   }
+  const state = journal.get();
   return { status: state.attempts.some(a => a.status === 'pending') ? 'RECONCILIATION_REQUIRED' : 'RECONCILED',
     attempts: state.attempts, broadcast: false };
 }
@@ -346,7 +371,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const command = argv[0] || 'status', c = config(env);
   must(['status', 'simulate', 'execute-once', 'reconcile'].includes(command), 'UNKNOWN_COMMAND');
   if (command === 'status') return readiness(c);
-  must(c.mode !== 'off', 'ARBITRAGE_OFF');
+  if (command !== 'reconcile') must(c.mode !== 'off', 'ARBITRAGE_OFF');
   if (command === 'execute-once') must(c.mode === 'live' && argv[1] === `--confirm-owner=${c.owner}`, 'LIVE_NOT_AUTHORIZED');
   const deps = await connect(c);
   return withJournal(c, async journal => {
