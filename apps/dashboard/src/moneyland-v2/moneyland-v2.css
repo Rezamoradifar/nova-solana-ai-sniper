@@ -720,3 +720,7 @@
    animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important;
  }
 }
+
+/* Lazy page load state — intentionally light and readable on slow mobile networks. */
+.ml2-root .ml2-route-loading{min-height:50vh;display:flex;align-items:flex-start;justify-content:center;padding:65px 5vw}
+.ml2-root .ml2-route-loading .ml2-skeleton-set{width:min(580px,100%);padding:10px}
