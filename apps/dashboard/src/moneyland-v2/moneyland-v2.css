@@ -724,3 +724,22 @@
 /* Lazy page load state — intentionally light and readable on slow mobile networks. */
 .ml2-root .ml2-route-loading{min-height:50vh;display:flex;align-items:flex-start;justify-content:center;padding:65px 5vw}
 .ml2-root .ml2-route-loading .ml2-skeleton-set{width:min(580px,100%);padding:10px}
+
+/* User-consented wallet selection inside the new visual shell. */
+.ml2-root .ml2-mobile-menu>button{display:flex;align-items:center;gap:8px;border:0;background:transparent;border-radius:8px;padding:12px 8px;font-size:13px;color:#d7deef;text-align:start}
+.ml2-root .ml2-mobile-menu>button:hover{background:#ffffff09}
+.ml2-root .ml2-wallet-option-list{display:flex;flex-direction:column;gap:10px}
+.ml2-root .ml2-wallet-option{display:flex;align-items:center;gap:14px;width:100%;padding:13px 14px;background:linear-gradient(120deg,#1b2233,#141824);border:1px solid #ffffff29;border-radius:11px;text-align:start;color:#e7f4ff}
+.ml2-root .ml2-wallet-option:hover{border-color:#00e5ff8a;background:#172a35}
+.ml2-root .ml2-wallet-option img{width:36px;height:36px;border-radius:8px;object-fit:contain}
+.ml2-root .ml2-wallet-option>span{flex:1}
+.ml2-root .ml2-wallet-option strong,.ml2-root .ml2-wallet-option small{display:block}
+.ml2-root .ml2-wallet-option strong{font-size:13px}
+.ml2-root .ml2-wallet-option small{font-size:10px;color:#8997af;margin-top:4px}
+.ml2-root .ml2-wallet-option>svg{color:var(--ml2-cyan)}
+.ml2-root .ml2-wallet-connected,.ml2-root .ml2-wallet-not-detected{display:flex;align-items:center;flex-direction:column;text-align:center;gap:12px;padding:24px 8px}
+.ml2-root .ml2-wallet-connected>svg,.ml2-root .ml2-wallet-not-detected>svg{color:var(--ml2-cyan)}
+.ml2-root .ml2-wallet-connected strong{font:600 15px 'JetBrains Mono',monospace}
+.ml2-root .ml2-wallet-connected p,.ml2-root .ml2-wallet-not-detected p{font-size:12px;color:#91a0b7;line-height:1.75}
+.ml2-root .ml2-wallet-not-detected strong{font-size:15px}
+.ml2-root .ml2-wallet-pending{padding:12px 14px;border:1px solid #8b5cf64f;border-radius:9px;color:#cabaff;background:#8b5cf60f;font-size:12px}
