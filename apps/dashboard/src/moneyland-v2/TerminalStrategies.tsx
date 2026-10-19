@@ -229,7 +229,7 @@ export function ArbitrageScreen() {
   return <>
     <ToolHeading eyebrow="SCANNER / ARBITRAGE" title={t('arbitrage')}
       description={lang === 'fa' ? 'اسکن واقعی قیمت‌های مستقیم صرافی‌های سولانا، با نمایش هزینه، اختلاف و تازگی قیمت؛ بدون اجرای خودکار معامله.' : 'Read-only cross-DEX route scanner powered by live Jupiter quote requests. Results are observations, not executable atomic opportunities.'}
-      badge={<ModeTag mode={scanning || routes.length ? 'connected' : 'preview'}/>}
+      badge={<ModeTag mode={routes.length ? 'connected' : error ? 'offline' : 'preview'}/>}
       action={<LinkedTool to="/arbitrage" label="Full live terminal"/>}/>
     <Notice tone="warn" title="No one-click execution">Sequential quotes do not reserve liquidity. Live execution and atomic settlement are not implemented in this UI.</Notice>
     <Panel className="ml2-scanner-controls">
