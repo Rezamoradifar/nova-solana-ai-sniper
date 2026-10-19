@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Glyph, Modal, Panel, Pill, Skeleton, useML, useMLToast } from './core.js';
-import { EmptyState, FormField, LinkedTool, ModeTag, Notice, Sparkline, Stat, ToolHeading } from './WorkspaceCommon.js';
+import { EmptyState, FormField, LinkedTool, ModeTag, Notice, Stat, ToolHeading } from './WorkspaceCommon.js';
 import { ARB_TOKENS, scanLiveRoutes, isRouteFresh, type LiveRoute, type ScanProgress } from '../lib/liveArbitrage.js';
 import { PUBLIC_API_BASE, money, pct } from '../lib/publicMarket.js';
 
