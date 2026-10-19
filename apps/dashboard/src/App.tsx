@@ -26,6 +26,11 @@ import PublicTelegram from './pages/PublicTelegram.js';
 import PublicWallet from './pages/PublicWallet.js';
 import { Admin } from './pages/Admin.js';
 import { TradingLab } from './pages/TradingLab.js';
+import { MoneylandFrame } from './moneyland-v2/core.js';
+import MoneylandLanding from './moneyland-v2/Landing.js';
+import { OverviewScreen, DexScreen, ExchangeScreen, PortfolioScreen } from './moneyland-v2/TerminalCorePages.js';
+import { CopyScreen, ArbitrageScreen, MemesScreen, FlashScreen, BotsScreen } from './moneyland-v2/TerminalStrategies.js';
+
 
 export function App() {
   return (
@@ -33,8 +38,19 @@ export function App() {
       <WalletConnectionProvider>
         <BrowserRouter>
           <Routes>
+            <Route element={<MoneylandFrame />}>
+              <Route path="/" element={<MoneylandLanding />} />
+              <Route path="/terminal" element={<OverviewScreen />} />
+              <Route path="/terminal/dex" element={<DexScreen />} />
+              <Route path="/terminal/exchange" element={<ExchangeScreen />} />
+              <Route path="/terminal/copy" element={<CopyScreen />} />
+              <Route path="/terminal/arbitrage" element={<ArbitrageScreen />} />
+              <Route path="/terminal/memes" element={<MemesScreen />} />
+              <Route path="/terminal/flash" element={<FlashScreen />} />
+              <Route path="/terminal/bots" element={<BotsScreen />} />
+              <Route path="/terminal/portfolio" element={<PortfolioScreen />} />
+            </Route>
             <Route element={<PublicLayout />}>
-              <Route path="/" element={<Landing />} />
               <Route path="/arbitrage" element={<PublicArbitrage />} />
               <Route path="/flash-arbitrage" element={<PublicFlashArbitrage />} />
               <Route path="/copy-trading" element={<PublicCopyTrading />} />
