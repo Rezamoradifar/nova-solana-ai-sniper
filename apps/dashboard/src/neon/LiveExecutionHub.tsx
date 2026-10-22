@@ -17,7 +17,7 @@ type State = {
 const initial: State = { network: null, copy: null, error: null, loaded: false };
 
 export function LiveExecutionHub() {
-  const { t } = useExperience();
+  const { t, lang } = useExperience();
   const [state, setState] = useState<State>(initial);
   const [reload, setReload] = useState(0);
   const refresh = useCallback(() => setReload((x) => x + 1), []);
@@ -61,7 +61,7 @@ export function LiveExecutionHub() {
       controller.abort();
       clearInterval(timer);
     };
-  }, [reload, t]);
+  }, [reload, lang]);
 
   const status: CopyReadiness = classifyCopyReadiness(state.network, state.copy);
   const descriptions: Record<CopyReadiness, [string, string]> = {
