@@ -20,8 +20,9 @@ interface LegacyInjectedPublicKey {
 interface LegacyInjectedProvider {
   isPhantom?: boolean;
   isSolflare?: boolean;
-  publicKey?: LegacyInjectedPublicKey | null;
-  connect: () => Promise<{ publicKey?: LegacyInjectedPublicKey } | void>;
+  publicKey?: LegacyInjectedPublicKey | string | null;
+  getAccount?: () => Promise<unknown>;
+  connect: () => Promise<{ publicKey?: LegacyInjectedPublicKey | string } | void>;
   disconnect?: () => Promise<void>;
   on?: (event: string, listener: (value?: unknown) => void) => void;
   off?: (event: string, listener: (value?: unknown) => void) => void;
@@ -30,9 +31,32 @@ interface LegacyInjectedProvider {
 interface LegacyInjectedWindow {
   phantom?: { solana?: LegacyInjectedProvider };
   solflare?: LegacyInjectedProvider;
+  // SafePal's documented Solana provider is window.safepal.
+  safepal?: LegacyInjectedProvider;
 }
 
-function legacyPublicKey(value: unknown): LegacyInjectedPublicKey | null {
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/** Convert an approved Solana base58 address into exactly 32 public-key bytes. */
+function addressBytes(address: string): Uint8Array | null {
+  if (!SOLANA_ADDRESS.test(address)) return null;
+  let value = 0n;
+  for (const character of address) {
+    const index = BASE58_ALPHABET.indexOf(character);
+    if (index < 0) return null;
+    value = value * 58n + BigInt(index);
+  }
+  const bytes = new Uint8Array(32);
+  for (let i = 31; i >= 0; i--) {
+    bytes[i] = Number(value & 255n);
+    value >>= 8n;
+  }
+  return value === 0n ? bytes : null;
+}
+
+function legacyPublicKey(value: unknown): LegacyInjectedPublicKey | string | null {
+  if (typeof value === 'string') return SOLANA_ADDRESS.test(value) ? value : null;
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<LegacyInjectedPublicKey>;
   if (typeof candidate.toString !== 'function') return null;
@@ -40,13 +64,19 @@ function legacyPublicKey(value: unknown): LegacyInjectedPublicKey | null {
 }
 
 function legacyAccount(
-  publicKey: LegacyInjectedPublicKey | null | undefined,
+  publicKey: LegacyInjectedPublicKey | string | null | undefined,
 ): WalletAccount | null {
   if (!publicKey) return null;
-  const address =
-    typeof publicKey.toBase58 === 'function' ? publicKey.toBase58() : publicKey.toString();
-  if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return null;
-  const bytes = typeof publicKey.toBytes === 'function' ? publicKey.toBytes() : null;
+  const address = typeof publicKey === 'string'
+    ? publicKey
+    : typeof publicKey.toBase58 === 'function'
+      ? publicKey.toBase58()
+      : publicKey.toString();
+  if (!SOLANA_ADDRESS.test(address)) return null;
+  const supplied = typeof publicKey === 'string' || typeof publicKey.toBytes !== 'function'
+    ? null
+    : publicKey.toBytes();
+  const bytes = supplied?.length === 32 ? supplied : addressBytes(address);
   if (!bytes || bytes.length !== 32) return null;
   return {
     address,
@@ -92,7 +122,10 @@ function legacyWallet(
             result && typeof result === 'object' && 'publicKey' in result
               ? legacyPublicKey(result.publicKey)
               : null;
-          current = legacyAccount(resultKey ?? provider.publicKey);
+          // SafePal may expose the address via getAccount() after approval.
+          // Read only public account data; never request a signature or transaction.
+          const fallback = resultKey ?? provider.publicKey ?? await provider.getAccount?.();
+          current = legacyAccount(legacyPublicKey(fallback));
           return { accounts: current ? [current] : [] };
         },
       },
@@ -124,6 +157,9 @@ const PHANTOM_ICON =
   'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiM3YzY1ZmYiLz48cGF0aCBkPSJNMTYgNDJjNC0xOCAxNi0yOCAzMC0yOCA4IDAgMTIgNSAxMiAxMSAwIDEyLTEzIDI1LTMwIDI1LTUgMC0xNC0xLTEyLTgtNSA0LTggMi04LTQgMCAwLTQgNi04IDYiLTQiIGZpbGw9IiNmZmYiLz48L3N2Zz4=' as Wallet['icon'];
 const SOLFLARE_ICON =
   'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTQiIGZpbGw9IiNmNThhMWYiLz48cGF0aCBkPSJNMzIgMTJsNiAxNCAxNCA2LTE0IDYtNiAxNC02LTE0LTE0LTYgMTQtNiA2LTE0eiIgZmlsbD0iI2ZmZiIvPjwvc3ZnPg==' as Wallet['icon'];
+// Neutral badge for the fallback adapter, not an imitation of SafePal's brand mark.
+const SAFEPAL_ICON =
+  'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTUiIGZpbGw9IiMxNTFlMzciLz48cGF0aCBkPSJNMzIgMTAgNTEgMTl2MTVjMCAxMi05IDIwLTE5IDI0LTEwLTQtMTktMTItMTktMjRWMTlsMTktOVoiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzNlZDBiOCIgc3Ryb2tlLXdpZHRoPSI1Ii8+PHBhdGggZD0iTTIzIDM1aDE4TTI3IDI4aDEwIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+PC9zdmc+' as Wallet['icon'];
 
 /**
  * Some injected wallets expose their legacy browser provider before (or without)
@@ -154,6 +190,14 @@ export function registerLegacyInjectedWallets(
       icon: SOLFLARE_ICON,
       provider: injected.solflare,
       valid: (provider) => provider.isSolflare === true,
+    },
+    {
+      name: 'SafePal',
+      icon: SAFEPAL_ICON,
+      provider: injected.safepal,
+      // The Solana provider documents getAccount(); do not register an EVM-only object.
+      valid: (provider) =>
+        typeof provider.getAccount === 'function' || provider.publicKey != null,
     },
   ];
 
