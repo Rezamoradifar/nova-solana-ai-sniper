@@ -1,0 +1,49 @@
+name: Nova copy activation and Mini App shutdown
+on:
+  push:
+    branches: [codex/nova-copy-miniapp-ops-20261023]
+  pull_request:
+    branches: [codex/nova-real-trading-entrypoints-20261022]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  operator-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Offline deployment failure and rollback cases
+        run: python3 -m unittest discover -s scripts -p 'test_nova_service_ops.py' -v
+      - name: Financial activation gates and durable feature rollback
+        run: node --test scripts/test_nova_live_copy_control.mjs
+      - name: Operator syntax
+        run: |
+          python3 -m py_compile scripts/disable-telegram-miniapp.py scripts/enable-live-copy-trading.py
+          bash -n scripts/init-letsencrypt.sh
+          git diff --check
+      - name: Actual nginx routes for both official templates
+        env:
+          NOVA_OPS_DOCKER_TEST: '1'
+        run: python3 scripts/test_nova_nginx_docker.py -v
+
+  bot-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --schema apps/api/prisma/schema.prisma
+      - name: Typecheck shared packages and Telegram bot
+        run: npx tsc -b packages/shared packages/ai apps/telegram-bot
+      - name: Existing copy and bot regressions
+        run: npx vitest run apps/telegram-bot/src/ui/screens/home.test.ts apps/api/src/trading/copyTradeWatcher.test.ts apps/api/src/trading/copyTrading.test.ts apps/api/src/routes/publicCopyTrading.test.ts
