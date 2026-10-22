@@ -332,13 +332,14 @@ class Installer:
         print('Preflight OK: project=' + self.project + '; web=' + ','.join(service(c) for c in self.web))
         print('Bot action: ' + ('recreate with its current immutable image' if self.bot_running else 'leave stopped/absent'))
 
-    def request(self, c, path, method='GET'):
+    def request(self, c, path, method='GET', timeout=10):
         host, port, tls = self.targets[c['id']]
-        connection = (http.client.HTTPSConnection(host, port, timeout=10, context=ssl._create_unverified_context())
-                      if tls else http.client.HTTPConnection(host, port, timeout=10))
+        connection = (http.client.HTTPSConnection(host, port, timeout=timeout, context=ssl._create_unverified_context())
+                      if tls else http.client.HTTPConnection(host, port, timeout=timeout))
         try:
             connection.request(method, path, body='{}' if method == 'POST' else None,
-                               headers={'Content-Type': 'application/json'})
+                               headers={'Content-Type': 'application/json',
+                                        'Connection': 'close', 'Cache-Control': 'no-cache'})
             response = connection.getresponse()
             body = response.read(2 * 1024 * 1024)
             return response.status, body, response.getheader('Cache-Control', '')
@@ -384,14 +385,63 @@ class Installer:
         command = ['python3', str(Path(sys.argv[0]).resolve()), '--app-dir', str(self.app), '--restore', str(self.backup)]
         print('Restore command: ' + shlex.join(command))
 
-    def render_and_validate(self):
+    def render_and_validate(self, require_disabled=False):
         for c in self.web:
             run(['docker', 'exec', c['id'], '/docker-entrypoint.d/20-envsubst-on-templates.sh'], 'Render nginx templates')
             run(['docker', 'exec', c['id'], 'nginx', '-t'], 'Validate rendered nginx')
+            if require_disabled:
+                effective = run(['docker', 'exec', c['id'], 'nginx', '-T'], 'Read effective nginx configuration')
+                if BEGIN not in effective or BLOCK not in effective:
+                    mounted = run(['docker', 'exec', c['id'], 'cat',
+                                   '/etc/nginx/templates/default.conf.template'], 'Read mounted web template')
+                    expected = read_file(self.app / TEMPLATES[service(c)])
+                    print('NOVA_NGINX_RENDER_CHECK=' + json.dumps({
+                        'service': service(c), 'disabledBlockLoaded': False,
+                        'mountedTemplateMatchesHost': digest(mounted.encode()) == digest(expected)}))
+                    raise Failure('NGINX_RENDERED_MINIAPP_BLOCK_MISSING: ' + service(c) +
+                                  '; inspect template rendering or a stale bind mount')
 
     def reload_web(self):
         for c in self.web:
             run(['docker', 'exec', c['id'], 'nginx', '-s', 'reload'], 'Reload nginx')
+
+    def verify_disabled_routes(self, wait_seconds=15):
+        # nginx -s reload sends HUP and returns before new workers necessarily
+        # accept connections. Use new connections and require two complete passes;
+        # the first old-worker 200/301 must not immediately trigger rollback.
+        deadline = time.monotonic() + wait_seconds
+        passes = 0
+        paths = ('/app', '/app/', '/app/deep/route', '/app/assets/disabled.js',
+                 '/api/auth/telegram', '/api/auth/telegram/')
+        while True:
+            failures = []
+            for c in self.web:
+                for path in paths:
+                    status, cache = 'UNREACHABLE', ''
+                    try:
+                        timeout = max(0.1, min(2, deadline - time.monotonic()))
+                        status, _, cache = self.request(
+                            c, path, 'POST' if path.startswith('/api/') else 'GET', timeout=timeout)
+                    except Failure:
+                        pass
+                    no_store = 'no-store' in [part.strip().lower() for part in cache.split(',')]
+                    if status != 410 or not no_store:
+                        failures.append({'service': service(c), 'path': path,
+                                         'http': status, 'noStore': no_store})
+                        break
+                else:
+                    try:
+                        require(self.site_check(c) == self.baseline[c['id']], 'Dashboard root changed')
+                    except Failure:
+                        failures.append({'service': service(c), 'path': '/',
+                                         'reason': 'DASHBOARD_OR_API_HEALTH_CHANGED'})
+            passes = passes + 1 if not failures else 0
+            if passes >= 2:
+                return
+            if time.monotonic() >= deadline:
+                print('NOVA_MINIAPP_HTTP_CHECK=' + json.dumps({'failures': failures, 'passes': passes}))
+                raise Failure('NGINX_MINIAPP_RELOAD_NOT_READY: disabled routes did not converge to 410/no-store')
+            time.sleep(0.25)
 
     def recreate_bot(self, image):
         override = self.write_private('telegram-miniapp-override.json',
@@ -424,14 +474,9 @@ class Installer:
             for name in FILES:
                 inplace(self.app / name, self.patched[name])
             self.changed = True
-            self.render_and_validate()  # Every running web config passes before the first reload.
+            self.render_and_validate(require_disabled=True)  # Validate every config before the first reload.
             self.reload_web()
-            for c in self.web:
-                for path in ('/app', '/app/', '/app/deep/route', '/app/assets/disabled.js',
-                             '/api/auth/telegram', '/api/auth/telegram/'):
-                    status, _, cache = self.request(c, path, 'POST' if path.startswith('/api/') else 'GET')
-                    require(status == 410 and 'no-store' in cache, 'Expected 410/no-store: ' + service(c) + path)
-                require(self.site_check(c) == self.baseline[c['id']], 'Dashboard root changed unexpectedly')
+            self.verify_disabled_routes()
             bot = self.old_bot
             if self.bot_running:
                 self.bot_touched = True

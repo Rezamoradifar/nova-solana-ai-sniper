@@ -32,6 +32,11 @@ Both mutations share an exclusive `.env.nova-ops.lock`.
 - Each running official nginx template is validated before any reload. Changes
   use the existing bind-mounted inode; replacing the file by rename would leave
   the container using the old configuration.
+- The rendered nginx configuration must contain the complete disabled-route
+  block. After HUP, fresh HTTP connections are checked until two complete passes
+  confirm 410/no-store and the original dashboard/API health. An old worker's
+  immediate 200/301 response is retried within the bounded transition window.
+  Persistent failures retain rollback and print only status/cache diagnostics.
 - Source bot startup now synchronizes both the enabled and disabled menu states.
   SSL renewal/setup no longer re-populates `MINIAPP_URL`.
 
@@ -117,8 +122,10 @@ of their actual differences rather than silently discarding them.
 
 Offline tests cover mode/limit gates, concurrent admin changes, response-loss
 reconciliation, rollback preservation, template idempotency and immutable image
-overlay validation. The Docker integration test checks actual nginx precedence
-for disabled routes while retaining the dashboard and ordinary API proxy.
+overlay validation. The Docker integration test starts nginx with a working legacy
+Mini App, patches its existing bind-mounted template, reruns envsubst and reloads
+the same running container. It then checks actual nginx precedence, the disabled
+routes and the retained dashboard/API proxy for both HTTP and TLS configurations.
 
 The authoring environment has no Nova SSH key or connected Nova management tool.
 Publishing this change and passing CI do not install it on the VPS. Public HTTP

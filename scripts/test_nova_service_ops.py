@@ -194,6 +194,56 @@ class FakeCopy(copy.Installer):
 
 
 class RolloutRules(unittest.TestCase):
+    def web_fixture(self, directory):
+        inst = mini.Installer(argparse.Namespace(app_dir=directory, dry_run=False, restore=None))
+        inst.web = [{'id': 'web', 'labels': {'com.docker.compose.service': 'gsp-web'}}]
+        inst.baseline = {'web': 'original-dashboard'}
+        return inst
+
+    def test_reload_waits_for_old_workers_then_requires_two_complete_valid_passes(self):
+        for old_status in [200, 301]:
+            with tempfile.TemporaryDirectory() as d, patch.object(mini.time, 'sleep') as delay:
+                inst = self.web_fixture(d)
+                responses = [(old_status, b'old response', '')] + [(410, b'disabled', 'no-store')] * 12
+                with patch.object(inst, 'request', side_effect=responses) as request, \
+                     patch.object(inst, 'site_check', return_value='original-dashboard') as site:
+                    inst.verify_disabled_routes()
+                self.assertEqual(request.call_count, 13)
+                self.assertEqual(site.call_count, 2)
+                self.assertGreaterEqual(delay.call_count, 2)
+                self.assertEqual(request.call_args_list[0].args[1], '/app')
+                self.assertEqual(request.call_args_list[1].args[1], '/app')
+
+    def test_reload_keeps_failure_if_routes_stay_open_or_cache_control_is_wrong(self):
+        for status, cache in [(200, ''), (301, ''), (410, 'public'), (410, 'x-no-store')]:
+            with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()) as output:
+                inst = self.web_fixture(d)
+                with patch.object(inst, 'request', return_value=(status, b'not acceptable', cache)):
+                    with self.assertRaisesRegex(mini.Failure, 'NGINX_MINIAPP_RELOAD_NOT_READY'):
+                        inst.verify_disabled_routes(wait_seconds=0)
+                self.assertIn('NOVA_MINIAPP_HTTP_CHECK=', output.getvalue())
+                self.assertIn('"http": ' + str(status), output.getvalue())
+
+    def test_reload_does_not_accept_a_changed_dashboard_even_when_app_is_blocked(self):
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()) as output:
+            inst = self.web_fixture(d)
+            with patch.object(inst, 'request', return_value=(410, b'disabled', 'no-store')), \
+                 patch.object(inst, 'site_check', return_value='unexpected new page'):
+                with self.assertRaises(mini.Failure): inst.verify_disabled_routes(wait_seconds=0)
+            self.assertIn('DASHBOARD_OR_API_HEALTH_CHANGED', output.getvalue())
+
+    def test_render_verification_reports_stale_mount_without_dumping_configuration(self):
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()) as output:
+            inst = self.web_fixture(d)
+            path = Path(d) / mini.TEMPLATES['gsp-web']
+            path.parent.mkdir(parents=True)
+            path.write_bytes(mini.patch_template(TEMPLATE))
+            with patch.object(mini, 'run', side_effect=['', '', 'old rendered config', 'private-old-template-value']):
+                with self.assertRaisesRegex(mini.Failure, 'NGINX_RENDERED_MINIAPP_BLOCK_MISSING'):
+                    inst.render_and_validate(require_disabled=True)
+            self.assertIn('"mountedTemplateMatchesHost": false', output.getvalue())
+            self.assertNotIn('private-old-template-value', output.getvalue())
+
     def fixture(self, directory, failure=None):
         root = Path(directory)
         (root / '.env').write_bytes(b'LIVE_TRADING=false\nMINIAPP_URL=\nPRIVATE_KEY_ENV=preserved\n')

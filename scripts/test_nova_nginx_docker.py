@@ -1,5 +1,6 @@
 """Real nginx route checks; opt in with NOVA_OPS_DOCKER_TEST=1 on a Docker host."""
 import http.client
+import argparse
 import importlib.util
 import json
 import os
@@ -24,7 +25,7 @@ class NginxIntegration(unittest.TestCase):
     def command(self, *args):
         return subprocess.check_output(args, text=True, stderr=subprocess.STDOUT).strip()
 
-    def test_both_real_nginx_templates(self):
+    def test_running_nginx_reloads_legacy_miniapp_to_disabled_for_both_templates(self):
         name = 'nova-ops-' + uuid.uuid4().hex[:10]
         network = name + '-net'
         containers = []
@@ -52,11 +53,21 @@ class NginxIntegration(unittest.TestCase):
                              '-out', str(cert / 'fullchain.pem'))
                 for template, tls, port in [('gsp-port.conf.template', False, 80),
                                              ('default.conf.template', True, 443)]:
+                    # Start with a working old Mini App, as on the actual VPS.
+                    # A startup-only test never exercises envsubst + HUP convergence.
+                    disabled = (ROOT / 'docker/nginx' / template).read_text()
+                    self.assertEqual(disabled.count(OPS.BLOCK), 1)
+                    legacy = disabled.replace(OPS.BLOCK, '''    location /app/ {
+        root /usr/share/nginx/html;
+        try_files $uri /app/index.html;
+    }''')
+                    live_template = temp / template
+                    live_template.write_text(legacy)
                     container = name + '-' + str(port)
                     containers.append(container)
                     self.command('docker', 'run', '-d', '--name', container, '--network', network,
                                  '-e', 'DOMAIN=ops.test', '-p', '127.0.0.1::' + str(port),
-                                 '-v', str(ROOT / 'docker/nginx' / template) +
+                                 '-v', str(live_template) +
                                  ':/etc/nginx/templates/default.conf.template:ro',
                                  '-v', str(html) + ':/usr/share/nginx/html:ro',
                                  '-v', str(cert) + ':/etc/letsencrypt/live/ops.test:ro',
@@ -82,6 +93,20 @@ class NginxIntegration(unittest.TestCase):
                         except (OSError, http.client.HTTPException): pass
                         time.sleep(0.2)
                     self.command('docker', 'exec', container, 'nginx', '-t')
+                    self.assertEqual(get('/app/')[:2], (200, b'OLD_APP_MUST_NOT_LOAD'))
+                    original_id = self.command('docker', 'inspect', '--format', '{{.Id}}', container)
+                    installer = OPS.Installer(argparse.Namespace(app_dir=str(ROOT)))
+                    current = {'id': container, 'labels': {
+                        'com.docker.compose.service': 'nginx' if tls else 'gsp-web'}}
+                    installer.web = [current]
+                    installer.targets = {container: ('127.0.0.1', host_port, tls)}
+                    installer.baseline = {container: installer.site_check(current)}
+                    OPS.inplace(live_template, OPS.patch_template(legacy.encode()))
+                    installer.render_and_validate(require_disabled=True)
+                    installer.reload_web()
+                    installer.verify_disabled_routes()
+                    self.assertEqual(self.command('docker', 'inspect', '--format', '{{.Id}}', container),
+                                     original_id, 'nginx must reload without replacing the website container')
                     # Reproduce the existing web installer's separate image-only
                     # release file, resolving its tag against actual Docker state.
                     release = temp / ('release-' + str(port) + '.yml')
