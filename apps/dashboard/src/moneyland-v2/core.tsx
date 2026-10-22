@@ -10,6 +10,7 @@ import {
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { fetchMarkets, type MarketToken } from '../lib/publicMarket.js';
 import { useWalletConnection } from '../lib/WalletContext.js';
+import { MobileWalletActions } from '../components/MobileWalletActions.js';
 import './moneyland-v2.css';
 
 export type Language = 'en' | 'fa';
@@ -250,7 +251,7 @@ function ContextProviders({ children }: { children: ReactNode }) {
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [walletOpen, setWalletOpen] = useState(false);
-  const { state: walletState, connect, disconnect, refresh: refreshWallets } = useWalletConnection();
+  const { state: walletState, connect, disconnect, cancel, refresh: refreshWallets } = useWalletConnection();
   const inFlight = useRef<AbortController | null>(null);
   const t = useCallback((key: string) => dictionary[lang][key] || dictionary.en[key] || key, [lang]);
   const setLang = (next: Language) => {
@@ -332,8 +333,15 @@ function ContextProviders({ children }: { children: ReactNode }) {
                   <p>{lang === 'fa' ? 'مرورگر داخل اپلیکیشن Phantom یا Solflare را باز کنید، یا افزونه کیف‌پول نصب کنید.' : 'Open the site inside Phantom/Solflare in-app browser, or install a supported browser wallet.'}</p>
                   <button className="ml2-outline-button" type="button" onClick={() => refreshWallets()}><Glyph name="refresh" size={16}/>{t('refresh')}</button>
                 </div>}
-                {walletState.status === 'connecting' && <p className="ml2-wallet-pending" role="status">{lang === 'fa' ? 'در انتظار تأیید داخل کیف پول…' : 'Waiting for approval in your wallet…'}</p>}
+                {walletState.status === 'connecting' && <div className="ml2-wallet-pending" role="status">
+                  <p>{lang === 'fa' ? 'در انتظار تأیید داخل کیف پول…' : 'Waiting for approval in your wallet…'}</p>
+                  <button className="ml2-outline-button" type="button" onClick={cancel}>
+                    {lang === 'fa' ? 'لغو درخواست' : 'Cancel connection'}
+                  </button>
+                </div>}
                 {walletState.error && <div className="ml2-notice ml2-notice-warn" role="alert"><Glyph name="warning" size={19}/><p>{walletState.error}</p></div>}
+                <MobileWalletActions lang={lang} />
+                {walletState.notice && <p role="status" className="ml2-wallet-pending">{walletState.notice}</p>}
                 <Link to="/wallet" onClick={() => setWalletOpen(false)} className="ml2-text-link">
                   {lang === 'fa' ? 'راهنمای اتصال موبایل' : 'Mobile wallet connection guide'} <Glyph name="arrow" size={16}/>
                 </Link>
