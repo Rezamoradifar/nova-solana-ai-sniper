@@ -21,7 +21,7 @@ jobs:
       - name: Offline deployment failure and rollback cases
         run: python3 -m unittest discover -s scripts -p 'test_nova_service_ops.py' -v
       - name: Financial activation gates and durable feature rollback
-        run: node --test scripts/test_nova_live_copy_control.mjs
+        run: node --test scripts/test_nova_live_copy_control.mjs scripts/test_nova_copy_diagnostic.mjs
       - name: Operator syntax
         run: |
           python3 -m py_compile scripts/disable-telegram-miniapp.py scripts/enable-live-copy-trading.py

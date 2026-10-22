@@ -113,6 +113,22 @@ an unhealthy RPC/scanner must be repaired before live activation can succeed.
 The scripts do not replace a broken paid RPC with a public endpoint or clear a
 manual kill switch/scanner pause.
 
+For blocked preflight, run `scripts/diagnose-nova-copy.mjs` on stdin with
+`docker exec -i API_CONTAINER_ID node --input-type=module -`. It reads the
+running API environment and the three safety Redis keys, classifying automatic
+versus other/manual scanner pauses without revealing the reason text. For up to
+three existing dedicated providers it verifies mainnet genesis, slot and latest
+blockhash, then tests the configured/derived WebSocket with the actual pump.fun
+`logsSubscribe` request. A subscription acknowledgement without a matching log
+notification is reported separately from received traffic. The report contains
+provider labels, boolean configuration presence, HTTP/numeric RPC codes and
+classified errors only; no provider URL, token, raw error, wallet or log payload.
+It never changes settings, clears a stop, restarts services or sends a trade.
+If no dedicated provider is configured, it reports
+`CONFIGURE_DEDICATED_MAINNET_HTTP_AND_WS` instead of treating the shared public
+fallback as a ready paid provider. An HTTP/WS probe does not by itself prove that
+the running scanner recovered; live activation still uses its existing gates.
+
 After an activation failure, rollback restores the saved flags and environment
 and restarts the preserved API image. It works through a one-off Node process
 even if the API cannot boot. A later manual `.env`/admin edit stops automatic
