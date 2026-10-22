@@ -31,6 +31,8 @@ jobs:
         run: npm run build --workspace @nova/dashboard
       - name: Read-only diagnostic syntax
         run: bash -n scripts/check-nova-real-trading.sh
+      - name: Web-only deployment syntax
+        run: bash -n scripts/deploy-nova-real-ui.sh
       - name: Compose syntax without secrets
         run: |
           cp .env.example .env
