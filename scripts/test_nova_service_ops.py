@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -154,6 +155,132 @@ class FileRules(unittest.TestCase):
             c['labels']['com.docker.compose.project.config_files'] = str(app / 'docker-compose.yml') + ',' + str(target)
             with patch.object(mini, 'run', side_effect=mini.Failure('image not present')):
                 self.assertFalse(mini.official_compose_files(c, app))
+
+
+class TelegramRecovery(unittest.TestCase):
+    def test_transient_exec_and_network_failures_retry_without_exposing_errors(self):
+        results = [mini.Failure('private token'), json.dumps({
+            'ok': False, 'error': {'code': 'TIMEOUT', 'method': 'setChatMenuButton'}}),
+            json.dumps({'ok': True, 'menu': {'type': 'commands'}, 'has_main_web_app': False})]
+        with patch.object(mini, 'run', side_effect=results) as run, \
+             patch.object(mini.time, 'sleep') as delay, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(mini.telegram('bot', {'type': 'commands'})['menu']['type'], 'commands')
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(delay.call_count, 2)
+        self.assertNotIn('private token', output.getvalue())
+        self.assertIn('CONTAINER_EXEC_UNAVAILABLE', output.getvalue())
+        self.assertIn('TIMEOUT', output.getvalue())
+
+    def test_bad_credentials_and_long_rate_limits_are_not_blindly_retried(self):
+        for error in [{'code': 'TOKEN_REJECTED', 'status': 401},
+                      {'code': 'TELEGRAM_REJECTED', 'status': 429, 'retryAfter': 300}]:
+            with patch.object(mini, 'run', return_value=json.dumps({'ok': False, 'error': error})) as run, \
+                 patch.object(mini.time, 'sleep') as delay, contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(mini.Failure, 'TELEGRAM_MENU_NOT_VERIFIED'):
+                    mini.telegram('bot', {'type': 'commands'})
+            run.assert_called_once()
+            delay.assert_not_called()
+
+    def node_request(self, setup):
+        with patch.object(mini, 'run', return_value='{"ok":true}') as run:
+            mini.telegram('bot', {'type': 'commands'})
+        script = run.call_args.args[2]
+        completed = subprocess.run(['node', '-'], input=setup + '\n' + script,
+                                   text=True, capture_output=True, timeout=10)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotIn('private-test-token', completed.stdout + completed.stderr)
+        return json.loads(completed.stdout)
+
+    def test_real_node_request_does_not_fail_confirmed_menu_for_optional_metadata(self):
+        result = self.node_request('''
+process.env.TELEGRAM_BOT_TOKEN = 'private-test-token';
+globalThis.fetch = async url => {
+  if (url.endsWith('/getMe')) throw new Error('private-test-token');
+  return {ok:true,status:200,json:async()=>({ok:true,
+    result:url.endsWith('/setChatMenuButton') ? true : {type:'commands'}})};
+};''')
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['menu']['type'], 'commands')
+        self.assertIsNone(result['has_main_web_app'])
+        self.assertEqual(result['metadataWarning']['method'], 'getMe')
+
+    def test_real_node_request_redacts_provider_description_and_rejects_wrong_menu(self):
+        cases = [
+            ("return {ok:false,status:401,json:async()=>({ok:false,description:'private-test-token'})};",
+             'TOKEN_REJECTED'),
+            ("return {ok:true,status:200,json:async()=>({ok:true,result:"
+             "url.endsWith('/setChatMenuButton') ? true : {type:'web_app'}})};", 'MENU_NOT_APPLIED'),
+            ("throw Object.assign(new Error('private-test-token'),{cause:{code:'EAI_AGAIN'}});",
+             'DNS_LOOKUP_FAILED'),
+        ]
+        for body, code in cases:
+            result = self.node_request("process.env.TELEGRAM_BOT_TOKEN='private-test-token';"
+                                       'globalThis.fetch=async url=>{' + body + '};')
+            self.assertFalse(result['ok'])
+            self.assertEqual(result['error']['code'], code)
+
+    def test_stable_api_runner_is_used_only_for_the_same_bot_token(self):
+        inst = mini.Installer(argparse.Namespace(app_dir='/unused'))
+        bot = {'id': 'bot'}
+        inst.api = {'id': 'api'}
+        for fingerprints, expected in [(['a' * 64, 'a' * 64], 'api'),
+                                       (['a' * 64, 'b' * 64], 'bot'),
+                                       ([mini.Failure('restarting')], 'bot')]:
+            with patch.object(mini, 'telegram_token_fingerprint', side_effect=fingerprints):
+                self.assertEqual(inst.menu_container(bot)['id'], expected)
+
+    def menu_fixture(self, directory):
+        inst = mini.Installer(argparse.Namespace(app_dir=directory, dry_run=False, menu_only=True))
+        inst.original = inst.patched = {'already': b'disabled'}
+        inst.old_bot = {'id': 'bot'}
+        inst.api = {'id': 'api'}
+        inst.bot_running = True
+        inst.before_ids = ['api', 'web']
+        return inst
+
+    def test_menu_recovery_makes_no_file_backup_or_container_changes(self):
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()) as output:
+            inst = self.menu_fixture(d)
+            with patch.object(inst, 'verify_disabled_routes') as verify, \
+                 patch.object(mini, 'run', return_value='') as run, \
+                 patch.object(inst, 'reset_menu', return_value={'has_main_web_app': None}) as reset, \
+                 patch.object(inst, 'nonbot_ids', return_value=inst.before_ids), \
+                 patch.object(inst, 'bot', return_value=inst.old_bot), \
+                 patch.object(inst, 'save_backup', side_effect=AssertionError('No new backup')), \
+                 patch.object(inst, 'reload_web', side_effect=AssertionError('No reload')), \
+                 patch.object(inst, 'recreate_bot', side_effect=AssertionError('No recreate')):
+                inst.finish_menu()
+            reset.assert_called_once_with(inst.old_bot)
+            self.assertEqual(verify.call_count, 2)
+            self.assertEqual(list(Path(d).iterdir()), [])
+            run.assert_called_once()
+            self.assertIn('NOVA_MINIAPP_DISABLED=YES', output.getvalue())
+            self.assertIn('has_main_web_app=unknown', output.getvalue())
+
+    def test_menu_recovery_refuses_open_routes_or_bot_with_old_app_url(self):
+        for failure in ['files', 'routes', 'bot_env']:
+            with tempfile.TemporaryDirectory() as d:
+                inst = self.menu_fixture(d)
+                if failure == 'files': inst.patched = {'still': b'enabled'}
+                with patch.object(inst, 'verify_disabled_routes',
+                                  side_effect=mini.Failure('open routes') if failure == 'routes' else None), \
+                     patch.object(mini, 'run', side_effect=mini.Failure('bot env') if failure == 'bot_env' else None), \
+                     patch.object(inst, 'reset_menu') as reset:
+                    with self.assertRaises(mini.Failure): inst.finish_menu()
+                reset.assert_not_called()
+
+    def test_menu_recovery_dry_run_never_sets_remote_menu(self):
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
+            inst = self.menu_fixture(d)
+            inst.args.dry_run = True
+            with patch.object(inst, 'verify_disabled_routes'), patch.object(mini, 'run'), \
+                 patch.object(inst, 'menu_container', return_value=inst.api), \
+                 patch.object(mini, 'telegram', return_value={'menu': {'type': 'web_app'}}) as request, \
+                 patch.object(inst, 'reset_menu') as reset:
+                inst.finish_menu()
+            request.assert_called_once_with('api')
+            reset.assert_not_called()
 
 
 class FakeCopy(copy.Installer):

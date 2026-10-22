@@ -47,6 +47,22 @@ Mini App** setting is separate from the default Bot API menu. The installer repo
 `has_main_web_app`; it cannot remove that BotFather setting. Network errors during
 the final menu reset report a partial result and a failed exit status.
 
+If shutdown reports that the web routes are disabled and bot configuration was
+applied but the menu was not verified, run the same script with `--menu-only`.
+It verifies the disabled files/routes and the bot's empty `MINIAPP_URL`, then
+changes and verifies only the remote default menu. It does not rewrite files,
+reload nginx, recreate a container or replace the original backup. `--dry-run
+--menu-only` reads the current menu without changing it.
+
+Menu calls retry bounded transient network/container failures. When API and bot
+credentials match by a private in-container SHA-256 comparison, menu calls use
+the stable API container; a different API token is never used as a fallback.
+`NOVA_TELEGRAM_MENU_CHECK` reports only a classified error, method, numeric status
+and retry delay. Authentication failures and long flood-control waits fail
+without blind retries. The BotFather `getMe` metadata lookup is independent of
+the required set/get-menu confirmation: a metadata failure reports `unknown`
+rather than undoing a confirmed menu result or claiming the setting is absent.
+
 ## Live copy activation
 
 The existing engine uses one global `LIVE_TRADING` switch for swaps. Turning that

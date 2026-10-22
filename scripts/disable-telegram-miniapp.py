@@ -227,30 +227,94 @@ def verify_compose_files(container, app):
 
 
 def telegram(container_id, button=None):
-    # The token is read only inside the container. Never inspect Env or print API errors.
+    # The token is read only inside the container. Return only bounded, allowlisted
+    # diagnostics: Telegram descriptions and fetch errors may contain the token.
     script = r'''
 const token = process.env.TELEGRAM_BOT_TOKEN;
+let method = 'getChatMenuButton';
+function fail(code, extra = {}) {
+  throw Object.assign(new Error('redacted'), {safe: {code, method, ...extra}});
+}
+function safe(error) {
+  return error?.safe || {code: 'REQUEST_FAILED', method};
+}
 async function call(method, body) {
-  if (!token) throw new Error();
-  const r = await fetch('https://api.telegram.org/bot' + token + '/' + method, {
-    method: 'POST', headers: {'content-type':'application/json'},
-    body: JSON.stringify(body || {}), signal: AbortSignal.timeout(15000)
-  });
-  const j = await r.json();
-  if (!r.ok || !j.ok) throw new Error();
+  if (!token) fail('TOKEN_MISSING');
+  let r;
+  try {
+    r = await fetch('https://api.telegram.org/bot' + token + '/' + method, {
+      method: 'POST', headers: {'content-type':'application/json'},
+      body: JSON.stringify(body || {}), signal: AbortSignal.timeout(8000)
+    });
+  } catch (error) {
+    const code = error?.cause?.code;
+    if (['TimeoutError', 'AbortError'].includes(error?.name)) fail('TIMEOUT');
+    if (['ENOTFOUND', 'EAI_AGAIN'].includes(code)) fail('DNS_LOOKUP_FAILED');
+    if (['ENETUNREACH', 'EHOSTUNREACH'].includes(code)) fail('NETWORK_UNREACHABLE');
+    fail('CONNECTION_FAILED');
+  }
+  let j;
+  try { j = await r.json(); } catch { fail('INVALID_RESPONSE'); }
+  if (!r.ok || !j.ok) {
+    const status = Number.isInteger(r.status) ? r.status : 0;
+    const retryAfter = Number.isSafeInteger(j.parameters?.retry_after)
+      ? Math.max(0, Math.min(j.parameters.retry_after, 86400)) : 0;
+    fail(status === 401 || status === 403 ? 'TOKEN_REJECTED' : 'TELEGRAM_REJECTED',
+      {status, retryAfter});
+  }
   return j.result;
 }
 (async () => {
   const requested = BUTTON;
-  if (requested) await call('setChatMenuButton', {menu_button: requested});
+  if (requested) {
+    method = 'setChatMenuButton';
+    if (await call(method, {menu_button: requested}) !== true) fail('SET_NOT_CONFIRMED');
+  }
+  method = 'getChatMenuButton';
   const menu = await call('getChatMenuButton');
-  if (requested && menu.type !== requested.type) throw new Error();
-  const me = await call('getMe');
-  console.log(JSON.stringify({menu, has_main_web_app: me.has_main_web_app === true}));
-})().catch(() => { console.error('TELEGRAM_REQUEST_FAILED_REDACTED'); process.exit(1); });
+  if (!menu || !['commands', 'web_app', 'default'].includes(menu.type)) fail('INVALID_RESPONSE');
+  if (requested && menu.type !== requested.type) fail('MENU_NOT_APPLIED', {menuType: menu.type});
+  let has_main_web_app = null, metadataWarning;
+  method = 'getMe';
+  try {
+    const me = await call('getMe');
+    if (!me || !Number.isSafeInteger(me.id)) fail('INVALID_RESPONSE');
+    has_main_web_app = me.has_main_web_app === true;
+  } catch (error) { metadataWarning = safe(error); }
+  console.log(JSON.stringify({ok: true, menu, has_main_web_app, metadataWarning}));
+})().catch(error => { console.log(JSON.stringify({ok: false, error: safe(error)})); });
 '''.replace('BUTTON', json.dumps(button))
-    return json.loads(run(['docker', 'exec', '-i', container_id, 'node', '-'],
-                          'Telegram menu request', script))
+    for attempt in range(1, 4):
+        try:
+            result = json.loads(run(['docker', 'exec', '-i', container_id, 'node', '-'],
+                                    'Telegram menu request', script))
+        except (Failure, ValueError):
+            result = {'ok': False, 'error': {'code': 'CONTAINER_EXEC_UNAVAILABLE'}}
+        if result.get('ok') is True:
+            if result.get('metadataWarning'):
+                print('NOVA_TELEGRAM_METADATA_CHECK=' + json.dumps(result['metadataWarning']))
+            return result
+        error = result.get('error', {'code': 'REQUEST_FAILED'})
+        print('NOVA_TELEGRAM_MENU_CHECK=' + json.dumps({'attempt': attempt, **error}))
+        retry_after = error.get('retryAfter', 0)
+        retryable = error.get('code') in {
+            'TIMEOUT', 'DNS_LOOKUP_FAILED', 'NETWORK_UNREACHABLE', 'CONNECTION_FAILED',
+            'CONTAINER_EXEC_UNAVAILABLE', 'INVALID_RESPONSE', 'MENU_NOT_APPLIED',
+        } or error.get('status', 0) >= 500 or error.get('status') == 429
+        if attempt == 3 or not retryable or retry_after > 20:
+            raise Failure('TELEGRAM_MENU_NOT_VERIFIED: see NOVA_TELEGRAM_MENU_CHECK')
+        time.sleep(max(attempt, retry_after))
+
+
+def telegram_token_fingerprint(container_id):
+    # Compare credentials privately before using a stable API container for the
+    # bot's menu request. Never send a request for a different bot as a fallback.
+    script = ("const t=process.env.TELEGRAM_BOT_TOKEN; if(!t) process.exit(1);"
+              "console.log(require('node:crypto').createHash('sha256').update(t).digest('hex'))")
+    value = run(['docker', 'exec', container_id, 'node', '-e', script],
+                'Private Telegram credential comparison').strip()
+    require(re.fullmatch(r'[0-9a-f]{64}', value), 'Telegram credential comparison unavailable')
+    return value
 
 
 class Installer:
@@ -271,6 +335,16 @@ class Installer:
 
     def nonbot_ids(self):
         return sorted(c['id'] for c in self.current() if service(c) != 'telegram-bot')
+
+    def menu_container(self, bot=None):
+        reference = bot if bot is not None else (self.old_bot if self.bot_running else self.api)
+        if reference['id'] != self.api['id']:
+            try:
+                if telegram_token_fingerprint(reference['id']) == telegram_token_fingerprint(self.api['id']):
+                    return self.api
+            except Failure:
+                pass
+        return reference
 
     def preflight(self):
         require(shutil.which('docker') and shutil.which('git'), 'Docker and Git are required')
@@ -327,10 +401,12 @@ class Installer:
             address = '127.0.0.1' if address in ('', '0.0.0.0', '::') else address
             self.targets[c['id']] = (address, int(bind['HostPort']), port == '443/tcp')
         self.baseline = {c['id']: self.site_check(c) for c in self.web}
-        menu_container = self.old_bot if self.bot_running else self.api
-        self.menu_before = telegram(menu_container['id'])
+        if not getattr(self.args, 'menu_only', False):
+            self.menu_before = telegram(self.menu_container()['id'])
         print('Preflight OK: project=' + self.project + '; web=' + ','.join(service(c) for c in self.web))
-        print('Bot action: ' + ('recreate with its current immutable image' if self.bot_running else 'leave stopped/absent'))
+        print('Bot action: ' + ('verify existing container; no recreation' if getattr(self.args, 'menu_only', False)
+                                else 'recreate with its current immutable image' if self.bot_running
+                                else 'leave stopped/absent'))
 
     def request(self, c, path, method='GET', timeout=10):
         host, port, tls = self.targets[c['id']]
@@ -496,13 +572,43 @@ class Installer:
                 print('PARTIAL: rollback could not complete. Use the printed private backup/restore command.')
             raise
         try:
-            result = telegram((bot if self.bot_running else self.api)['id'], {'type': 'commands'})
+            result = self.reset_menu(bot if self.bot_running else self.api)
         except Exception:
-            raise Failure('PARTIAL: web routes are disabled and bot configuration applied, but Telegram menu reset/verification failed; rerun after fixing Telegram connectivity') from None
+            raise Failure('PARTIAL: web routes are disabled and bot configuration applied, but Telegram menu is unverified; use --menu-only after reviewing NOVA_TELEGRAM_MENU_CHECK') from None
+        self.report_success(result)
+
+    def reset_menu(self, bot):
+        container = self.menu_container(bot)
+        print('NOVA_TELEGRAM_MENU_RUNNER=' + service(container))
+        return telegram(container['id'], {'type': 'commands'})
+
+    def report_success(self, result):
         print('SUCCESS: Mini App routes return 410; dashboard and API health preserved; non-bot IDs unchanged.')
         print('NOVA_MINIAPP_DISABLED=YES')
-        print('Telegram default menu=commands; has_main_web_app=' + str(result['has_main_web_app']).lower())
+        main_app = result['has_main_web_app']
+        print('Telegram default menu=commands; has_main_web_app=' +
+              ('unknown' if main_app is None else str(main_app).lower()))
         print('Existing JWT sessions are not selectively revoked. BotFather Main Mini App settings are separate.')
+
+    def finish_menu(self):
+        # Recovery for a completed local shutdown whose remote menu check failed.
+        # No file writes, nginx reload, container recreation or backup replacement.
+        require(self.original == self.patched, 'MENU_ONLY_REQUIRES_DISABLED_FILES: run the full shutdown first')
+        self.verify_disabled_routes()
+        bot = self.old_bot if self.bot_running else self.api
+        if self.bot_running:
+            run(['docker', 'exec', bot['id'], 'node', '-e',
+                 'process.exit(process.env.MINIAPP_URL ? 1 : 0)'], 'Verify empty bot MINIAPP_URL')
+        if self.args.dry_run:
+            result = telegram(self.menu_container(bot)['id'])
+            print('DRY RUN: disabled routes verified; Telegram default menu=' + result['menu']['type'])
+            return
+        result = self.reset_menu(bot)
+        require(self.nonbot_ids() == self.before_ids, 'A non-bot container changed during menu recovery')
+        require((self.bot() or {}).get('id') == (self.old_bot or {}).get('id'),
+                'Bot container changed during menu recovery')
+        self.verify_disabled_routes()
+        self.report_success(result)
 
     def restore(self):
         self.backup = Path(self.args.restore).resolve()
@@ -518,7 +624,7 @@ class Installer:
             return
         self.restore_files()
         bot = self.recreate_bot(self.manifest['bot_image']) if self.manifest['bot_running'] else self.api
-        telegram(bot['id'], self.manifest['menu_before'])
+        telegram(self.menu_container(bot)['id'], self.manifest['menu_before'])
         require(self.nonbot_ids() == self.before_ids, 'Non-bot IDs changed during restore')
         print('RESTORED: saved templates/env, original bot image (if previously running), and default menu.')
 
@@ -528,12 +634,19 @@ def main():
     parser.add_argument('--app-dir', default='/opt/nova-solana-ai-sniper')
     parser.add_argument('--dry-run', action='store_true', help='Read-only preflight; no file, container or Telegram mutation')
     parser.add_argument('--restore', metavar='BACKUP_DIR')
+    parser.add_argument('--menu-only', action='store_true',
+                        help='Finish a partial shutdown: verify disabled routes and reset only the Telegram menu')
     args = parser.parse_args()
+    if args.menu_only and args.restore:
+        parser.error('--menu-only cannot be combined with --restore')
     os.umask(0o077)
     installer = Installer(args)
     try:
         if args.dry_run:
             installer.preflight()
+            if args.menu_only:
+                installer.finish_menu()
+                return 0
             if args.restore:
                 installer.restore()
                 return 0
@@ -542,7 +655,9 @@ def main():
             with open(installer.app / '.env.nova-ops.lock', 'a') as lock:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 installer.preflight()
-                if args.restore:
+                if args.menu_only:
+                    installer.finish_menu()
+                elif args.restore:
                     installer.restore()
                 else:
                     installer.apply()
