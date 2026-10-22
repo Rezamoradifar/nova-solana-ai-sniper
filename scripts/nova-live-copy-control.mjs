@@ -12,6 +12,26 @@ const ACTION = 'operator.copy_live_enabled';
 // https://namespaces.chainagnostic.org/solana/caip2
 const MAINNET_GENESIS = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
 
+export function bootstrapStopReleaseAllowed(s, before) {
+  return (
+    s.bootstrap?.marker === '2026-10-17' &&
+    s.bootstrap.envKillSwitch === true &&
+    s.bootstrap.redisKillSwitch === false &&
+    s.bootstrap.envLiveTrading === false &&
+    s.bootstrap.envPaperTrading === true &&
+    s.bootstrap.envCopyExecution === false &&
+    s.network?.tradingMode === 'PAPER' &&
+    s.activeCopyConfigs === 0 &&
+    Array.isArray(before) &&
+    before.length === FEATURE_KEYS.length &&
+    before.every((row) => row === null || row.enabled === false)
+  );
+}
+
+export function redisStopState(value) {
+  return value === '1' ? true : value === '0' || value === null ? false : null;
+}
+
 export function blockers(s, live = false) {
   const errors = [];
   if (s.health !== 200 || s.readiness !== 200) errors.push('API_NOT_READY');
@@ -111,7 +131,12 @@ export async function enableFeatures(db, payload, before) {
       await tx.auditLog.create({
         data: {
           action: ACTION,
-          metadata: { operationId: payload.operationId, before, after },
+          metadata: {
+            operationId: payload.operationId,
+            before,
+            after,
+            bootstrapStopReleaseRequested: payload.releaseBootstrapStop === true,
+          },
         },
       });
       return after;
@@ -176,7 +201,7 @@ async function main() {
   const { loadApiEnv } = await import('/repo/apps/api/dist/config/env.js');
   const { resolveAllRpcEndpoints } = await import('/repo/apps/api/dist/solana/connection.js');
   const { verifySafetySystemReady } = await import('/repo/apps/api/dist/trading/safety.js');
-  const { getKillSwitchState, getScannerAutoBuyPauseState } = await import('@nova/shared');
+  const { getScannerAutoBuyPauseReason } = await import('@nova/shared');
   const db = new PrismaClient();
   let redis;
   const action = process.argv[2];
@@ -209,8 +234,9 @@ async function main() {
       otherAutoBuys,
       activeCopyConfigs,
       safety,
-      killSwitch,
-      scannerPause,
+      killSwitchRaw,
+      scannerPauseRaw,
+      scannerPauseReason,
     ] = await Promise.all([
       get('/health'),
       get('/health/ready'),
@@ -234,9 +260,12 @@ async function main() {
         },
         redis,
       ),
-      getKillSwitchState(redis),
-      getScannerAutoBuyPauseState(redis),
+      redis.get('nova:trading:kill_switch'),
+      redis.get('nova:trading:scanner_autobuy_paused'),
+      getScannerAutoBuyPauseReason(redis),
     ]);
+    const killSwitch = redisStopState(killSwitchRaw);
+    const scannerPause = redisStopState(scannerPauseRaw);
     const limits = {
       maxBuySol: config.COPY_TRADING_MAX_BUY_SOL,
       maxDailyBuys: config.COPY_TRADING_MAX_DAILY_BUYS,
@@ -257,6 +286,20 @@ async function main() {
       scannerPause,
       skipSimulation: config.SKIP_BUY_SIMULATION,
       dedicatedMainnetRpc: false,
+      bootstrap: {
+        marker: process.env.NOVA_FRESH_BOOTSTRAP === '2026-10-17' ? '2026-10-17' : null,
+        envKillSwitch: config.KILL_SWITCH,
+        redisKillSwitch: killSwitch,
+        envLiveTrading: config.LIVE_TRADING,
+        envPaperTrading: config.PAPER_TRADING,
+        envCopyExecution: config.COPY_TRADING_EXECUTION_ENABLED,
+        scannerAutoResumeEnabled: config.SCANNER_AUTO_BUY_AUTO_RESUME_ENABLED,
+        scannerPauseSource: !scannerPauseReason
+          ? 'NOT_RECORDED'
+          : scannerPauseReason === 'all launch-detection sources unhealthy'
+            ? 'AUTOMATIC_OUTAGE'
+            : 'OTHER_OR_MANUAL',
+      },
     };
     if (action !== 'status') {
       const endpoints = resolveAllRpcEndpoints({
@@ -326,8 +369,18 @@ async function main() {
         }
       }
     }
-    const errors = blockers(snapshot, action === 'status');
     const before = featureSnapshot(rows);
+    const releasing =
+      action === 'prepare-bootstrap' ||
+      (action === 'enable' && payload.releaseBootstrapStop === true);
+    const releaseAllowed = releasing && bootstrapStopReleaseAllowed(snapshot, before);
+    // Only the explicitly requested, documented bootstrap env stop is prospective.
+    // All ordinary scanner/RPC/limits gates still run. No Redis key is cleared.
+    const errors = blockers(
+      releaseAllowed ? { ...snapshot, killSwitch: false } : snapshot,
+      action === 'status',
+    );
+    if (releasing && !releaseAllowed) errors.push('BOOTSTRAP_STOP_RELEASE_NOT_ELIGIBLE');
     const report = {
       ok: errors.length === 0,
       blockers: errors,
@@ -337,9 +390,10 @@ async function main() {
       activeCopyConfigs,
       limits,
       copyWatcherReady: copy.body?.copyWatcherReady === true,
+      bootstrapStopReleaseReady: releaseAllowed,
     };
-    if (action === 'prepare' || action === 'status') {
-      console.log(JSON.stringify({ report, before }));
+    if (action === 'prepare' || action === 'prepare-bootstrap' || action === 'status') {
+      console.log(JSON.stringify({ report, before, bootstrap: snapshot.bootstrap }));
     } else if (action === 'enable') {
       if (errors.length) throw new Error('PREFLIGHT_FAILED');
       await enableFeatures(db, payload, payload.before);
@@ -353,7 +407,7 @@ async function main() {
 
 // node --input-type=module - ACTION JSON (stdin execution); normal imports stay inert.
 if (
-  process.argv[1] === '-' ||
+  (process.argv[1] === '-' && import.meta.url.endsWith('/[eval1]')) ||
   (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
 ) {
   // Terminate the in-container helper before the operator command's timeout.

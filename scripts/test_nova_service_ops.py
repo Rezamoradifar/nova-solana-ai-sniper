@@ -22,6 +22,10 @@ def load(name, filename):
 
 mini = load('nova_mini_tests', 'disable-telegram-miniapp.py')
 copy = load('nova_copy_tests', 'enable-live-copy-trading.py')
+rpc = load('nova_rpc_tests', 'configure-nova-copy-rpc.py')
+BOOTSTRAP = (b'NOVA_FRESH_BOOTSTRAP=2026-10-17\nLIVE_TRADING=false\nPAPER_TRADING=true\n'
+             b'COPY_TRADING_EXECUTION_ENABLED=false\nKILL_SWITCH=true\nMINIAPP_URL=\n'
+             b'COPY_TRADING_MAX_BUY_SOL=0.05\nENCRYPTION_KEY=preserved-private-value\n')
 TEMPLATE = b'''server {
     location /api/ { proxy_pass http://api:4000/; }
     location /app/ {
@@ -283,6 +287,140 @@ globalThis.fetch = async url => {
             reset.assert_not_called()
 
 
+class RpcSetupRules(unittest.TestCase):
+    def stopped(self):
+        return {'report': {'mode': 'PAPER', 'otherAutoBuys': 0, 'activeCopyConfigs': 0,
+                'blockers': ['KILL_SWITCH_ACTIVE_OR_UNKNOWN']}, 'before': [None, None],
+                'bootstrap': {'marker': '2026-10-17', 'envKillSwitch': True, 'redisKillSwitch': False,
+                 'envLiveTrading': False, 'envPaperTrading': True, 'envCopyExecution': False,
+                 'scannerAutoResumeEnabled': True, 'scannerPauseSource': 'AUTOMATIC_OUTAGE'}}
+
+    def test_rpc_install_preserves_paper_stop_miniapp_and_other_secrets(self):
+        http, ws = 'https://paid.example/token$literal?x=1&y=2', 'wss://paid.example/ws-private'
+        changed = rpc.patch_rpc_env(BOOTSTRAP, http, ws)
+        self.assertIn(BOOTSTRAP, changed)
+        self.assertEqual(copy.scalar(changed, 'SOLANA_RPC_URL'), http)
+        self.assertEqual(copy.scalar(changed, 'SOLANA_WS_URL'), ws)
+        copy.require_bootstrap_modes(changed)
+        after = copy.patch_env(changed, release_bootstrap_stop=True)
+        self.assertEqual(copy.scalar(after, 'KILL_SWITCH'), 'false')
+        self.assertEqual(copy.scalar(after, 'LIVE_TRADING'), 'true')
+        self.assertEqual(copy.scalar(after, 'SOLANA_RPC_URL'), http)
+        self.assertIn(b'COPY_TRADING_MAX_BUY_SOL=0.05\nENCRYPTION_KEY=preserved-private-value', after)
+
+    def test_rpc_setup_rejects_unstopped_duplicate_stale_or_existing_provider_settings(self):
+        bad = [BOOTSTRAP.replace(b'LIVE_TRADING=false', b'LIVE_TRADING=true'),
+               BOOTSTRAP.replace(b'KILL_SWITCH=true', b'KILL_SWITCH=false'),
+               BOOTSTRAP + b'KILL_SWITCH=true\n', BOOTSTRAP + b'HELIUS_API_KEY=keep-this-key\n',
+               BOOTSTRAP + b'SOLANA_RPC_URL="multiline\nvalue"\n']
+        for data in bad:
+            with self.assertRaises(rpc.Failure):
+                rpc.patch_rpc_env(data, 'https://paid.example/private', 'wss://paid.example/private')
+
+    def test_url_validation_rejects_public_wrong_network_schemes_and_env_injection(self):
+        for url in ['https://api.mainnet-beta.solana.com/', 'https://api.devnet.solana.com',
+                    'http://paid.example/private', 'https://u:p@paid.example',
+                    "https://paid.example/'private", 'https://paid.example/private\nLIVE_TRADING=true',
+                    'https://paid.example/fragment#private', 'https://paid.example:99999/private']:
+            with self.assertRaises(rpc.Failure) as error: rpc.validate_url(url, 'https')
+            self.assertNotIn(url, str(error.exception))
+
+    def test_manual_stops_modes_active_configs_and_admin_flags_block_rpc_setup(self):
+        import copy as clone
+        for section, key, value in [('bootstrap', 'redisKillSwitch', True),
+                ('bootstrap', 'scannerPauseSource', 'OTHER_OR_MANUAL'),
+                ('bootstrap', 'envLiveTrading', True), ('bootstrap', 'marker', None),
+                ('report', 'activeCopyConfigs', 1), ('report', 'otherAutoBuys', 1)]:
+            result = clone.deepcopy(self.stopped())
+            result[section][key] = value
+            with self.assertRaises(rpc.Failure): rpc.require_stopped(result)
+        result = self.stopped(); result['before'][0] = {'enabled': True}
+        with self.assertRaises(rpc.Failure): rpc.require_stopped(result)
+
+    def test_candidate_urls_travel_only_on_private_stdin_and_idle_ws_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()) as output:
+            inst = rpc.Installer(argparse.Namespace(app_dir=d, dry_run=False, restore=None))
+            checks = [{'status': 'OK'}] * 3
+            reply = {'checks': checks, 'ws': {'status': 'LOGS_RECEIVED'}}
+            with patch.object(inst, 'current_api', return_value={'id': 'api'}), \
+                 patch.object(rpc.ops, 'run', return_value=json.dumps(reply)) as run:
+                inst.probe_candidate('https://paid.example/private-token', 'wss://paid.example/ws-token')
+            argv, label, source = run.call_args.args
+            self.assertNotIn('private-token', ' '.join(argv) + label + output.getvalue())
+            self.assertIn('https://paid.example/private-token', source)
+            self.assertEqual(argv[-1], '--functions-only')
+            reply['ws']['status'] = 'SUBSCRIBED_NO_LOGS'
+            with patch.object(inst, 'current_api', return_value={'id': 'api'}), \
+                 patch.object(rpc.ops, 'run', return_value=json.dumps(reply)):
+                with self.assertRaisesRegex(rpc.Failure, 'RPC_CANDIDATE_REJECTED'):
+                    inst.probe_candidate('https://paid.example/private-token', 'wss://paid.example/ws-token')
+            self.assertFalse((Path(d) / '.env').exists())
+            self.assertIsNone(inst.backup)
+
+    def test_rpc_readiness_waits_for_api_startup_without_releasing_bootstrap_stop(self):
+        import copy as clone
+        with tempfile.TemporaryDirectory() as d, patch.object(rpc.time, 'sleep'), \
+             contextlib.redirect_stdout(io.StringIO()):
+            inst = rpc.Installer(argparse.Namespace(app_dir=d, dry_run=False, restore=None))
+            inst.before = [None, None]
+            ready = self.stopped()
+            warming = clone.deepcopy(ready)
+            warming['report']['mode'] = 'UNKNOWN'
+            warming['report']['blockers'] += ['API_NOT_READY', 'COPY_BACKEND_NOT_COMPATIBLE', 'NETWORK_NOT_READY']
+            with patch.object(inst, 'control', side_effect=[warming, ready]) as control:
+                self.assertEqual(inst.wait_ready(), ready)
+                self.assertEqual(control.call_count, 2)
+
+    def test_explicit_bootstrap_release_validates_source_modes_and_normal_enable_keeps_stop(self):
+        self.assertEqual(copy.scalar(copy.patch_env(BOOTSTRAP), 'KILL_SWITCH'), 'true')
+        for data in [BOOTSTRAP.replace(b'NOVA_FRESH_BOOTSTRAP=2026-10-17', b'NOVA_FRESH_BOOTSTRAP=unknown'),
+                     BOOTSTRAP.replace(b'PAPER_TRADING=true', b'PAPER_TRADING=false')]:
+            with self.assertRaises(copy.Failure): copy.patch_env(data, release_bootstrap_stop=True)
+
+    def rpc_fixture(self, directory):
+        inst = rpc.Installer(argparse.Namespace(app_dir=directory, dry_run=False, restore=None))
+        inst.original_env = BOOTSTRAP
+        inst.patched_env = rpc.patch_rpc_env(BOOTSTRAP, 'https://paid.example/private', 'wss://paid.example/private')
+        (Path(directory) / '.env').write_bytes(BOOTSTRAP)
+        inst.project = 'nova'
+        inst.image = 'sha256:' + 'a' * 64
+        inst.before = [None, None]
+        inst.prior_compose = [directory + '/docker-compose.yml']
+        inst.before_ids = ['web', 'bot', 'db']
+        return inst
+
+    def test_rpc_success_keeps_stop_and_paper_and_recreates_only_existing_api(self):
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()) as output:
+            inst = self.rpc_fixture(d)
+            with patch.object(rpc.copy, 'run', return_value=''), \
+                 patch.object(inst, 'recreate') as recreate, patch.object(inst, 'wait_ready'), \
+                 patch.object(inst, 'other_ids', return_value=inst.before_ids), \
+                 patch.object(inst, 'current_api', return_value={'image': inst.image}):
+                inst.apply()
+            recreate.assert_called_once()
+            saved = (Path(d) / '.env').read_bytes()
+            self.assertEqual(saved, inst.patched_env)
+            copy.require_bootstrap_modes(saved)
+            self.assertIn('NOVA_COPY_RPC_READY=YES', output.getvalue())
+            self.assertEqual((inst.backup / 'env').read_bytes(), BOOTSTRAP)
+
+    def test_rpc_runtime_failure_restores_original_env_without_touching_other_services(self):
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()) as output:
+            inst = self.rpc_fixture(d)
+            with patch.object(rpc.copy, 'run', return_value=''), \
+                 patch.object(inst, 'recreate') as recreate, \
+                 patch.object(inst, 'wait_ready', side_effect=rpc.Failure('unhealthy')), \
+                 patch.object(inst, 'other_ids', return_value=inst.before_ids), \
+                 patch.object(inst, 'current_api', return_value={'id': 'api', 'image': inst.image}), \
+                 patch.object(inst, 'control', return_value={'restored': 'unchanged'}) as control:
+                with self.assertRaises(rpc.Failure): inst.apply()
+            self.assertEqual((Path(d) / '.env').read_bytes(), BOOTSTRAP)
+            self.assertEqual(recreate.call_count, 2)
+            self.assertEqual(control.call_args.args[0], 'restore')
+            self.assertTrue(control.call_args.kwargs['oneoff'])
+            self.assertIn('NOVA_RPC_ROLLED_BACK', output.getvalue())
+
+
 class FakeCopy(copy.Installer):
     def __init__(self, app, failure=None):
         super().__init__(argparse.Namespace(app_dir=str(app), dry_run=False, restore=None))
@@ -402,6 +540,18 @@ class RolloutRules(unittest.TestCase):
             self.assertFalse(inst.flags_enabled)
             self.assertEqual((Path(d) / '.env').read_bytes(), inst.original_env)
             self.assertIn('restore', inst.calls)
+
+    def test_failed_live_verification_restores_the_released_bootstrap_stop(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(copy, 'run', return_value=''), \
+             patch.object(copy.time, 'sleep'), contextlib.redirect_stdout(io.StringIO()):
+            inst = self.fixture(d, 'unhealthy_after_restart')
+            inst.original_env = BOOTSTRAP
+            (Path(d) / '.env').write_bytes(BOOTSTRAP)
+            inst.args.release_bootstrap_stop = True
+            inst.patched_env = copy.patch_env(BOOTSTRAP, release_bootstrap_stop=True)
+            with self.assertRaises(copy.Failure): inst.apply()
+            self.assertEqual((Path(d) / '.env').read_bytes(), BOOTSTRAP)
+            self.assertFalse(inst.flags_enabled)
 
     def test_rollback_refuses_to_overwrite_later_env_edits(self):
         with tempfile.TemporaryDirectory() as d, patch.object(copy, 'run', return_value=''), \

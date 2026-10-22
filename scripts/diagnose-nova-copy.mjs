@@ -276,8 +276,9 @@ async function main() {
 }
 
 if (
-  (process.argv[1] === '-' && import.meta.url.endsWith('/[eval1]')) ||
-  (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  process.argv[2] !== '--functions-only' &&
+  ((process.argv[1] === '-' && import.meta.url.endsWith('/[eval1]')) ||
+    (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href))
 ) {
   const timer = setTimeout(() => {
     console.error('NOVA_COPY_DIAG_TIMEOUT_NO_CHANGES');

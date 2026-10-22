@@ -25,6 +25,28 @@ class NginxIntegration(unittest.TestCase):
     def command(self, *args):
         return subprocess.check_output(args, text=True, stderr=subprocess.STDOUT).strip()
 
+    def test_compose_keeps_literal_rpc_credentials_and_stopped_bootstrap_modes(self):
+        spec = importlib.util.spec_from_file_location('nova_rpc_compose_test', ROOT / 'scripts/configure-nova-copy-rpc.py')
+        rpc = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(rpc)
+        before = (b'NOVA_FRESH_BOOTSTRAP=2026-10-17\nLIVE_TRADING=false\nPAPER_TRADING=true\n'
+                  b'COPY_TRADING_EXECUTION_ENABLED=false\nKILL_SWITCH=true\nMINIAPP_URL=\n')
+        http, ws = 'https://paid.example/private$token?key=1&x=2', 'wss://paid.example/private$token'
+        with tempfile.TemporaryDirectory() as d:
+            temp = Path(d)
+            env = temp / '.env'
+            env.write_bytes(rpc.patch_rpc_env(before, http, ws))
+            compose = temp / 'compose.json'
+            compose.write_text(json.dumps({'services': {'api': {'image': 'node:20-alpine',
+                'env_file': [str(env)]}}}))
+            actual = json.loads(self.command('docker', 'compose', '--env-file', str(env),
+                '-f', str(compose), 'config', '--format', 'json'))['services']['api']['environment']
+            self.assertEqual(actual['SOLANA_RPC_URL'], http)
+            self.assertEqual(actual['SOLANA_WS_URL'], ws)
+            self.assertEqual(actual['KILL_SWITCH'], 'true')
+            self.assertEqual(actual['LIVE_TRADING'], 'false')
+            self.assertEqual(actual['COPY_TRADING_EXECUTION_ENABLED'], 'false')
+
     def test_running_nginx_reloads_legacy_miniapp_to_disabled_for_both_templates(self):
         name = 'nova-ops-' + uuid.uuid4().hex[:10]
         network = name + '-net'

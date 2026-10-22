@@ -2,7 +2,8 @@
 
 This release changes operator scripts, the Mini App nginx locations and bot menu
 synchronization. It does not replace the financial engine, choose source wallets,
-create account copy configurations, change RPC credentials or increase limits.
+create account copy configurations or increase limits. Optional fresh-bootstrap
+RPC setup accepts endpoints privately and changes only the two RPC URL settings.
 
 ## Run on the existing Nova VPS
 
@@ -19,6 +20,44 @@ Run these steps in order:
 Keep `disable-telegram-miniapp.py`, `enable-live-copy-trading.py` and
 `nova-live-copy-control.mjs` together. `--dry-run` performs read-only preflight.
 Both mutations share an exclusive `.env.nova-ops.lock`.
+
+## Fresh server with only public RPC and the initial stop still on
+
+When diagnostics show no dedicated provider, `envKillSwitch=true`, Redis kill
+switch off and an automatic outage pause, first run
+`configure-nova-copy-rpc.py --app-dir /opt/nova-solana-ai-sniper`. Keep this script,
+the two installers, `nova-live-copy-control.mjs` and `diagnose-nova-copy.mjs`
+together. It prompts through a private terminal for complete Solana **mainnet**
+HTTPS and WSS URLs. For GetBlock, copy each interface's actual endpoint from its
+dashboard; do not assume the HTTP and WebSocket tokens are interchangeable.
+The URLs travel to the candidate probe on private stdin, never shell arguments.
+
+Before writing, the candidate must prove mainnet genesis, slot, recent blockhash
+and actual pump.fun program-log delivery over WSS. An idle subscription alone is
+insufficient. Setup requires the original `2026-10-17` bootstrap marker, stopped
+env modes, inactive admin execution flags, zero active copy/launch auto-buy
+configs, no Redis kill switch or manual scanner pause and the existing automatic
+resume policy. Existing other-provider settings and duplicate/unusual env entries
+are preserved by refusing replacement. Shared public endpoints are rejected.
+
+Only `SOLANA_RPC_URL` and `SOLANA_WS_URL` are written, single-quoted to retain
+literal dollar signs. The existing API image is pinned, backed up and recreated;
+PAPER and the env kill switch remain on. A bounded wait requires the actual
+scanner/RPC gates to recover and the automatic pause to clear under the existing
+policy. No scanner Redis key is cleared by the installer. Failure restores the
+saved environment/image while preserving later manual edits and the Mini App
+shutdown. Success prints `NOVA_COPY_RPC_READY=YES`.
+
+Then use the explicitly authorized activation option:
+`enable-live-copy-trading.py --app-dir /opt/nova-solana-ai-sniper --release-bootstrap-stop`.
+This can release only the original bootstrap env stop when no Redis kill switch,
+active admin execution override, active copy config or already requested live
+mode exists. Every ordinary scanner/RPC/simulation/safety/limit gate still runs;
+unknown Redis stop values block activation. The stopped env is backed up before
+the live flags and `KILL_SWITCH=false` are written together. Failed LIVE/watcher
+verification restores the original env stop as well as the mode/feature flags.
+Normal activation without this option never changes the kill-switch setting.
+Both operations print exact private restore commands and share the same lock.
 
 ## Mini App shutdown
 

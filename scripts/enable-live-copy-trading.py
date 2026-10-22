@@ -27,9 +27,36 @@ ENV_FLAGS = {'LIVE_TRADING': 'true', 'PAPER_TRADING': 'false',
              'COPY_TRADING_EXECUTION_ENABLED': 'true'}
 
 
-def patch_env(data):
+def scalar(data, key, default=None):
+    values = re.findall(r'(?m)^[ \t]*(?:export[ \t]+)?' + re.escape(key) +
+                        r'[ \t]*=([^\r\n]*)', data.decode('utf-8'))
+    require(len(values) <= 1, 'Duplicate mode/provider setting: ' + key)
+    if not values:
+        return default
+    value = values[0].strip()
+    if value.startswith(('"', "'")):
+        quote = value[0]
+        match = re.fullmatch(re.escape(quote) + r'([^' + re.escape(quote) + r']*)' +
+                             re.escape(quote) + r'[ \t]*(?:#.*)?', value)
+        require(match is not None, 'Unusual mode/provider setting: ' + key)
+        return match[1]
+    return value.split('#', 1)[0].strip()
+
+
+def require_bootstrap_modes(data):
+    expected = {'NOVA_FRESH_BOOTSTRAP': '2026-10-17', 'LIVE_TRADING': 'false',
+                'PAPER_TRADING': 'true', 'COPY_TRADING_EXECUTION_ENABLED': 'false',
+                'KILL_SWITCH': 'true'}
+    for key, value in expected.items():
+        require(scalar(data, key) == value, 'Bootstrap stop release requires the original stopped mode: ' + key)
+
+
+def patch_env(data, release_bootstrap_stop=False):
+    if release_bootstrap_stop:
+        require_bootstrap_modes(data)
     text = data.decode('utf-8')
-    for key, value in ENV_FLAGS.items():
+    flags = {**ENV_FLAGS, **({'KILL_SWITCH': 'false'} if release_bootstrap_stop else {})}
+    for key, value in flags.items():
         pattern = r'(?m)^[ \t]*(?:export[ \t]+)?' + key + r'[ \t]*=[^\r\n]*'
         for match in re.finditer(pattern, text):
             old = match[0].split('=', 1)[1].strip()
@@ -73,7 +100,7 @@ class Installer:
                 if oneoff else ['docker', 'exec', '-i', self.current_api()['id']])
         return json.loads(run(argv + tail, 'Redacted copy-trading ' + action, self.helper))
 
-    def preflight(self):
+    def inspect_installation(self):
         # Every operator Compose command supplies explicit -f, --env-file and
         # project arguments. Validate actual running-container layers below;
         # an unused default override file or COMPOSE_FILE must not block recovery.
@@ -87,7 +114,7 @@ class Installer:
             'Local Docker context check'))
         require(host.startswith('unix://'), 'Only the local Docker Unix socket is supported')
         self.original_env = ops.read_file(self.app / '.env')
-        self.patched_env = patch_env(self.original_env)
+        self.patched_env = patch_env(self.original_env, getattr(self.args, 'release_bootstrap_stop', False))
         candidates = ops.containers('label=com.docker.compose.project.working_dir=' + str(self.app))
         projects = {c['labels'].get('com.docker.compose.project') for c in candidates}
         require(len(projects) == 1 and None not in projects, 'No unique local Compose project')
@@ -102,10 +129,16 @@ class Installer:
         require(re.fullmatch(r'sha256:[0-9a-f]{64}', self.image), 'Immutable API image required')
         self.prior_compose = api['labels']['com.docker.compose.project.config_files'].split(',')
         self.before_ids = self.other_ids()
-        result = self.control('prepare')
+
+    def preflight(self):
+        self.inspect_installation()
+        releasing = getattr(self.args, 'release_bootstrap_stop', False)
+        result = self.control('prepare-bootstrap' if releasing else 'prepare')
         print('COPY_PREFLIGHT=' + json.dumps(result['report'], separators=(',', ':')))
         require(result['report']['ok'], 'COPY_NOT_ACTIVATED: repair the reported blockers first')
         self.before = result['before']
+        if releasing:
+            print('BOOTSTRAP_STOP_RELEASE=env only; Redis/manual stops remain enforced; saved stop restored on failure')
 
     def save(self):
         base = self.app / 'data/copy-live-backups'
@@ -120,6 +153,7 @@ class Installer:
             'operationId': self.operation_id, 'before': self.before,
             'prior_compose': self.prior_compose,
             'env_before': ops.digest(self.original_env), 'env_after': ops.digest(self.patched_env),
+            'releaseBootstrapStop': getattr(self.args, 'release_bootstrap_stop', False),
         }
         for name, data in [('env', self.original_env),
                            ('manifest.json', (json.dumps(self.manifest, indent=2) + '\n').encode())]:
@@ -238,7 +272,11 @@ def main():
     parser.add_argument('--app-dir', default='/opt/nova-solana-ai-sniper')
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--restore', metavar='BACKUP_DIR')
+    parser.add_argument('--release-bootstrap-stop', action='store_true',
+                        help='Explicitly release only the fresh-install env stop after all live-copy gates pass')
     args = parser.parse_args()
+    if args.restore and args.release_bootstrap_stop:
+        parser.error('--release-bootstrap-stop cannot be combined with --restore')
     os.umask(0o077)
     installer = Installer(args)
     try:

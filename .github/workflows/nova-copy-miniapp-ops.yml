@@ -24,7 +24,8 @@ jobs:
         run: node --test scripts/test_nova_live_copy_control.mjs scripts/test_nova_copy_diagnostic.mjs
       - name: Operator syntax
         run: |
-          python3 -m py_compile scripts/disable-telegram-miniapp.py scripts/enable-live-copy-trading.py
+          python3 -m py_compile scripts/disable-telegram-miniapp.py scripts/enable-live-copy-trading.py scripts/configure-nova-copy-rpc.py
+          node --input-type=module - --functions-only < scripts/diagnose-nova-copy.mjs
           bash -n scripts/init-letsencrypt.sh
           git diff --check
       - name: Actual nginx routes for both official templates

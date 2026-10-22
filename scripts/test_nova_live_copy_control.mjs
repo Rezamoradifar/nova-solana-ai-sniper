@@ -6,6 +6,8 @@ import {
   restoreFeatures,
   featureSnapshot,
   FEATURE_KEYS,
+  bootstrapStopReleaseAllowed,
+  redisStopState,
 } from './nova-live-copy-control.mjs';
 
 const { structuredClone } = globalThis;
@@ -98,6 +100,67 @@ test('postcheck demands LIVE and an actually running, healthy watcher', () => {
     s.copy.watcher[key] = false;
     assert(blockers(s, true).includes('COPY_WATCHER_NOT_READY'));
     s.copy.watcher[key] = true;
+  }
+});
+
+test('bootstrap release is explicit and limited to the stopped fresh installation', () => {
+  const s = healthy();
+  s.activeCopyConfigs = 0;
+  s.killSwitch = true;
+  s.bootstrap = {
+    marker: '2026-10-17',
+    envKillSwitch: true,
+    redisKillSwitch: false,
+    envLiveTrading: false,
+    envPaperTrading: true,
+    envCopyExecution: false,
+  };
+  assert(bootstrapStopReleaseAllowed(s, [null, null]));
+  assert(blockers(s).includes('KILL_SWITCH_ACTIVE_OR_UNKNOWN'));
+  assert.deepEqual(blockers({ ...s, killSwitch: false }), []);
+  for (const [key, value] of [
+    ['marker', null],
+    ['envKillSwitch', false],
+    ['redisKillSwitch', true],
+    ['redisKillSwitch', null],
+    ['envLiveTrading', true],
+    ['envPaperTrading', false],
+    ['envCopyExecution', true],
+  ]) {
+    const changed = structuredClone(s);
+    changed.bootstrap[key] = value;
+    assert.equal(bootstrapStopReleaseAllowed(changed, [null, null]), false, key);
+  }
+  for (const [key, value] of [
+    ['activeCopyConfigs', 1],
+    ['activeCopyConfigs', undefined],
+  ]) {
+    assert.equal(bootstrapStopReleaseAllowed({ ...s, [key]: value }, [null, null]), false);
+  }
+  assert.equal(bootstrapStopReleaseAllowed(s, [{ enabled: true }, null]), false);
+  const unhealthy = structuredClone(s);
+  unhealthy.network.scanner.state = 'UNHEALTHY';
+  assert(
+    blockers({ ...unhealthy, killSwitch: false }).includes('SCANNER_UNHEALTHY_REPAIR_RPC_OR_WS'),
+  );
+});
+
+test('unknown Redis stop values stay unknown and block activation', () => {
+  assert.equal(redisStopState('1'), true);
+  assert.equal(redisStopState('0'), false);
+  assert.equal(redisStopState(null), false);
+  for (const value of [undefined, '', 'true', 'off', 'unexpected']) {
+    assert.equal(redisStopState(value), null);
+    assert(
+      blockers({ ...healthy(), killSwitch: redisStopState(value) }).includes(
+        'KILL_SWITCH_ACTIVE_OR_UNKNOWN',
+      ),
+    );
+    assert(
+      blockers({ ...healthy(), scannerPause: redisStopState(value) }).includes(
+        'SCANNER_BUYS_PAUSED',
+      ),
+    );
   }
 });
 
