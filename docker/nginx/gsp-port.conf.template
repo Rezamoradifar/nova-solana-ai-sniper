@@ -19,13 +19,31 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    location /app/ {
-        root /usr/share/nginx/html;
-        try_files $uri /app/index.html;
-        add_header Content-Security-Policy "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    # NOVA_TELEGRAM_MINIAPP_DISABLED_BEGIN
+    location = /app {
+        default_type text/plain;
+        add_header Cache-Control "no-store" always;
+        return 410 "Telegram Mini App is disabled.\n";
     }
+
+    location ^~ /app/ {
+        default_type text/plain;
+        add_header Cache-Control "no-store" always;
+        return 410 "Telegram Mini App is disabled.\n";
+    }
+
+    location = /api/auth/telegram {
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        return 410 '{"code":"MINIAPP_DISABLED","error":"Telegram Mini App is disabled."}';
+    }
+
+    location = /api/auth/telegram/ {
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        return 410 '{"code":"MINIAPP_DISABLED","error":"Telegram Mini App is disabled."}';
+    }
+    # NOVA_TELEGRAM_MINIAPP_DISABLED_END
 
     location / {
         root /usr/share/nginx/html;

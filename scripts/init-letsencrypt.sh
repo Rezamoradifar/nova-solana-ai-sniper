@@ -23,9 +23,8 @@ set_env() {
     echo "$1=$2" >> .env
   fi
 }
-echo "==> Writing DOMAIN and MINIAPP_URL to .env"
+echo "==> Writing DOMAIN to .env"
 set_env DOMAIN "$DOMAIN"
-set_env MINIAPP_URL "https://${DOMAIN}/app/"
 
 if [ ! -d "$LIVE_PATH" ]; then
   echo "==> Creating a dummy self-signed certificate so nginx can boot"
@@ -54,8 +53,7 @@ docker run --rm \
 echo "==> Reloading nginx with the real certificate"
 $COMPOSE restart nginx
 
-echo "==> Starting certificate auto-renewal and restarting the bot so it shows the Mini App"
+echo "==> Starting certificate auto-renewal"
 $COMPOSE up -d certbot
-$COMPOSE up -d --force-recreate telegram-bot
 
-echo "Done. Mini App: https://${DOMAIN}/app/"
+echo "Done. HTTPS: https://${DOMAIN}/"

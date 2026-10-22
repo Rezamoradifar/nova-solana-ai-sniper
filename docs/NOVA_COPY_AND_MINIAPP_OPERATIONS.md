@@ -1,0 +1,204 @@
+# Live copy trading and Telegram Mini App shutdown
+
+This release changes operator scripts, the Mini App nginx locations and bot menu
+synchronization. It does not replace the financial engine, choose source wallets,
+create account copy configurations or increase limits. Optional fresh-bootstrap
+RPC setup accepts endpoints privately and changes only the two RPC URL settings.
+
+## Run on the existing Nova VPS
+
+Use the existing root Termius session on the server hosting
+`/opt/nova-solana-ai-sniper`. Fetch this reviewed branch and extract only its
+operator scripts into a private persistent directory. Do not switch or reset the
+installed checkout and do not run the legacy broad mainnet configuration script.
+
+Run these steps in order:
+
+1. `python3 /path/to/scripts/disable-telegram-miniapp.py --app-dir /opt/nova-solana-ai-sniper`
+2. `python3 /path/to/scripts/enable-live-copy-trading.py --app-dir /opt/nova-solana-ai-sniper`
+
+Keep `disable-telegram-miniapp.py`, `enable-live-copy-trading.py` and
+`nova-live-copy-control.mjs` together. `--dry-run` performs read-only preflight.
+Both mutations share an exclusive `.env.nova-ops.lock`.
+
+## Fresh server with only public RPC and the initial stop still on
+
+When diagnostics show no dedicated provider, `envKillSwitch=true`, Redis kill
+switch off and an automatic outage pause, first run
+`configure-nova-copy-rpc.py --app-dir /opt/nova-solana-ai-sniper`. Keep this script,
+the two installers, `nova-live-copy-control.mjs` and `diagnose-nova-copy.mjs`
+together. It prompts through a private terminal for complete Solana **mainnet**
+HTTPS and WSS URLs. For GetBlock, copy each interface's actual endpoint from its
+dashboard; do not assume the HTTP and WebSocket tokens are interchangeable.
+The URLs travel to the candidate probe on private stdin, never shell arguments.
+
+Before writing, the candidate must prove mainnet genesis, slot, recent blockhash
+and actual pump.fun program-log delivery over WSS. An idle subscription alone is
+insufficient. Setup requires the original `2026-10-17` bootstrap marker, stopped
+env modes, inactive admin execution flags, zero active copy/launch auto-buy
+configs, no Redis kill switch or manual scanner pause and the existing automatic
+resume policy. Existing other-provider settings and duplicate/unusual env entries
+are preserved by refusing replacement. Shared public endpoints are rejected.
+
+Only `SOLANA_RPC_URL` and `SOLANA_WS_URL` are written, single-quoted to retain
+literal dollar signs. The existing API image is pinned, backed up and recreated;
+PAPER and the env kill switch remain on. A bounded wait requires the actual
+scanner/RPC gates to recover and the automatic pause to clear under the existing
+policy. No scanner Redis key is cleared by the installer. Failure restores the
+saved environment/image while preserving later manual edits and the Mini App
+shutdown. Success prints `NOVA_COPY_RPC_READY=YES`.
+
+Then use the explicitly authorized activation option:
+`enable-live-copy-trading.py --app-dir /opt/nova-solana-ai-sniper --release-bootstrap-stop`.
+This can release only the original bootstrap env stop when no Redis kill switch,
+active admin execution override, active copy config or already requested live
+mode exists. Every ordinary scanner/RPC/simulation/safety/limit gate still runs;
+unknown Redis stop values block activation. The stopped env is backed up before
+the live flags and `KILL_SWITCH=false` are written together. Failed LIVE/watcher
+verification restores the original env stop as well as the mode/feature flags.
+Normal activation without this option never changes the kill-switch setting.
+Both operations print exact private restore commands and share the same lock.
+
+## Mini App shutdown
+
+- `/app`, its subroutes and static assets return HTTP 410 and `Cache-Control: no-store`.
+- Public Telegram Mini App authentication returns HTTP 410. Ordinary website/API
+  routes continue to work.
+- `MINIAPP_URL` is cleared without changing other environment values. The current
+  bot image is recreated with an empty URL, so newly generated bot home screens
+  no longer contain an app button. The default Telegram menu becomes `commands`.
+- Website, API, database, Redis and marketing-engine containers are not replaced.
+- Each running official nginx template is validated before any reload. Changes
+  use the existing bind-mounted inode; replacing the file by rename would leave
+  the container using the old configuration.
+- The rendered nginx configuration must contain the complete disabled-route
+  block. After HUP, fresh HTTP connections are checked until two complete passes
+  confirm 410/no-store and the original dashboard/API health. An old worker's
+  immediate 200/301 response is retried within the bounded transition window.
+  Persistent failures retain rollback and print only status/cache diagnostics.
+- Source bot startup now synchronizes both the enabled and disabled menu states.
+  SSL renewal/setup no longer re-populates `MINIAPP_URL`.
+
+Success prints `NOVA_MINIAPP_DISABLED=YES`. Previously issued JWTs are not revoked;
+the application has no distinct Mini App token scope. Historical chat buttons may
+remain in old messages, but their application URL is blocked. BotFather's **Main
+Mini App** setting is separate from the default Bot API menu. The installer reports
+`has_main_web_app`; it cannot remove that BotFather setting. Network errors during
+the final menu reset report a partial result and a failed exit status.
+
+If shutdown reports that the web routes are disabled and bot configuration was
+applied but the menu was not verified, run the same script with `--menu-only`.
+It verifies the disabled files/routes and the bot's empty `MINIAPP_URL`, then
+changes and verifies only the remote default menu. It does not rewrite files,
+reload nginx, recreate a container or replace the original backup. `--dry-run
+--menu-only` reads the current menu without changing it.
+
+Menu calls retry bounded transient network/container failures. When API and bot
+credentials match by a private in-container SHA-256 comparison, menu calls use
+the stable API container; a different API token is never used as a fallback.
+`NOVA_TELEGRAM_MENU_CHECK` reports only a classified error, method, numeric status
+and retry delay. Authentication failures and long flood-control waits fail
+without blind retries. The BotFather `getMe` metadata lookup is independent of
+the required set/get-menu confirmation: a metadata failure reports `unknown`
+rather than undoing a confirmed menu result or claiming the setting is absent.
+
+## Live copy activation
+
+The existing engine uses one global `LIVE_TRADING` switch for swaps. Turning that
+on with active launch auto-buy configurations could unexpectedly promote those
+simulations into real buys. This installer therefore refuses activation when any
+unrelated `isActive && autoBuyOnLaunch` configuration exists. It rechecks that
+condition under a database table lock before committing the two feature flags.
+It does not disable, delete or modify those user configurations.
+
+Other requirements, all checked before any financial-setting mutation:
+
+- Official local Docker Compose installation and compatible running API image.
+- Live API/network readiness, a healthy detection scanner and no scanner-buy pause.
+- Redis and safety limits work; no kill switch is active; buy simulation is enabled.
+- A dedicated RPC proves Solana mainnet by its genesis hash, slot and recent
+  blockhash. Up to three existing configured source targets are checked for
+  signatures and parsed transaction history. No provider key is printed.
+- Existing copy ceilings do not exceed **0.1 SOL per buy, 10 attempts per Tehran
+  day, three open positions and 150 bps slippage**. Lower limits stay unchanged.
+
+The installer backs up `.env` and the precise existing admin feature overrides,
+sets only `LIVE_TRADING=true`, `PAPER_TRADING=false` and
+`COPY_TRADING_EXECUTION_ENABLED=true`, and persists only the two corresponding
+admin boolean overrides. A transaction audit records the before/after state so
+an uncertain helper response can be reconciled. It restarts **only `api`** using
+the exact image ID that was already running, without building, pulling or running
+migrations. The Mini App shutdown, website, bot and database settings are kept.
+
+Success requires the network to report `LIVE`, copy execution to report `live`,
+and the copy watcher to report both running and healthy, with all safety gates
+still passing. It prints `NOVA_COPY_LIVE_READY=...`. Zero active copy targets is
+reported as zero: the infrastructure can be enabled without creating trades.
+Users must choose and enable their own targets at `/copy-trading` and fund their
+existing account trading wallet. Connecting SafePal by public address alone does
+not give the server a transaction signer.
+
+Enabling this mode authorizes bounded automatic execution by existing active
+user-owned copy configurations. The helper itself constructs no signer and sends
+no trade, but the resumed worker may trade after restart. A readiness success is
+not proof of a completed on-chain trade or realized profit.
+
+## Failure and recovery
+
+Each installer prints its private backup path and exact `--restore` command.
+Copy preflight blockers produce `COPY_NOT_ACTIVATED` before writing mode flags,
+while a Mini App shutdown completed in step one stays in place. In particular,
+an unhealthy RPC/scanner must be repaired before live activation can succeed.
+The scripts do not replace a broken paid RPC with a public endpoint or clear a
+manual kill switch/scanner pause.
+
+For blocked preflight, run `scripts/diagnose-nova-copy.mjs` on stdin with
+`docker exec -i API_CONTAINER_ID node --input-type=module -`. It reads the
+running API environment and the three safety Redis keys, classifying automatic
+versus other/manual scanner pauses without revealing the reason text. For up to
+three existing dedicated providers it verifies mainnet genesis, slot and latest
+blockhash, then tests the configured/derived WebSocket with the actual pump.fun
+`logsSubscribe` request. A subscription acknowledgement without a matching log
+notification is reported separately from received traffic. The report contains
+provider labels, boolean configuration presence, HTTP/numeric RPC codes and
+classified errors only; no provider URL, token, raw error, wallet or log payload.
+It never changes settings, clears a stop, restarts services or sends a trade.
+If no dedicated provider is configured, it reports
+`CONFIGURE_DEDICATED_MAINNET_HTTP_AND_WS` instead of treating the shared public
+fallback as a ready paid provider. An HTTP/WS probe does not by itself prove that
+the running scanner recovered; live activation still uses its existing gates.
+
+After an activation failure, rollback restores the saved flags and environment
+and restarts the preserved API image. It works through a one-off Node process
+even if the API cannot boot. A later manual `.env`/admin edit stops automatic
+overwrite and is reported as a partial recovery. Rollback cannot reverse a
+transaction already submitted by the worker. Normal position monitoring continues
+using the existing per-position real/paper marker in the same image.
+
+Standard Compose and literal image-only JSON/YAML release/rollback overlays from
+the existing web installers are supported, including `nova-real-ui` and wallet UI
+release files. Tagged images must resolve locally to the corresponding running
+image ID. An unrelated frontend overlay is retained while only the API or bot
+target is pinned and recreated; the running website is not replaced. Multiple
+image-only layers follow their original ordering. No source override is deleted
+or rewritten.
+
+Overlays changing ports, environment, commands, mounts, build configuration or
+other settings, full resolved configuration snapshots, symlinks and interpolated
+image values are rejected. A rejection prints `NOVA_COMPOSE_CONTEXT` with only
+service and filenames, never secret environment values. These require inspection
+of their actual differences rather than silently discarding them.
+
+## Verification scope
+
+Offline tests cover mode/limit gates, concurrent admin changes, response-loss
+reconciliation, rollback preservation, template idempotency and immutable image
+overlay validation. The Docker integration test starts nginx with a working legacy
+Mini App, patches its existing bind-mounted template, reruns envsubst and reloads
+the same running container. It then checks actual nginx precedence, the disabled
+routes and the retained dashboard/API proxy for both HTTP and TLS configurations.
+
+The authoring environment has no Nova SSH key or connected Nova management tool.
+Publishing this change and passing CI do not install it on the VPS. Public HTTP
+probes can verify the resulting shutdown/runtime status only after the server
+command has been executed.

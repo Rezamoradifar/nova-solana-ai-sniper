@@ -89,13 +89,14 @@ async function main() {
     redis,
     process.env.PLATFORM_TREASURY_WALLET_ADDRESS,
   );
-  if (env.MINIAPP_URL) {
-    await bot.api
-      .setChatMenuButton({
-        menu_button: { type: 'web_app', text: 'Open App', web_app: { url: env.MINIAPP_URL } },
-      })
-      .catch((err) => logger.warn({ err }, 'could not set the Mini App menu button'));
-  }
+  // Sync both states so clearing MINIAPP_URL also removes a previously set app menu.
+  await bot.api
+    .setChatMenuButton({
+      menu_button: env.MINIAPP_URL
+        ? { type: 'web_app', text: 'Open App', web_app: { url: env.MINIAPP_URL } }
+        : { type: 'commands' },
+    })
+    .catch((err) => logger.warn({ err }, 'could not sync the bot menu button'));
   registerUiRouter(bot, {
     miniappUrl: env.MINIAPP_URL,
     prisma,
