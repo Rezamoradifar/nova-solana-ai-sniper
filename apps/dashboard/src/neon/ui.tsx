@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type ButtonHTMLAttributes } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useWalletConnection } from '../lib/WalletContext.js';
+import { MobileWalletActions } from '../components/MobileWalletActions.js';
 import { fetchMarkets, BOT_URL, type MarketToken } from '../lib/publicMarket.js';
 import { DEMO_MARKETS, PRODUCTS, type Language, dollars, percent } from './model.js';
 import './neon.css';
@@ -89,8 +90,74 @@ export function CandleChart({ compact = false, period = '1H' }: { compact?: bool
   return <div className={`n-candle-chart ${compact ? 'compact' : ''}`}><span className="n-chart-disclosure">{t('ILLUSTRATIVE CANDLES · NOT MARKET HISTORY', 'کندل نمایشی · تاریخچه واقعی بازار نیست')}</span><svg viewBox="0 0 650 320" role="img" aria-label={t('Illustrative candlestick chart. Not real historical prices.', 'نمودار کندل نمایشی؛ قیمت‌های تاریخی واقعی نیستند.')} preserveAspectRatio="none"><defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#00E5FF" stopOpacity=".1" /><stop offset="1" stopColor="#00E5FF" stopOpacity="0" /></linearGradient></defs>{[50,100,150,200,250].map(y => <g key={y}><line x1="10" x2="598" y1={y} y2={y} stroke="#ffffff0b" /><text x="605" y={y + 4} fill="#94a0b7" fontSize="10" fontFamily="monospace">{(154-y*.047).toFixed(2)}</text></g>)}{[80,200,320,440,560].map(x => <line key={x} x1={x} x2={x} y1="20" y2="290" stroke="#ffffff08" />)}<path d="M10 230Q70 218 140 210T260 180T400 137T565 102V295H10Z" fill={`url(#${id})`} /><path d="M10 230Q70 218 140 210T260 180T400 137T565 102" stroke="#8B5CF6" opacity=".65" fill="none" strokeWidth="1.3" />{candles.map(c => <g key={c.x} fill={c.up ? '#22C55E' : '#EF4444'} stroke={c.up ? '#22C55E' : '#EF4444'}><line x1={c.x+3.5} x2={c.x+3.5} y1={c.y-8} y2={c.y+c.body+8} /><rect x={c.x} y={c.y} width="7" height={c.body} rx=".7" stroke="none" /><rect x={c.x} y={292-c.volume} width="7" height={c.volume} opacity=".2" stroke="none" /></g>)}<line x1="10" x2="600" y1="94" y2="94" stroke="#00E5FF" strokeDasharray="4 5" opacity=".6" /><rect x="601" y="84" width="48" height="19" fill="#00E5FF" rx="2" /><text x="604" y="97" fill="#051316" fontSize="10" fontFamily="monospace">148.32</text>{['04:00','08:00','12:00','16:00','20:00'].map((v,i) => <text key={v} x={20+i*127} y="312" fill="#94a0b7" fontSize="10" fontFamily="monospace">{v}</text>)}</svg></div>;
 }
 function WalletDialog({ open, close }: { open: boolean; close: () => void }) {
-  const { t } = useExperience(); const w = useWalletConnection();
-  return <Modal open={open} close={close} title={t('Connect your wallet', 'اتصال کیف پول')}><p className="n-muted n-modal-copy">{t('Connect an installed Solana wallet. Only your approved public address is requested; this does not sign transactions.', 'کیف پول نصب‌شده سولانا را متصل کن. فقط آدرس عمومی تأییدشده خوانده می‌شود؛ تراکنشی امضا نمی‌شود.')}</p>{w.state.account ? <><Badge tone="green">{t('CONNECTED', 'متصل')}</Badge><p className="n-address" dir="ltr">{w.state.account.address}</p><Button variant="secondary" onClick={() => void w.disconnect()}>{t('Disconnect', 'قطع اتصال')}</Button></> : w.state.available.length ? w.state.available.map(wallet => <button type="button" className="n-wallet-option" key={wallet.name} onClick={() => void w.connect(wallet)} disabled={w.state.status !== 'disconnected'}><img src={wallet.icon} alt="" width="32" height="32" /><span>{wallet.name}</span><Icon /></button>) : <Empty title={t('No wallet detected', 'کیف پول شناسایی نشد')} text={t('Open this site inside your Solana wallet browser, or enable a compatible browser extension.', 'سایت را در مرورگر کیف پول سولانا باز کن یا افزونه سازگار مرورگر را فعال کن.')}><Button variant="secondary" onClick={w.refresh}><Icon name="refresh" />{t('Check again', 'بررسی دوباره')}</Button></Empty>}{w.state.status === 'connecting' && <p role="status">{t('Approve the connection in your wallet.', 'اتصال را در کیف پول تأیید کن.')}</p>}{w.state.error && <Risk>{w.state.error}</Risk>}<div className="n-safe-line"><Icon name="shield" />{t('Never share your seed phrase or private key.', 'هرگز عبارت بازیابی یا کلید خصوصی را به اشتراک نگذار.')}</div></Modal>;
+  const { t, lang } = useExperience();
+  const w = useWalletConnection();
+  const connecting = w.state.status === 'connecting';
+  const busy = connecting || w.state.status === 'disconnecting';
+
+  return (
+    <Modal open={open} close={close} title={t('Connect your wallet', 'اتصال کیف پول')}>
+      <p className="n-muted n-modal-copy">
+        {t(
+          'Connect an approved Solana wallet. Connecting only shares your public address, never a transaction signature.',
+          'کیف پول سولانای خود را متصل کنید. تنها آدرس عمومی خوانده می‌شود؛ هیچ تراکنشی امضا نخواهد شد.',
+        )}
+      </p>
+      {w.state.account ? (
+        <>
+          <Badge tone="green">{t('CONNECTED', 'متصل')}</Badge>
+          <p className="n-address" dir="ltr">{w.state.account.address}</p>
+          <Button variant="secondary" onClick={() => void w.disconnect()} disabled={busy}>
+            {t('Disconnect', 'قطع اتصال')}
+          </Button>
+        </>
+      ) : (
+        <>
+          {w.state.available.length > 0 ? w.state.available.map((wallet, index) => (
+            <button
+              type="button"
+              className="n-wallet-option"
+              key={wallet.name + index}
+              onClick={() => void w.connect(wallet)}
+              disabled={busy}
+            >
+              <img src={wallet.icon} alt="" width="32" height="32" />
+              <span>{wallet.name}</span>
+              <Icon />
+            </button>
+          )) : (
+            <Empty
+              title={t('No wallet detected', 'کیف پول شناسایی نشد')}
+              text={t(
+                'Open the site inside your Solana wallet browser, or enable a compatible extension.',
+                'سایت را در مرورگر داخلی کیف پول سولانا باز کنید یا افزونه سازگار را فعال کنید.',
+              )}
+            />
+          )}
+          {connecting && (
+            <div role="status" className="n-wallet-pending">
+              <p>{t('Approve the connection in your wallet.', 'اتصال را داخل کیف پول تأیید کنید.')}</p>
+              <Button variant="secondary" onClick={w.cancel}>
+                {t('Cancel request', 'لغو درخواست')}
+              </Button>
+            </div>
+          )}
+          {!busy && (
+            <Button variant="secondary" onClick={w.refresh}>
+              <Icon name="refresh" />{t('Check wallets again', 'بررسی دوباره کیف پول‌ها')}
+            </Button>
+          )}
+          <MobileWalletActions lang={lang} />
+        </>
+      )}
+      {w.state.error && <Risk>{w.state.error}</Risk>}
+      {w.state.notice && <p role="status" className="n-muted n-modal-copy">{w.state.notice}</p>}
+      <div className="n-safe-line">
+        <Icon name="shield" />
+        {t('Never share your seed phrase or private key.', 'هرگز عبارت بازیابی یا کلید خصوصی را به اشتراک نگذارید.')}
+      </div>
+    </Modal>
+  );
 }
 function Shell() {
   const { t, lang, setLang, demo, setDemo, openWallet } = useExperience(); const location = useLocation(); const [menu, setMenu] = useState(false); const trigger = useRef<HTMLButtonElement>(null); const wallet = useWalletConnection(); const isHome = location.pathname === '/';

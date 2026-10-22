@@ -1,0 +1,39 @@
+name: Nova real entrypoints checks
+on:
+  push:
+    branches:
+      - codex/nova-real-trading-entrypoints-20261022
+  pull_request:
+    branches:
+      - codex/nova-fresh-vps-recovery-20261017
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck dashboard
+        run: npx tsc --noEmit -p apps/dashboard/tsconfig.json
+      - name: Real readiness unit tests
+        run: npx vitest run apps/dashboard/src/neon/realReadiness.test.ts apps/dashboard/src/lib/walletConnection.test.ts apps/dashboard/src/lib/mobileWalletLinks.test.ts
+      - name: Production frontend build
+        run: npm run build --workspace @nova/dashboard
+      - name: Read-only diagnostic syntax
+        run: bash -n scripts/check-nova-real-trading.sh
+      - name: Web-only deployment syntax
+        run: bash -n scripts/deploy-nova-real-ui.sh
+      - name: Compose syntax without secrets
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.yml config --quiet
