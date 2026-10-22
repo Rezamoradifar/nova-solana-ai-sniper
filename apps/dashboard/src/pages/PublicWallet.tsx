@@ -197,7 +197,7 @@ export default function PublicWallet() {
                   <h3>No compatible wallet detected</h3>
                   <p>
                     {mobileBrowser
-                      ? 'Mobile Chrome/Safari cannot expose Phantom or Solflare to this page. Open GSP TRADING inside the wallet app browser, then connect again.'
+                      ? 'Mobile Chrome/Safari may not expose Phantom, Solflare or SafePal. Open this site in your wallet app's DApp browser, then connect again.'
                       : 'Use a browser with a Solana wallet extension, or open this page in a supported wallet’s in-app browser.'}
                   </p>
                   {embedded && (
@@ -215,6 +215,9 @@ export default function PublicWallet() {
                     <a href="https://solflare.com/download" target="_blank" rel="noreferrer">
                       Get Solflare <Icon name="external" size={14} />
                     </a>
+                    <a href="https://www.safepal.com/download?product=2" target="_blank" rel="noreferrer">
+                      Get SafePal <Icon name="external" size={14} />
+                    </a>
                   </div>
                 </div>
               )}
@@ -222,6 +225,7 @@ export default function PublicWallet() {
                 <div className="wallet-mobile-quickstart">
                   <strong>Mobile connection</strong>
                   <p>Open this exact GSP TRADING page inside your wallet app.</p>
+                  <p>SafePal: use DApps / Explore in the SafePal app to open moneyland.tr/wallet.</p>
                   <div className="wallet-mobile-links">
                     <a
                       href={`https://phantom.app/ul/browse/${encodeURIComponent(mobileUrl)}?ref=${encodeURIComponent(window.location.origin)}`}
