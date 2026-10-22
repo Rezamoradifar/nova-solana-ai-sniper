@@ -37,15 +37,19 @@ class NginxIntegration(unittest.TestCase):
             env = temp / '.env'
             env.write_bytes(rpc.patch_rpc_env(before, http, ws))
             compose = temp / 'compose.json'
-            compose.write_text(json.dumps({'services': {'api': {'image': 'node:20-alpine',
+            compose.write_text(json.dumps({'services': {'api': {'image': 'nginx:1.27-alpine',
                 'env_file': [str(env)]}}}))
-            actual = json.loads(self.command('docker', 'compose', '--env-file', str(env),
-                '-f', str(compose), 'config', '--format', 'json'))['services']['api']['environment']
-            self.assertEqual(actual['SOLANA_RPC_URL'], http)
-            self.assertEqual(actual['SOLANA_WS_URL'], ws)
-            self.assertEqual(actual['KILL_SWITCH'], 'true')
-            self.assertEqual(actual['LIVE_TRADING'], 'false')
-            self.assertEqual(actual['COPY_TRADING_EXECUTION_ENABLED'], 'false')
+            # `compose config` escapes $ as $$ for re-serializing a Compose file.
+            # Check the actual container environment, which is what Node reads.
+            argv = ['docker', 'compose', '--env-file', str(env), '-f', str(compose)]
+            try:
+                script = ('printf "%s\\n" "$SOLANA_RPC_URL" "$SOLANA_WS_URL" '
+                          '"$KILL_SWITCH" "$LIVE_TRADING" "$COPY_TRADING_EXECUTION_ENABLED"')
+                actual = subprocess.run(argv + ['run', '--rm', '--no-deps', '-T', 'api',
+                    'sh', '-c', script], text=True, capture_output=True, check=True).stdout.splitlines()
+                self.assertEqual(actual, [http, ws, 'true', 'false', 'false'])
+            finally:
+                self.command(*(argv + ['down', '--remove-orphans']))
 
     def test_running_nginx_reloads_legacy_miniapp_to_disabled_for_both_templates(self):
         name = 'nova-ops-' + uuid.uuid4().hex[:10]
