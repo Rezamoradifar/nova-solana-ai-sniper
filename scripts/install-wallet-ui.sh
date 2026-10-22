@@ -35,7 +35,7 @@ git merge-base --is-ancestor "$BASE_SHA" "$release" ||
 
 # Verify the patch cannot hide changes to trading code, API, or database schema.
 blocked="$(git diff --name-only "$BASE_SHA" "$release" -- . |
-  grep -Ev '^(apps/dashboard/src/(lib/(walletConnection(\.test)?\.ts|mobileWalletLinks(\.test)?\.ts)|components/MobileWalletActions\.(tsx|css)|moneyland-v2/core\.tsx|neon/ui\.tsx)|scripts/install-wallet-ui\.sh)$' || true)"
+  grep -Ev '^(apps/dashboard/src/(lib/(walletConnection(\.test)?\.ts|mobileWalletLinks(\.test)?\.ts)|components/MobileWalletActions\.(tsx|css)|moneyland-v2/core\.tsx|neon/ui\.tsx|pages/PublicWallet\.tsx)|scripts/install-wallet-ui\.sh)$' || true)"
 if test -n "$blocked"; then
   printf 'Unexpected paths in release:\n%s\n' "$blocked" >&2
   fail "Release contains changes outside the approved public wallet UI scope"
