@@ -92,6 +92,69 @@ class FileRules(unittest.TestCase):
             extra.write_text(json.dumps(valid))
             self.assertFalse(mini.official_compose_files(container, app))
 
+    def test_existing_real_ui_and_wallet_release_overlays_match_the_running_web_image(self):
+        with tempfile.TemporaryDirectory() as d:
+            app, image = Path(d), 'sha256:' + 'a' * 64
+            tag = 'nova-real-ui:b859cd8017a92c5dd4fb17aafc35cbe3b961d99f'
+            for name, data in [
+                ('release.yml', 'services:\n  gsp-web:\n    image: "' + tag + '"\n'),
+                ('release.json', json.dumps({'services': {'gsp-web': {'image': tag}}})),
+            ]:
+                extra = app / name
+                extra.write_text(data)
+                c = {'image': image, 'labels': {'com.docker.compose.service': 'gsp-web',
+                    'com.docker.compose.project.config_files': str(app / 'docker-compose.yml') + ',' + str(extra)}}
+                with patch.object(mini, 'run', return_value=image + '\n') as inspect:
+                    self.assertTrue(mini.official_compose_files(c, app), name)
+                    self.assertEqual(inspect.call_args.args[0][-1], tag)
+                with patch.object(mini, 'run', return_value='sha256:' + 'b' * 64):
+                    self.assertFalse(mini.official_compose_files(c, app), 'Retagged image must fail')
+
+    def test_multi_service_and_ordered_layers_preserve_unrelated_frontend_image_override(self):
+        with tempfile.TemporaryDirectory() as d:
+            app, image = Path(d), 'sha256:' + 'a' * 64
+            old, new = app / 'rollback.yml', app / 'api-live-copy-override.json'
+            old.write_text('services:\n  api:\n    image: "old-api:release"\n    pull_policy: never\n'
+                           '  gsp-web:\n    image: "old-web:release"\n    pull_policy: never\n')
+            new.write_text(json.dumps({'services': {'api': {'image': image, 'pull_policy': 'never'}}}))
+            c = {'image': image, 'labels': {'com.docker.compose.service': 'api',
+                'com.docker.compose.project.config_files': ','.join(map(str, [app / 'docker-compose.yml', old, new]))}}
+            with patch.object(mini, 'run', side_effect=AssertionError('Last immutable image needs no lookup')):
+                self.assertTrue(mini.official_compose_files(c, app))
+            c['labels']['com.docker.compose.service'] = 'telegram-bot'
+            self.assertTrue(mini.official_compose_files(c, app), 'An unrelated image layer is harmless')
+
+    def test_overlays_cannot_hide_financial_environment_ports_commands_or_includes(self):
+        image = 'sha256:' + 'a' * 64
+        for key, value in [('environment', {'LIVE_TRADING': 'true'}), ('ports', ['9999:80']),
+                           ('command', 'something'), ('volumes', ['/tmp:/repo']),
+                           ('build', {'context': '.'})]:
+            with self.assertRaises(mini.Failure):
+                mini.image_overlay(json.dumps({'services': {'api': {'image': image, key: value}}}).encode())
+        invalid = [
+            'services:\n  api:\n    image: "' + image + '"\n    environment: true\n',
+            'include: other.yml\nservices:\n  api:\n    image: sample\n',
+            'services:\n  api:\n    image: sample\n    image: duplicate\n',
+            'services:\n  api:\n    image: ${PRIVATE_IMAGE}\n',
+            '{"services":{"api":{"image":"a","image":"b"}}}',
+        ]
+        for text in invalid:
+            with self.assertRaises((mini.Failure, ValueError)):
+                mini.image_overlay(text.encode())
+
+    def test_overlay_symlink_and_missing_local_image_are_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            app, image = Path(d), 'sha256:' + 'a' * 64
+            target = app / 'release.json'
+            target.write_text(json.dumps({'services': {'gsp-web': {'image': 'missing:release'}}}))
+            link = app / 'link.json'; link.symlink_to(target)
+            c = {'image': image, 'labels': {'com.docker.compose.service': 'gsp-web',
+                'com.docker.compose.project.config_files': str(app / 'docker-compose.yml') + ',' + str(link)}}
+            self.assertFalse(mini.official_compose_files(c, app))
+            c['labels']['com.docker.compose.project.config_files'] = str(app / 'docker-compose.yml') + ',' + str(target)
+            with patch.object(mini, 'run', side_effect=mini.Failure('image not present')):
+                self.assertFalse(mini.official_compose_files(c, app))
+
 
 class FakeCopy(copy.Installer):
     def __init__(self, app, failure=None):

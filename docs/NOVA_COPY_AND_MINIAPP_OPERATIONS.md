@@ -99,9 +99,19 @@ overwrite and is reported as a partial recovery. Rollback cannot reverse a
 transaction already submitted by the worker. Normal position monitoring continues
 using the existing per-position real/paper marker in the same image.
 
-Standard Compose or these installers' exact immutable image-only overlays are
-supported. Arbitrary custom overlays, symlinked configuration files and unexpected
-template layouts are rejected without bypassing their checks.
+Standard Compose and literal image-only JSON/YAML release/rollback overlays from
+the existing web installers are supported, including `nova-real-ui` and wallet UI
+release files. Tagged images must resolve locally to the corresponding running
+image ID. An unrelated frontend overlay is retained while only the API or bot
+target is pinned and recreated; the running website is not replaced. Multiple
+image-only layers follow their original ordering. No source override is deleted
+or rewritten.
+
+Overlays changing ports, environment, commands, mounts, build configuration or
+other settings, full resolved configuration snapshots, symlinks and interpolated
+image values are rejected. A rejection prints `NOVA_COMPOSE_CONTEXT` with only
+service and filenames, never secret environment values. These require inspection
+of their actual differences rather than silently discarding them.
 
 ## Verification scope
 

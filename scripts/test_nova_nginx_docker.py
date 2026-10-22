@@ -1,5 +1,6 @@
 """Real nginx route checks; opt in with NOVA_OPS_DOCKER_TEST=1 on a Docker host."""
 import http.client
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,9 @@ import unittest
 import uuid
 
 ROOT = Path(__file__).resolve().parent.parent
+SPEC = importlib.util.spec_from_file_location('nova_nginx_ops', ROOT / 'scripts/disable-telegram-miniapp.py')
+OPS = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(OPS)
 
 
 @unittest.skipUnless(os.environ.get('NOVA_OPS_DOCKER_TEST') == '1' and shutil.which('docker'),
@@ -78,6 +82,17 @@ class NginxIntegration(unittest.TestCase):
                         except (OSError, http.client.HTTPException): pass
                         time.sleep(0.2)
                     self.command('docker', 'exec', container, 'nginx', '-t')
+                    # Reproduce the existing web installer's separate image-only
+                    # release file, resolving its tag against actual Docker state.
+                    release = temp / ('release-' + str(port) + '.yml')
+                    svc = 'nginx' if tls else 'gsp-web'
+                    release.write_text('services:\n  ' + svc + ':\n    image: "nginx:1.27-alpine"\n')
+                    actual_image = self.command('docker', 'inspect', '--format', '{{.Image}}', container)
+                    metadata = {'image': actual_image, 'labels': {
+                        'com.docker.compose.service': svc,
+                        'com.docker.compose.project.config_files':
+                            str(ROOT / 'docker-compose.yml') + ',' + str(release)}}
+                    self.assertTrue(OPS.official_compose_files(metadata, ROOT))
                     self.assertEqual(get('/')[:2], (200, b'NOVA_DASHBOARD_RETAINED'))
                     self.assertEqual(json.loads(get('/api/health')[1]), {'status': 'ok'})
                     for path in ['/app', '/app/', '/app/deep/path', '/app/assets/old.js',

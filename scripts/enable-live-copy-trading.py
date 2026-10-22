@@ -96,9 +96,9 @@ class Installer:
         self.project = projects.pop()
         require(re.fullmatch(r'[a-z0-9][a-z0-9_-]*', self.project), 'Unexpected Compose project name')
         for c in self.current():
-            require(c['labels'].get('com.docker.compose.project.working_dir') == str(self.app)
-                    and ops.official_compose_files(c, self.app),
-                    'Custom Compose configuration detected; no financial changes made')
+            require(c['labels'].get('com.docker.compose.project.working_dir') == str(self.app),
+                    'Compose project contains a different installation')
+            ops.verify_compose_files(c, self.app)
         api = self.current_api()
         self.image = api['image']
         require(re.fullmatch(r'sha256:[0-9a-f]{64}', self.image), 'Immutable API image required')

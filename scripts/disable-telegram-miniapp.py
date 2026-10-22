@@ -132,29 +132,98 @@ def service(container):
     return container['labels'].get('com.docker.compose.service', '')
 
 
+def image_overlay(data):
+    """Read only literal image/pull-policy overlays emitted by Nova installers.
+
+    This deliberately supports the tiny generated YAML subset rather than a YAML
+    loader: anchors, includes, environment, ports, commands and mounts cannot be
+    accepted as a side effect of a previously installed frontend release.
+    """
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            require(key not in result, 'Duplicate overlay key')
+            result[key] = value
+        return result
+
+    text = data.decode('utf-8')
+    if text.lstrip().startswith('{'):
+        parsed = json.loads(text, object_pairs_hook=unique)
+    else:
+        lines = [line.rstrip() for line in text.splitlines()
+                 if line.strip() and not line.lstrip().startswith('#')]
+        require(lines and lines[0] == 'services:', 'Not a literal services overlay')
+        parsed, current = {'services': {}}, None
+        for line in lines[1:]:
+            entry = re.fullmatch(r'  ([a-z][a-z0-9_-]*):', line)
+            if entry:
+                current = entry[1]
+                require(current not in parsed['services'], 'Duplicate overlay service')
+                parsed['services'][current] = {}
+                continue
+            prop = re.fullmatch(r'    (image|pull_policy):[ \t]*(.+)', line)
+            require(prop and current, 'Unsupported overlay property')
+            value = prop[2].strip()
+            if value.startswith('"'):
+                value = json.loads(value)
+            elif value.startswith("'"):
+                require(value.endswith("'") and value.count("'") == 2, 'Invalid quoted image')
+                value = value[1:-1]
+            require(prop[1] not in parsed['services'][current], 'Duplicate overlay property')
+            parsed['services'][current][prop[1]] = value
+    require(isinstance(parsed, dict) and set(parsed) == {'services'} and
+            isinstance(parsed['services'], dict) and 1 <= len(parsed['services']) <= 9,
+            'Expected an image-only services overlay')
+    allowed = {'api', 'gsp-web', 'nginx', 'telegram-bot', 'marketing-engine',
+               'migrate', 'postgres', 'redis', 'certbot'}
+    for name, fields in parsed['services'].items():
+        require(name in allowed and isinstance(fields, dict) and
+                set(fields) in ({'image'}, {'image', 'pull_policy'}),
+                'Overlay changes configuration beyond images')
+        require(isinstance(fields['image'], str) and
+                re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._/@:-]{0,255}', fields['image']),
+                'Overlay image must be literal, without interpolation')
+        require(fields.get('pull_policy', 'never') == 'never', 'Unsupported overlay pull policy')
+    return parsed['services']
+
+
 def official_compose_files(container, app):
-    """Accept base Compose, or one of these installers' immutable image-only overlays."""
+    """Preserve installed UI releases while validating image-only Compose layers."""
     configs = container['labels'].get('com.docker.compose.project.config_files', '').split(',')
     if configs == [str(app / 'docker-compose.yml')]:
         return True
-    if len(configs) != 2 or configs[0] != str(app / 'docker-compose.yml'):
+    if not 2 <= len(configs) <= 6 or configs[0] != str(app / 'docker-compose.yml'):
         return False
     svc = service(container)
-    spec = {
-        'telegram-bot': ('telegram-miniapp-override.json', 'miniapp-disable-backups'),
-        'api': ('api-live-copy-override.json', 'copy-live-backups'),
-    }.get(svc)
-    if not spec:
-        return False
-    extra = Path(configs[1])
-    if (extra.name != spec[0] or extra.parent.parent != app / 'data' / spec[1]
-            or extra.resolve() != extra):
-        return False
     try:
-        return json.loads(read_file(extra)) == {
-            'services': {svc: {'image': container['image'], 'pull_policy': 'never'}}}
-    except (OSError, ValueError, Failure):
+        effective = None
+        for name in configs[1:]:
+            extra = Path(name)
+            require(extra.is_absolute() and extra.resolve() == extra,
+                    'Overlay path must be absolute and not a symlink')
+            entries = image_overlay(read_file(extra))
+            if svc in entries:
+                effective = entries[svc]['image']
+        if effective is None:
+            # For example, a project-wide frontend image override does not
+            # change the bot. Recreated targets are always pinned separately.
+            return True
+        image = effective if re.fullmatch(r'sha256:[0-9a-f]{64}', effective) else run(
+            ['docker', 'image', 'inspect', '--format', '{{.Id}}', effective],
+            'Validate installed image-only overlay').strip()
+        return image == container['image']
+    except (OSError, ValueError, UnicodeError, Failure):
         return False
+
+
+def verify_compose_files(container, app):
+    if not official_compose_files(container, app):
+        # Filenames and service names only; no resolved environment or values.
+        files = container['labels'].get('com.docker.compose.project.config_files', '').split(',')
+        print('NOVA_COMPOSE_CONTEXT=' + json.dumps({
+            'service': service(container), 'files': [Path(p).name for p in files[:6]]}))
+        raise Failure('Unsupported Compose configuration for ' + service(container) +
+                      '; literal image-only UI release/rollback overlays are supported')
 
 
 def telegram(container_id, button=None):
@@ -228,8 +297,7 @@ class Installer:
             labels = c['labels']
             require(labels.get('com.docker.compose.project.working_dir') == str(self.app),
                     'Project includes containers from a different working directory')
-            require(official_compose_files(c, self.app),
-                    'Custom Compose overrides are unsupported; review before changing anything')
+            verify_compose_files(c, self.app)
         self.before_ids = self.nonbot_ids()
         self.web = [c for c in all_containers if c['running'] and service(c) in TEMPLATES]
         require(self.web and len({service(c) for c in self.web}) == len(self.web),
