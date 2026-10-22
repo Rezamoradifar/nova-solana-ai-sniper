@@ -197,7 +197,7 @@ export default function PublicWallet() {
                   <h3>No compatible wallet detected</h3>
                   <p>
                     {mobileBrowser
-                      ? 'Mobile Chrome/Safari may not expose Phantom, Solflare or SafePal. Open this site in your wallet app's DApp browser, then connect again.'
+                      ? 'Mobile Chrome/Safari may not expose Phantom, Solflare or SafePal. Open this site in the wallet DApp browser, then connect again.'
                       : 'Use a browser with a Solana wallet extension, or open this page in a supported wallet’s in-app browser.'}
                   </p>
                   {embedded && (
