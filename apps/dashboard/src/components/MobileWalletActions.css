@@ -1,0 +1,35 @@
+/* Scoped wallet-app handoff: no global theme or financial controls altered. */
+.nova-mobile-wallet-actions {
+  margin-top: 16px;
+  padding: 15px;
+  border: 1px solid rgba(100, 220, 239, .28);
+  background: rgba(13, 30, 45, .74);
+  border-radius: 14px;
+  color: #e8f8ff;
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.nova-mobile-wallet-actions > strong { display: block; margin-bottom: 4px; font-weight: 700; }
+.nova-mobile-wallet-actions p { margin: 6px 0 12px; color: #c1d4e5; }
+.nova-mobile-wallet-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin: 10px 0 12px; }
+.nova-mobile-wallet-link, .nova-mobile-wallet-copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(88, 210, 239, .46);
+  color: #dbfaff;
+  background: rgba(6, 84, 112, .23);
+  text-align: center;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+.nova-mobile-wallet-copy { width: 100%; }
+.nova-mobile-wallet-link:hover, .nova-mobile-wallet-copy:hover { background: rgba(0, 229, 255, .16); }
+.nova-mobile-wallet-actions small { display: block; margin-top: 7px; color: #90aab9; word-break: break-all; direction: ltr; text-align: left; }
+@media (max-width: 390px) { .nova-mobile-wallet-links { grid-template-columns: 1fr; } }
