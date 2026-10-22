@@ -74,11 +74,9 @@ class Installer:
         return json.loads(run(argv + tail, 'Redacted copy-trading ' + action, self.helper))
 
     def preflight(self):
-        require(not os.environ.get('COMPOSE_FILE'), 'Custom COMPOSE_FILE is unsupported')
-        require(not any((self.app / p).exists() for p in (
-            'compose.override.yaml', 'compose.override.yml',
-            'docker-compose.override.yml', 'docker-compose.override.yaml')),
-            'Custom Compose override is unsupported')
+        # Every operator Compose command supplies explicit -f, --env-file and
+        # project arguments. Validate actual running-container layers below;
+        # an unused default override file or COMPOSE_FILE must not block recovery.
         remote = run(['git', '-C', str(self.app), 'remote', 'get-url', 'origin'],
                      'Nova repository check').strip()
         require(re.fullmatch(r'(?:https://github\.com/|git@github\.com:)'

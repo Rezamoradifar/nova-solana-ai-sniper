@@ -249,6 +249,7 @@ class RolloutRules(unittest.TestCase):
             root = Path(d)
             original = b'LIVE_TRADING=false\nMINIAPP_URL=\n'
             (root / '.env').write_bytes(original)
+            (root / 'compose.override.yaml').write_text('services: {}\n')
             containers = [{
                 'id': service, 'image': 'sha256:' + 'a' * 64, 'running': True,
                 'labels': {
@@ -265,6 +266,7 @@ class RolloutRules(unittest.TestCase):
                 raise AssertionError('Unexpected mutating command: ' + repr(argv))
             with patch.object(copy, 'run', side_effect=read_command), \
                  patch.object(copy.ops, 'containers', return_value=containers), \
+                 patch.dict(os.environ, {'COMPOSE_FILE': 'unused-by-explicit-operator-commands.yml'}), \
                  patch.object(inst, 'control', return_value=result) as control:
                 with self.assertRaises(copy.Failure): inst.preflight()
                 control.assert_called_once_with('prepare')
