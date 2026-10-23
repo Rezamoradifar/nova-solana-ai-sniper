@@ -2,6 +2,20 @@ import { test, expect, type Page } from '@playwright/test';
 
 const address = '11111111111111111111111111111111';
 const secondAddress = 'So11111111111111111111111111111111111111112';
+const chartScriptUrl = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+// Exercise the asynchronous embed boundary without depending on the live vendor's
+// network, market data or cross-origin ResizeObserver implementation.
+const chartScriptFixture = `(() => {
+  const script = document.currentScript;
+  const config = JSON.parse(script.textContent);
+  const host = script.parentElement.querySelector('.tradingview-widget-container__widget');
+  const frame = document.createElement('iframe');
+  frame.title = 'Fixture TradingView chart';
+  frame.srcdoc = '<!doctype html><html><body>Approved chart fixture</body></html>';
+  frame.dataset.symbol = config.symbol;
+  frame.style.cssText = 'display:block;width:100%;height:100%;border:0';
+  host.append(frame);
+})();`;
 
 async function mockServices(page: Page) {
   await page.route('**/api/**', async (route) => {
@@ -103,6 +117,9 @@ async function injectWallet(page: Page, reject = false) {
 
 test.beforeEach(async ({ page }) => {
   await mockServices(page);
+  await page.route(chartScriptUrl, (route) =>
+    route.fulfill({ contentType: 'application/javascript', body: chartScriptFixture }),
+  );
 });
 
 test('one approved connection and Persian choice survive navigation across every site frame', async ({
@@ -251,4 +268,38 @@ test('wallet chooser remains within the viewport and is keyboard dismissible', a
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole('button', { name: 'اتصال یا مدیریت کیف پول' }).first()).toBeFocused();
+});
+
+test('a delayed chart response cannot access a removed route and the next visit renders one chart', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let requested = false;
+  await page.route(chartScriptUrl, async (route) => {
+    requested = true;
+    await gate;
+    await route.fulfill({ contentType: 'application/javascript', body: chartScriptFixture });
+  });
+  try {
+    await page.goto('/terminal?lang=fa');
+    await expect.poll(() => requested).toBe(true);
+    await page.locator('footer').getByRole('link', { name: 'کپی ترید', exact: true }).click();
+    await expect(page).toHaveURL(/\/copy-trading$/);
+    release();
+    for (let visit = 0; visit < 2; visit++) {
+      await page.locator('footer').getByRole('link', { name: 'محیط معاملاتی', exact: true }).click();
+      const chart = page.getByTitle('نمودار بازار TradingView', { exact: true });
+      await expect(chart).toHaveCount(1);
+      const embeddedChart = chart.contentFrame().getByTitle('Fixture TradingView chart', { exact: true });
+      await expect(embeddedChart).toHaveAttribute('data-symbol', 'COINBASE:SOLUSD');
+      await expect(embeddedChart.contentFrame().locator('body')).toHaveText('Approved chart fixture');
+      await page.locator('footer').getByRole('link', { name: 'کپی ترید', exact: true }).click();
+    }
+    expect(errors).toEqual([]);
+  } finally {
+    release();
+  }
 });
