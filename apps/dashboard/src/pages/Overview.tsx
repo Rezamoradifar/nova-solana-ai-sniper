@@ -4,6 +4,7 @@ import { useLiveEvents } from '../lib/useLiveEvents.js';
 import { StatCard } from '../components/StatCard.js';
 import { TradingViewWidget } from '../components/TradingViewWidget.js';
 import type { PortfolioSummary, Trade } from '../lib/types.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 function formatUsd(value: number): string {
   const sign = value < 0 ? '-' : '';
@@ -11,6 +12,7 @@ function formatUsd(value: number): string {
 }
 
 export function Overview() {
+  const { t: localize } = useLanguage();
   const liveTick = useLiveEvents(['trade.created', 'position.updated']);
   const { data: portfolio } = usePolling(
     () => api.get<PortfolioSummary[]>('/portfolio'),
@@ -31,18 +33,18 @@ export function Overview() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-white">Overview</h1>
+      <h1 className="text-2xl font-semibold text-white">{localize('Overview')}</h1>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Open Positions" value={String(totals.openPositions)} />
-        <StatCard label="Invested" value={`${totals.investedSol.toFixed(3)} SOL`} />
+        <StatCard label={localize('Open Positions')} value={String(totals.openPositions)} />
+        <StatCard label={localize('Invested')} value={`${totals.investedSol.toFixed(3)} SOL`} />
         <StatCard
-          label="Realized PnL"
+          label={localize('Realized PnL')}
           value={formatUsd(totals.realizedPnlUsd)}
           tone={totals.realizedPnlUsd >= 0 ? 'profit' : 'loss'}
         />
         <StatCard
-          label="Unrealized PnL"
+          label={localize('Unrealized PnL')}
           value={formatUsd(totals.unrealizedPnlUsd)}
           tone={totals.unrealizedPnlUsd >= 0 ? 'profit' : 'loss'}
         />
@@ -51,17 +53,17 @@ export function Overview() {
       <TradingViewWidget />
 
       <div className="card">
-        <h2 className="mb-4 text-sm font-semibold text-slate-300">Recent Trades</h2>
+        <h2 className="mb-4 text-sm font-semibold text-slate-300">{localize('Recent Trades')}</h2>
         <div className="overflow-x-auto">
           <table className="table-base">
             <thead>
               <tr>
-                <th>Side</th>
-                <th>Token</th>
-                <th>Amount (SOL)</th>
-                <th>Price</th>
-                <th>Status</th>
-                <th>Time</th>
+                <th>{localize('Side')}</th>
+                <th>{localize('Token')}</th>
+                <th>{localize('Amount (SOL)')}</th>
+                <th>{localize('Price')}</th>
+                <th>{localize('Status')}</th>
+                <th>{localize('Time')}</th>
               </tr>
             </thead>
             <tbody>
@@ -80,7 +82,7 @@ export function Overview() {
               {trades?.length === 0 && (
                 <tr>
                   <td colSpan={6} className="py-6 text-center text-slate-500">
-                    No trades yet.
+                    {localize('No trades yet.')}
                   </td>
                 </tr>
               )}

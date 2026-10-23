@@ -16,7 +16,9 @@ import {
   pct,
   type MarketToken,
 } from '../../lib/publicMarket.js';
-import { useWalletConnection } from '../../lib/WalletContext.js';
+import { LanguageSwitch, useLanguage } from '../../lib/LanguageContext.js';
+import { WalletButton } from '../WalletUI.js';
+import { SiteBrand } from '../SiteBrand.js';
 import '../../landing.css';
 import '../../workspace.css';
 import '../../moneyland.css';
@@ -152,18 +154,8 @@ export function Icon({
 
 export function NovaMark({ small = false }: { small?: boolean }) {
   return (
-    <span className={`nova-brand ${small ? 'small' : ''}`}>
-      <svg viewBox="0 0 36 36" width="33" height="33" fill="none" aria-hidden="true">
-        <path
-          d="M27 9a12 12 0 1 0 1 17v-8H18"
-          stroke="currentColor"
-          strokeWidth="3.5"
-          strokeLinecap="square"
-        />
-      </svg>
-      <span className="brand-word">
-        GSP<span>TRADING</span>
-      </span>
+    <span className={small ? 'nova-brand small' : 'nova-brand'}>
+      <SiteBrand />
     </span>
   );
 }
@@ -263,12 +255,19 @@ export function TokenMark({ symbol, color = '#c1ff75' }: { symbol: string; color
 }
 
 export function MarketTicker() {
+  const { t: localize } = useLanguage();
   const { tokens, loading, error } = useMarkets();
   return (
     <div className="market-ticker">
       <div className="ticker-label">
         <span className={`status-dot ${error ? 'offline' : !tokens.length ? 'pending' : ''}`} />
-        <span>{error ? 'Data unavailable' : tokens.length ? 'Market pulse' : 'Connecting'}</span>
+        <span>
+          {error
+            ? localize('Data unavailable')
+            : tokens.length
+              ? localize('Market pulse')
+              : localize('Connecting')}
+        </span>
         <span className="ticker-network">SOLANA</span>
       </div>
       <div className="ticker-items">
@@ -296,8 +295,8 @@ export function MarketTicker() {
         ) : (
           <span className="muted ticker-wait">
             {loading
-              ? 'Fetching current market prices…'
-              : 'Live prices will appear when the source reconnects.'}
+              ? localize('Fetching current market prices…')
+              : localize('Live prices will appear when the source reconnects.')}
           </span>
         )}
       </div>
@@ -341,9 +340,10 @@ interface PublicNetworkStatus {
 }
 
 export function PublicLayout() {
+  const { t: localize } = useLanguage();
+  const { t } = useLanguage();
   const [menuOpen, setMenuOpen] = useState(false);
   const [network, setNetwork] = useState<PublicNetworkStatus | null>(null);
-  const { state: wallet } = useWalletConnection();
   const location = useLocation();
   useEffect(() => {
     setMenuOpen(false);
@@ -360,7 +360,7 @@ export function PublicLayout() {
       '/pricing': 'Packages',
       '/copy-trading': 'Solana copy trading',
     };
-    document.title = `Moneyland | GSP TRADING — ${titles[location.pathname] ?? 'Solana trading'}`;
+    document.title = `Moneyland | GSP TRADING — ${t(titles[location.pathname] ?? 'Solana trading')}`;
     let canonical = document.head.querySelector('link[rel="canonical"]');
     if (!canonical) {
       canonical = document.createElement('link');
@@ -368,7 +368,7 @@ export function PublicLayout() {
       document.head.appendChild(canonical);
     }
     canonical.setAttribute('href', 'https://moneyland.tr' + location.pathname);
-  }, [location.pathname]);
+  }, [location.pathname, t]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setMenuOpen(false);
@@ -412,7 +412,7 @@ export function PublicLayout() {
     <MarketProvider>
       <div className="nova-site moneyland-theme">
         <a href="#main-content" className="skip-link">
-          Skip to content
+          {localize('Skip to content')}
         </a>
         <header className="nova-header">
           <div className="site-container header-inner">
@@ -422,22 +422,24 @@ export function PublicLayout() {
             <nav
               className={menuOpen ? 'main-nav is-open' : 'main-nav'}
               id="public-nav"
-              aria-label="Main navigation"
+              aria-label={localize('Main navigation')}
             >
-              <NavLink to="/tools">Platform</NavLink>
+              <NavLink to="/tools">{localize('Platform')}</NavLink>
               <NavLink to="/arbitrage">
-                Arbitrage <span className="nav-new">LIVE</span>
+                {localize('Arbitrage') + ' '}
+                <span className="nav-new">LIVE</span>
               </NavLink>
-              <NavLink to="/markets">Markets</NavLink>
-              <NavLink to="/research">GMGN Tools</NavLink>
-              <NavLink to="/executions">Executions</NavLink>
-              <NavLink to="/flash-arbitrage">Flash Loan</NavLink>
-              <NavLink to="/copy-trading">Copy Trading</NavLink>
+              <NavLink to="/markets">{localize('Markets')}</NavLink>
+              <NavLink to="/research">{localize('GMGN Tools')}</NavLink>
+              <NavLink to="/executions">{localize('Executions')}</NavLink>
+              <NavLink to="/flash-arbitrage">{localize('Flash Loan')}</NavLink>
+              <NavLink to="/copy-trading">{localize('Copy Trading')}</NavLink>
               <span className="nav-divider" aria-hidden="true" />
               <NavLink to="/telegram">
-                <Icon name="telegram" size={17} /> Telegram bot
+                <Icon name="telegram" size={17} />
+                {' ' + localize('Telegram bot')}
               </NavLink>
-              <NavLink to="/pricing">Bot packages</NavLink>
+              <NavLink to="/pricing">{localize('Bot packages')}</NavLink>
             </nav>
             <div className="header-actions">
               <span
@@ -447,22 +449,19 @@ export function PublicLayout() {
                 title={
                   network?.slot
                     ? `Solana slot ${network.slot.toLocaleString()}`
-                    : 'Solana network status'
+                    : localize('Solana network status')
                 }
               >
                 <span className={`status-dot ${network?.status === 'ready' ? '' : 'offline'}`} />
-                MAINNET · {network?.status === 'ready' ? 'ONLINE' : 'DEGRADED'} ·{' '}
+                {localize('MAINNET ·') + ' '}
+                {network?.status === 'ready' ? localize('ONLINE') : localize('DEGRADED')} ·{' '}
                 {network?.tradingMode ?? 'PAPER'}
               </span>
-              <Link to="/wallet" className="nova-button button-sm wallet-header-link">
-                <Icon name="wallet" size={17} />
-                {wallet.account
-                  ? `${wallet.account.address.slice(0, 4)}…${wallet.account.address.slice(-4)}`
-                  : 'Connect wallet'}
-              </Link>
+              <LanguageSwitch />
+              <WalletButton className="wallet-header-link" />
               <button
                 className="icon-button menu-toggle"
-                aria-label={menuOpen ? 'Close navigation' : 'Open navigation'}
+                aria-label={menuOpen ? localize('Close navigation') : localize('Open navigation')}
                 aria-expanded={menuOpen}
                 aria-controls="public-nav"
                 onClick={() => setMenuOpen(!menuOpen)}
@@ -483,57 +482,62 @@ export function PublicLayout() {
                   <NovaMark />
                 </Link>
                 <p>
-                  Institutional Solana intelligence.
+                  {localize('Institutional Solana intelligence.')}
                   <br />
-                  Built for disciplined execution.
+                  {localize('Built for disciplined execution.')}
                 </p>
                 <span className="footer-network">
-                  <Icon name="globe" size={15} /> Solana Mainnet ·{' '}
-                  {network?.status === 'ready' ? 'RPC online' : 'RPC degraded'} ·{' '}
-                  {network?.tradingMode ?? 'PAPER'}
+                  <Icon name="globe" size={15} />
+                  {' ' + localize('Solana Mainnet ·')}{' '}
+                  {network?.status === 'ready' ? localize('RPC online') : localize('RPC degraded')}{' '}
+                  · {network?.tradingMode ?? 'PAPER'}
                 </span>
               </div>
               <div className="footer-column">
-                <h3>Website tools</h3>
-                <Link to="/tools">All tools</Link>
-                <Link to="/arbitrage">Arbitrage terminal</Link>
-                <Link to="/markets">Live markets</Link>
-                <Link to="/flash-arbitrage">Flash Loan Lab</Link>
-                <Link to="/copy-trading">Copy Trading</Link>
-                <Link to="/wallet">Connect wallet</Link>
+                <h3>{localize('Website tools')}</h3>
+                <Link to="/tools">{localize('All tools')}</Link>
+                <Link to="/terminal">{localize('Trading workspace', 'محیط معاملاتی')}</Link>
+                <Link to="/arbitrage">{localize('Arbitrage terminal')}</Link>
+                <Link to="/markets">{localize('Live markets')}</Link>
+                <Link to="/flash-arbitrage">{localize('Flash Loan Lab')}</Link>
+                <Link to="/copy-trading">{localize('Copy Trading')}</Link>
+                <Link to="/wallet">{localize('Connect wallet')}</Link>
               </div>
               <div className="footer-column">
-                <h3>Telegram bot</h3>
-                <Link to="/telegram">Bot overview</Link>
-                <Link to="/pricing">Bot packages</Link>
+                <h3>{localize('Telegram bot')}</h3>
+                <Link to="/telegram">{localize('Bot overview')}</Link>
+                <Link to="/pricing">{localize('Bot packages')}</Link>
                 <a href={BOT_URL} target="_blank" rel="noreferrer">
-                  Open Telegram bot
+                  {localize('Open Telegram bot')}
                 </a>
-                <Link to="/security">Risk & security</Link>
+                <Link to="/security">{localize('Risk & security')}</Link>
               </div>
               <div className="footer-column">
-                <h3>Resources</h3>
+                <h3>{localize('Resources')}</h3>
                 <a
                   href="https://github.com/Rezamoradifar/nova-solana-ai-sniper"
                   target="_blank"
                   rel="noreferrer"
                 >
-                  Source & documentation
+                  {localize('Source & documentation')}
                 </a>
                 <a href="https://solscan.io" target="_blank" rel="noreferrer">
-                  Solana explorer
+                  {localize('Solana explorer')}
                 </a>
-                <Link to="/tools#questions">Common questions</Link>
+                <Link to="/tools#questions">{localize('Common questions')}</Link>
               </div>
             </div>
             <div className="footer-bottom">
-              <span>© {new Date().getFullYear()} GSP TRADING · moneyland.tr. All rights reserved.</span>
-              <span>Clarity before execution.</span>
+              <span>
+                © {new Date().getFullYear()}
+                {' ' + localize('GSP TRADING · moneyland.tr. All rights reserved.')}
+              </span>
+              <span>{localize('Clarity before execution.')}</span>
             </div>
             <p className="risk-note">
-              Digital asset trading involves risk, including loss of capital. Quotes and estimated
-              spreads are observations, not executed trades or guaranteed returns. Live market data
-              is provided by third-party sources and may be delayed.
+              {localize(
+                'Digital asset trading involves risk, including loss of capital. Quotes and estimated spreads are observations, not executed trades or guaranteed returns. Live market data is provided by third-party sources and may be delayed.',
+              )}
             </p>
           </div>
         </footer>

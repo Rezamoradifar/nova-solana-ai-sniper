@@ -12,6 +12,7 @@ import {
   type ScanProgress,
 } from '../lib/liveArbitrage.js';
 import { PUBLIC_API_BASE, pct } from '../lib/publicMarket.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 const INITIAL: ScanInput = {
   token: ARB_TOKENS[0],
@@ -29,6 +30,7 @@ const age = (route: LiveRoute, now: number) =>
   Math.max(0, Math.floor((now - route.buyQuoteAt) / 1000));
 
 export default function PublicArbitrage() {
+  const { t: localize } = useLanguage();
   const [config, setConfig] = useState<ScanInput>(INITIAL);
   const [tokenSymbol, setTokenSymbol] = useState<string>('USDC');
   const [amount, setAmount] = useState('0.5');
@@ -212,12 +214,15 @@ export default function PublicArbitrage() {
   return (
     <div className="site-container interior-page arbitrage-page">
       <PageHeading
-        eyebrow="LIVE ARBITRAGE INTELLIGENCE"
-        title="Find the spread. Know the cost."
-        text="Compare real, direct Solana quotes across venues. Inspect each route with its costs, assumptions, and timestamp."
+        eyebrow={localize('LIVE ARBITRAGE INTELLIGENCE')}
+        title={localize('Find the spread. Know the cost.')}
+        text={localize(
+          'Compare real, direct Solana quotes across venues. Inspect each route with its costs, assumptions, and timestamp.',
+        )}
       >
         <span className="observation-badge">
-          <Icon name="scan" size={17} /> Observation only
+          <Icon name="scan" size={17} />
+          {' ' + localize('Observation only')}
         </span>
       </PageHeading>
       <div className="terminal-statusbar">
@@ -227,15 +232,15 @@ export default function PublicArbitrage() {
           />
           <strong>{status}</strong>
           <span className="statusbar-divider" />
-          <span>Solana mainnet</span>
+          <span>{localize('Solana mainnet')}</span>
           <span className="statusbar-divider" />
-          <span>Jupiter quotes</span>
+          <span>{localize('Jupiter quotes')}</span>
         </div>
         <div>
-          <span className="desktop-only">No wallet required</span>
+          <span className="desktop-only">{localize('No wallet required')}</span>
           <button className="text-link" onClick={() => setActive(!active)}>
             <Icon name={active ? 'pause' : 'play'} size={15} />
-            {active ? 'Pause scanner' : 'Resume scanner'}
+            {active ? localize('Pause scanner') : localize('Resume scanner')}
           </button>
         </div>
       </div>
@@ -243,13 +248,14 @@ export default function PublicArbitrage() {
         <aside className="scan-sidebar panel">
           <div className="panel-label">
             <span>
-              <Icon name="sliders" size={17} /> Scan settings
+              <Icon name="sliders" size={17} />
+              {' ' + localize('Scan settings')}
             </span>
             <span className="subtle-label">01</span>
           </div>
           <form onSubmit={apply}>
             <label className="field-label" htmlFor="arb-asset">
-              Intermediate asset
+              {localize('Intermediate asset')}
             </label>
             <div className="asset-select">
               <TokenMark symbol={tokenSymbol} color="#a5c6ff" />
@@ -266,7 +272,7 @@ export default function PublicArbitrage() {
               </select>
             </div>
             <label className="field-label" htmlFor="arb-amount">
-              Starting amount
+              {localize('Starting amount')}
             </label>
             <div className="input-unit">
               <input
@@ -296,7 +302,8 @@ export default function PublicArbitrage() {
             </div>
             <div className="settings-divider" />
             <label className="field-label" htmlFor="arb-cost">
-              Network-cost budget <span>ESTIMATE</span>
+              {localize('Network-cost budget') + ' '}
+              <span>{localize('ESTIMATE')}</span>
             </label>
             <div className="input-unit">
               <input
@@ -312,9 +319,11 @@ export default function PublicArbitrage() {
               />
               <span>SOL</span>
             </div>
-            <p className="field-help">Your combined fee and tip assumption for the round trip.</p>
+            <p className="field-help">
+              {localize('Your combined fee and tip assumption for the round trip.')}
+            </p>
             <label className="field-label" htmlFor="arb-buffer">
-              Additional safety buffer
+              {localize('Additional safety buffer')}
             </label>
             <div className="input-unit">
               <input
@@ -330,13 +339,14 @@ export default function PublicArbitrage() {
               />
               <span>bps</span>
             </div>
-            <p className="field-help">10 bps = 0.10% of the starting amount.</p>
+            <p className="field-help">{localize('10 bps = 0.10% of the starting amount.')}</p>
             <button className="nova-button full-width" type="submit">
-              <Icon name="scan" size={17} /> Apply & scan
+              <Icon name="scan" size={17} />
+              {' ' + localize('Apply & scan')}
             </button>
           </form>
           <div className="scan-venues">
-            <span className="field-label">Venues in this scan</span>
+            <span className="field-label">{localize('Venues in this scan')}</span>
             {ARB_DEXES.map((d) => (
               <div key={d}>
                 <span className="venue-indicator" />
@@ -347,13 +357,17 @@ export default function PublicArbitrage() {
           </div>
           <div className="sidebar-note">
             <Icon name="shield" size={18} />
-            <p>This terminal requests quotes. It does not connect a wallet or execute trades.</p>
+            <p>
+              {localize(
+                'This terminal requests quotes. It does not connect a wallet or execute trades.',
+              )}
+            </p>
           </div>
         </aside>
         <div className="terminal-main">
           <div className="terminal-stats">
             <div className="terminal-stat">
-              <span>Best estimated net</span>
+              <span>{localize('Best estimated net')}</span>
               <strong
                 className={best ? (best.estimatedNetSol > 0 ? 'positive' : 'negative') : 'muted'}
               >
@@ -363,27 +377,33 @@ export default function PublicArbitrage() {
               <small>
                 {best
                   ? `${pct(best.estimatedNetPercent)} after configured costs`
-                  : 'Waiting for a complete route'}
+                  : localize('Waiting for a complete route')}
               </small>
             </div>
             <div className="terminal-stat">
-              <span>Valid route observations</span>
+              <span>{localize('Valid route observations')}</span>
               <strong>
                 {routes.length}
                 <small> / 6</small>
               </strong>
-              <small>{freshRoutes.length} currently within 45 seconds</small>
+              <small>
+                {freshRoutes.length}
+                {' ' + localize('currently within 45 seconds')}
+              </small>
             </div>
             <div className="terminal-stat">
-              <span>Next scan</span>
+              <span>{localize('Next scan')}</span>
               <strong className="stat-time">
                 {scanning
-                  ? 'In progress'
+                  ? localize('In progress')
                   : nextScan
                     ? `${Math.max(0, Math.ceil((nextScan - now) / 1000))}s`
-                    : 'Paused'}
+                    : localize('Paused')}
               </strong>
-              <small>Last completed: {clock(lastScan)}</small>
+              <small>
+                {localize('Last completed:') + ' '}
+                {clock(lastScan)}
+              </small>
             </div>
           </div>
           <div className="scan-progress">
@@ -393,9 +413,9 @@ export default function PublicArbitrage() {
                 {scanning
                   ? progress.phase
                   : !active
-                    ? 'Scanner paused. Your observations remain available.'
+                    ? localize('Scanner paused. Your observations remain available.')
                     : !visible
-                      ? 'Scanning pauses while this tab is hidden.'
+                      ? localize('Scanning pauses while this tab is hidden.')
                       : progress.phase}
               </span>
               <span>
@@ -405,7 +425,7 @@ export default function PublicArbitrage() {
             <div
               className="progress-track"
               role="progressbar"
-              aria-label="Quote scan progress"
+              aria-label={localize('Quote scan progress')}
               aria-valuemin={0}
               aria-valuemax={progress.total}
               aria-valuenow={progress.completed}
@@ -417,7 +437,8 @@ export default function PublicArbitrage() {
             <div className="table-toolbar">
               <div>
                 <h2>
-                  Route observations <span className="count-badge">{routes.length}</span>
+                  {localize('Route observations') + ' '}
+                  <span className="count-badge">{routes.length}</span>
                 </h2>
                 <p>
                   SOL → {config.token.symbol} → SOL · {sol(config.amountSol)} SOL
@@ -429,11 +450,11 @@ export default function PublicArbitrage() {
                   aria-pressed={positiveOnly}
                   onClick={() => setPositiveOnly(!positiveOnly)}
                 >
-                  Positive estimates
+                  {localize('Positive estimates')}
                 </button>
                 <button
                   className="icon-button"
-                  aria-label="Export current observations as CSV"
+                  aria-label={localize('Export current observations as CSV')}
                   onClick={download}
                   disabled={!routes.length}
                 >
@@ -441,7 +462,7 @@ export default function PublicArbitrage() {
                 </button>
                 <button
                   className="icon-button"
-                  aria-label="Restart scan"
+                  aria-label={localize('Restart scan')}
                   onClick={() => {
                     setActive(true);
                     setRevision((v) => v + 1);
@@ -461,12 +482,12 @@ export default function PublicArbitrage() {
               <table className="nova-table route-table">
                 <thead>
                   <tr>
-                    <th>Route · buy → sell</th>
-                    <th>Min. return</th>
-                    <th>Est. net</th>
-                    <th>Quote age</th>
+                    <th>{localize('Route · buy → sell')}</th>
+                    <th>{localize('Min. return')}</th>
+                    <th>{localize('Est. net')}</th>
+                    <th>{localize('Quote age')}</th>
                     <th>
-                      <span className="sr-only">Inspect</span>
+                      <span className="sr-only">{localize('Inspect')}</span>
                     </th>
                   </tr>
                 </thead>
@@ -501,7 +522,7 @@ export default function PublicArbitrage() {
                         </td>
                         <td>
                           <span className={`quote-age ${fresh ? '' : 'stale'}`}>
-                            {age(r, now)}s {fresh ? '' : '· Stale'}
+                            {age(r, now)}s {fresh ? '' : localize('· Stale')}
                           </span>
                         </td>
                         <td>
@@ -531,23 +552,29 @@ export default function PublicArbitrage() {
                   </span>
                   <h3>
                     {scanning
-                      ? 'Reading the routes'
+                      ? localize('Reading the routes')
                       : positiveOnly && routes.length
-                        ? 'No positive estimates in this scan'
+                        ? localize('No positive estimates in this scan')
                         : !active
-                          ? 'Ready when you are'
-                          : 'No route observations yet'}
+                          ? localize('Ready when you are')
+                          : localize('No route observations yet')}
                   </h3>
                   <p>
                     {scanning
-                      ? 'Quotes appear as each two-venue route completes. A scan can take around 20–45 seconds.'
+                      ? localize(
+                          'Quotes appear as each two-venue route completes. A scan can take around 20–45 seconds.',
+                        )
                       : positiveOnly && routes.length
-                        ? 'Current costs and minimum quote outputs leave the observed routes below break-even.'
-                        : 'Start a scan or adjust the asset and amount to request fresh quotes.'}
+                        ? localize(
+                            'Current costs and minimum quote outputs leave the observed routes below break-even.',
+                          )
+                        : localize(
+                            'Start a scan or adjust the asset and amount to request fresh quotes.',
+                          )}
                   </p>
                   {positiveOnly && routes.length > 0 && (
                     <button className="text-link" onClick={() => setPositiveOnly(false)}>
-                      Show all observations ↗
+                      {localize('Show all observations ↗')}
                     </button>
                   )}
                 </div>
@@ -557,15 +584,16 @@ export default function PublicArbitrage() {
               <span>
                 {progress.failed > 0
                   ? `${progress.failed} quote requests unavailable`
-                  : 'Direct routes only · 50 bps slippage per leg'}
+                  : localize('Direct routes only · 50 bps slippage per leg')}
               </span>
-              <span>Estimates, not executed returns</span>
+              <span>{localize('Estimates, not executed returns')}</span>
             </div>
           </div>
           <div ref={detailsRef} className="route-details panel">
             <div className="panel-label">
               <span>
-                <Icon name="layers" size={17} /> Route breakdown
+                <Icon name="layers" size={17} />
+                {' ' + localize('Route breakdown')}
               </span>
               {selected && <span className="subtle-label">{clock(selected.observedAt)}</span>}
             </div>
@@ -581,58 +609,60 @@ export default function PublicArbitrage() {
                   <span
                     className={`outline-tag ${!isRouteFresh(selected, now) ? 'tag-stale' : ''}`}
                   >
-                    {!isRouteFresh(selected, now) ? 'STALE OBSERVATION' : 'QUOTE OBSERVATION'}
+                    {!isRouteFresh(selected, now)
+                      ? localize('STALE OBSERVATION')
+                      : localize('QUOTE OBSERVATION')}
                   </span>
                 </div>
                 <div className="breakdown-grid">
                   <dl className="cost-breakdown">
                     <div>
-                      <dt>Starting amount</dt>
+                      <dt>{localize('Starting amount')}</dt>
                       <dd>{sol(selected.inputSol)} SOL</dd>
                     </div>
                     <div>
-                      <dt>Minimum quoted return</dt>
+                      <dt>{localize('Minimum quoted return')}</dt>
                       <dd>{sol(selected.outputSol)} SOL</dd>
                     </div>
                     <div>
-                      <dt>Gross difference</dt>
+                      <dt>{localize('Gross difference')}</dt>
                       <dd className={selected.grossSol > 0 ? 'positive' : 'negative'}>
                         {sol(selected.grossSol, true)} SOL
                       </dd>
                     </div>
                     <div>
-                      <dt>Network-cost budget</dt>
+                      <dt>{localize('Network-cost budget')}</dt>
                       <dd>−{sol(selected.costSol)} SOL</dd>
                     </div>
                     <div>
-                      <dt>Additional buffer</dt>
+                      <dt>{localize('Additional buffer')}</dt>
                       <dd>−{sol(selected.bufferSol)} SOL</dd>
                     </div>
                     <div className="breakdown-total">
-                      <dt>Estimated net result</dt>
+                      <dt>{localize('Estimated net result')}</dt>
                       <dd className={selected.estimatedNetSol > 0 ? 'positive' : 'negative'}>
                         {sol(selected.estimatedNetSol, true)} SOL
                       </dd>
                     </div>
                   </dl>
                   <div className="quote-context">
-                    <span className="eyebrow">QUOTE CONTEXT</span>
+                    <span className="eyebrow">{localize('QUOTE CONTEXT')}</span>
                     <p>
-                      The exit quote uses the first leg’s minimum output. Both quotes include a 50
-                      bps slippage setting; your extra buffer and cost budget are deducted
-                      separately.
+                      {localize(
+                        'The exit quote uses the first leg’s minimum output. Both quotes include a 50 bps slippage setting; your extra buffer and cost budget are deducted separately.',
+                      )}
                     </p>
                     <dl>
                       <div>
-                        <dt>Buy venue</dt>
+                        <dt>{localize('Buy venue')}</dt>
                         <dd>{selected.buyDex}</dd>
                       </div>
                       <div>
-                        <dt>Sell venue</dt>
+                        <dt>{localize('Sell venue')}</dt>
                         <dd>{selected.sellDex}</dd>
                       </div>
                       <div>
-                        <dt>Buy / sell slots</dt>
+                        <dt>{localize('Buy / sell slots')}</dt>
                         <dd>
                           {selected.buyQuote.contextSlot} / {selected.sellQuote.contextSlot}
                         </dd>
@@ -644,21 +674,25 @@ export default function PublicArbitrage() {
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Inspect {selected.token} token ↗
+                      {localize('Inspect') + ' '}
+                      {selected.token}
+                      {' ' + localize('token ↗')}
                     </a>
                   </div>
                 </div>
                 <p className="source-note">
-                  The quotes are sequential and do not reserve liquidity. A displayed estimate does
-                  not establish that the route can execute atomically or profitably.
+                  {localize(
+                    'The quotes are sequential and do not reserve liquidity. A displayed estimate does not establish that the route can execute atomically or profitably.',
+                  )}
                 </p>
               </>
             ) : (
               <div className="empty-details">
                 <Icon name="layers" size={26} />
                 <p>
-                  Select an observed route to see both venues, quote context, and the complete cost
-                  breakdown.
+                  {localize(
+                    'Select an observed route to see both venues, quote context, and the complete cost breakdown.',
+                  )}
                 </p>
               </div>
             )}
@@ -668,21 +702,29 @@ export default function PublicArbitrage() {
       <div className="terminal-footnotes">
         <details>
           <summary>
-            Data sources & connection details <Icon name="chevron" size={16} />
+            {localize('Data sources & connection details') + ' '}
+            <Icon name="chevron" size={16} />
           </summary>
           <div>
             <p>
-              <strong>Public terminal:</strong> direct Jupiter quote requests, spaced at least 2.2
-              seconds apart. Scans refresh 60 seconds after completion and pause when the tab is
-              hidden. Results older than 45 seconds are marked stale.
+              <strong>{localize('Public terminal:')}</strong>
+              {' ' +
+                localize(
+                  'direct Jupiter quote requests, spaced at least 2.2 seconds apart. Scans refresh 60 seconds after completion and pause when the tab is hidden. Results older than 45 seconds are marked stale.',
+                )}
             </p>
             <p>
-              <strong>Background bot scanner:</strong> {worker}. This separate service reports its
-              own state when connected. Public quote scanning does not depend on that worker.
+              <strong>{localize('Background bot scanner:')}</strong> {worker}
+              {localize(
+                '. This separate service reports its own state when connected. Public quote scanning does not depend on that worker.',
+              )}
             </p>
             <p>
-              <strong>Trading execution:</strong> disabled in this public terminal. Market estimates
-              are not confirmed transactions.
+              <strong>{localize('Trading execution:')}</strong>
+              {' ' +
+                localize(
+                  'disabled in this public terminal. Market estimates are not confirmed transactions.',
+                )}
             </p>
             <a
               href="https://developers.jup.ag/docs/api-reference/swap/v1/quote"
@@ -690,16 +732,16 @@ export default function PublicArbitrage() {
               target="_blank"
               rel="noreferrer"
             >
-              Quote source documentation ↗
+              {localize('Quote source documentation ↗')}
             </a>
           </div>
         </details>
         <div className="button-row">
           <Link className="text-link" to="/flash-arbitrage">
-            Open Flash Loan Lab ↗
+            {localize('Open Flash Loan Lab ↗')}
           </Link>
           <Link className="text-link" to="/security">
-            Understand risk & custody ↗
+            {localize('Understand risk & custody ↗')}
           </Link>
         </div>
       </div>

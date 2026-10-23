@@ -21,4 +21,10 @@ describe('mobile wallet connection links', () => {
     expect(links?.page).toBe('https://moneyland.tr/wallet');
     expect(links?.phantom).not.toContain('secret');
   });
+  it('carries only the chosen site language into the mobile wallet browser', () => {
+    const links = getMobileWalletLinks('https://moneyland.tr/?secret=never-copy', 'fa');
+    expect(links?.page).toBe('https://moneyland.tr/wallet?lang=fa');
+    expect(links?.phantom).toContain(encodeURIComponent('https://moneyland.tr/wallet?lang=fa'));
+    expect(links?.phantom).not.toContain('secret');
+  });
 });

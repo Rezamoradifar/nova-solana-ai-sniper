@@ -1,0 +1,156 @@
+.nova-site-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #f1f5ff;
+  font-family: Inter, Arial, sans-serif;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -1px;
+  white-space: nowrap;
+  text-align: left;
+}
+.nova-site-brand > span:last-child {
+  display: block;
+}
+.nova-site-brand small {
+  display: block;
+  margin-top: 5px;
+  color: #94a3b8;
+  font-size: 7px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+}
+.nova-site-mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #00e5ff44;
+  background: linear-gradient(140deg, #00e5ff12, #8b5cf61a);
+  border-radius: 10px;
+  color: #00e5ff;
+}
+.nova-site-mark svg {
+  width: 28px;
+  height: 28px;
+}
+.nova-site-dot {
+  color: #00e5ff;
+}
+.nova-account-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.nova-account-actions .nova-wallet-button,
+.nova-account-actions .nova-language-switch {
+  font-size: 11px;
+  padding: 8px;
+  min-height: 36px;
+}
+html[lang='fa'] body,
+html[lang='fa'] .neon,
+html[lang='fa'] .ml2-root,
+html[lang='fa'] .nova-site {
+  font-family: Tahoma, Arial, sans-serif;
+}
+html[dir='rtl'] .table-base {
+  text-align: right;
+}
+html[dir='rtl'] .table-base th {
+  letter-spacing: 0;
+}
+html[dir='rtl'] input[type='email'],
+html[dir='rtl'] input[type='number'],
+html[dir='rtl'] input[inputmode='decimal'] {
+  direction: ltr;
+  text-align: start;
+}
+html[dir='rtl'] .nova-site .page-heading,
+html[dir='rtl'] .nova-site .footer-column,
+html[dir='rtl'] .nova-site .wallet-details,
+html[dir='rtl'] .nova-site .wallet-connect-panel {
+  text-align: start;
+}
+html[dir='rtl'] .nova-site .wallet-address,
+html[dir='rtl'] .nova-site code {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+html[dir='rtl'] .nova-site .eyebrow {
+  letter-spacing: 0;
+}
+html[dir='rtl'] .nova-site .main-nav.is-open {
+  inset-inline-start: 0;
+  inset-inline-end: 0;
+}
+html[dir='rtl'] .nova-site .interior-page h1,
+html[dir='rtl'] .nova-site .interior-page h2,
+html[dir='rtl'] .nova-site .interior-page h3 {
+  letter-spacing: normal;
+  line-height: 1.6;
+}
+.nova-site .header-actions .nova-language-switch {
+  flex-shrink: 0;
+}
+.nova-site .wallet-header-link {
+  flex-shrink: 0;
+}
+@media (max-width: 640px) {
+  .nova-site-brand {
+    font-size: 19px;
+    gap: 7px;
+  }
+  .nova-site-mark {
+    width: 29px;
+    height: 29px;
+    border-radius: 8px;
+  }
+  .nova-site-mark svg {
+    width: 23px;
+    height: 23px;
+  }
+  .nova-site-brand small {
+    font-size: 5px;
+    letter-spacing: 1px;
+  }
+  .nova-site.moneyland-theme .header-actions {
+    gap: 5px;
+  }
+  .nova-site .header-actions .nova-wallet-button,
+  .nova-site .header-actions .nova-language-switch {
+    padding: 8px;
+    min-height: 37px;
+    font-size: 10px;
+  }
+  .nova-site .header-inner {
+    gap: 8px;
+  }
+  .nova-site .header-actions .nova-wallet-button > span:first-child {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nova-wallet-dialog::backdrop {
+    backdrop-filter: none;
+  }
+}
+
+/* Wallet management remains available at every breakpoint, including the older terminal. */
+.ml2-root .ml2-header-actions .nova-wallet-button.ml2-wallet-top {
+  display: inline-flex;
+}
+@media (max-width: 760px) {
+  .ml2-root .ml2-header-actions {
+    gap: 6px;
+  }
+  .ml2-root .ml2-header-actions .nova-wallet-button {
+    padding: 8px;
+    font-size: 11px;
+  }
+}

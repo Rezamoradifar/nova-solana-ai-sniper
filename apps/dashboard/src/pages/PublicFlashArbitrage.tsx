@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Icon, PageHeading } from '../components/public/PublicLayout.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 const MAX_BORROW_USDC = 10_000;
 const MIN_EDGE_PERCENT = 0.3;
@@ -17,6 +18,7 @@ function dollars(value: number): string {
 }
 
 export default function PublicFlashArbitrage() {
+  const { t: localize } = useLanguage();
   const [notionalInput, setNotionalInput] = useState('10000');
   const [edgeInput, setEdgeInput] = useState('0.30');
 
@@ -57,35 +59,38 @@ export default function PublicFlashArbitrage() {
   return (
     <div className="site-container interior-page flash-arb-page">
       <PageHeading
-        eyebrow="FLASH LOAN ARBITRAGE"
-        title="Borrow. Route. Repay. Atomically."
-        text="Explore the execution model being built for GSP TRADING: borrow USDC, route two swaps, repay inside the same transaction, and only submit after profitability and simulation gates pass."
+        eyebrow={localize('FLASH LOAN ARBITRAGE')}
+        title={localize('Borrow. Route. Repay. Atomically.')}
+        text={localize(
+          'Explore the execution model being built for GSP TRADING: borrow USDC, route two swaps, repay inside the same transaction, and only submit after profitability and simulation gates pass.',
+        )}
       >
         <span className="observation-badge">
-          <Icon name="shield" size={17} /> Simulation first · Live locked
+          <Icon name="shield" size={17} />
+          {' ' + localize('Simulation first · Live locked')}
         </span>
       </PageHeading>
 
-      <section className="flash-status-grid" aria-label="Flash arbitrage safety limits">
+      <section className="flash-status-grid" aria-label={localize('Flash arbitrage safety limits')}>
         <article>
-          <span>Execution mode</span>
-          <strong>Simulation only</strong>
-          <small>Live submit is not connected</small>
+          <span>{localize('Execution mode')}</span>
+          <strong>{localize('Simulation only')}</strong>
+          <small>{localize('Live submit is not connected')}</small>
         </article>
         <article>
-          <span>Borrow asset</span>
+          <span>{localize('Borrow asset')}</span>
           <strong>USDC</strong>
-          <small>Project 0 integration target</small>
+          <small>{localize('Project 0 integration target')}</small>
         </article>
         <article>
-          <span>Max borrow</span>
+          <span>{localize('Max borrow')}</span>
           <strong>{dollars(MAX_BORROW_USDC)}</strong>
-          <small>Initial operator ceiling</small>
+          <small>{localize('Initial operator ceiling')}</small>
         </article>
         <article>
-          <span>Minimum edge</span>
+          <span>{localize('Minimum edge')}</span>
           <strong>{MIN_EDGE_PERCENT.toFixed(2)}%</strong>
-          <small>Guaranteed quote threshold</small>
+          <small>{localize('Guaranteed quote threshold')}</small>
         </article>
       </section>
 
@@ -93,14 +98,15 @@ export default function PublicFlashArbitrage() {
         <section className="panel flash-scenario-panel">
           <div className="panel-label">
             <span>
-              <Icon name="sliders" size={17} /> Scenario calculator
+              <Icon name="sliders" size={17} />
+              {' ' + localize('Scenario calculator')}
             </span>
-            <span className="subtle-label">NO TRADE IS SENT</span>
+            <span className="subtle-label">{localize('NO TRADE IS SENT')}</span>
           </div>
           <div className="flash-scenario-body">
             <div className="flash-input-grid">
               <label>
-                <span>Borrow notional</span>
+                <span>{localize('Borrow notional')}</span>
                 <div className="input-unit">
                   <input
                     value={notionalInput}
@@ -110,13 +116,13 @@ export default function PublicFlashArbitrage() {
                     min="1"
                     max="1000000"
                     step="100"
-                    aria-label="Borrow notional in USDC"
+                    aria-label={localize('Borrow notional in USDC')}
                   />
                   <span>USDC</span>
                 </div>
               </label>
               <label>
-                <span>Observed route edge</span>
+                <span>{localize('Observed route edge')}</span>
                 <div className="input-unit">
                   <input
                     value={edgeInput}
@@ -126,7 +132,7 @@ export default function PublicFlashArbitrage() {
                     min="0"
                     max="20"
                     step="0.01"
-                    aria-label="Observed route edge percent"
+                    aria-label={localize('Observed route edge percent')}
                   />
                   <span>%</span>
                 </div>
@@ -135,53 +141,56 @@ export default function PublicFlashArbitrage() {
 
             <div className="flash-scenario-result" aria-live="polite">
               <div>
-                <span>Theoretical spread value</span>
+                <span>{localize('Theoretical spread value')}</span>
                 <strong>{scenario.valid ? dollars(scenario.spreadValue) : '—'}</strong>
-                <small>Before actual execution costs and realized slippage</small>
+                <small>{localize('Before actual execution costs and realized slippage')}</small>
               </div>
               <span className={scenarioPasses ? 'flash-gate-pass' : 'flash-gate-blocked'}>
-                {scenarioPasses ? 'Scenario clears configured gates' : 'Scenario blocked by a gate'}
+                {scenarioPasses
+                  ? localize('Scenario clears configured gates')
+                  : localize('Scenario blocked by a gate')}
               </span>
             </div>
 
             <dl className="flash-gate-list">
               <div>
-                <dt>Borrow ceiling</dt>
+                <dt>{localize('Borrow ceiling')}</dt>
                 <dd className={scenario.valid && scenario.withinBorrowLimit ? 'positive' : ''}>
                   {scenario.valid && scenario.withinBorrowLimit
-                    ? 'Within limit'
+                    ? localize('Within limit')
                     : 'Max ' + dollars(MAX_BORROW_USDC)}
                 </dd>
               </div>
               <div>
-                <dt>Minimum guaranteed edge</dt>
+                <dt>{localize('Minimum guaranteed edge')}</dt>
                 <dd className={scenario.valid && scenario.clearsEdgeGate ? 'positive' : ''}>
                   {scenario.valid && scenario.clearsEdgeGate
-                    ? 'Pass'
+                    ? localize('Pass')
                     : 'Needs ≥ ' + MIN_EDGE_PERCENT.toFixed(2) + '%'}
                 </dd>
               </div>
               <div>
-                <dt>Max price impact / leg</dt>
+                <dt>{localize('Max price impact / leg')}</dt>
                 <dd>≤ {MAX_PRICE_IMPACT_PERCENT.toFixed(2)}%</dd>
               </div>
               <div>
-                <dt>Quote lifetime</dt>
+                <dt>{localize('Quote lifetime')}</dt>
                 <dd>≤ {MAX_QUOTE_AGE_SECONDS}s</dd>
               </div>
             </dl>
 
             <div className="flash-actions">
               <Link className="nova-button" to="/arbitrage">
-                <Icon name="scan" size={17} /> Scan live routes
+                <Icon name="scan" size={17} />
+                {' ' + localize('Scan live routes')}
               </Link>
               <button
                 type="button"
                 className="nova-button button-outline"
                 disabled
-                title="Live Project 0 execution is not connected yet"
+                title={localize('Live Project 0 execution is not connected yet')}
               >
-                Live execution locked
+                {localize('Live execution locked')}
               </button>
             </div>
           </div>
@@ -190,9 +199,10 @@ export default function PublicFlashArbitrage() {
         <section className="panel flash-flow-panel">
           <div className="panel-label">
             <span>
-              <Icon name="layers" size={17} /> Atomic transaction path
+              <Icon name="layers" size={17} />
+              {' ' + localize('Atomic transaction path')}
             </span>
-            <span className="subtle-label">ONE TRANSACTION</span>
+            <span className="subtle-label">{localize('ONE TRANSACTION')}</span>
           </div>
           <ol className="flash-flow">
             {[
@@ -220,33 +230,36 @@ export default function PublicFlashArbitrage() {
           <div className="flash-readiness-icon ready">
             <Icon name="check" size={22} />
           </div>
-          <span className="eyebrow">READY IN CODE</span>
-          <h2>Profitability + simulation gates</h2>
+          <span className="eyebrow">{localize('READY IN CODE')}</span>
+          <h2>{localize('Profitability + simulation gates')}</h2>
           <p>
-            Quote chaining, borrow limits, edge checks, price-impact limits, quote freshness, and
-            mandatory simulation are implemented and tested.
+            {localize(
+              'Quote chaining, borrow limits, edge checks, price-impact limits, quote freshness, and mandatory simulation are implemented and tested.',
+            )}
           </p>
         </article>
         <article className="panel">
           <div className="flash-readiness-icon pending">
             <Icon name="layers" size={22} />
           </div>
-          <span className="eyebrow">NEXT INTEGRATION</span>
-          <h2>Project 0 + Jupiter V2</h2>
+          <span className="eyebrow">{localize('NEXT INTEGRATION')}</span>
+          <h2>{localize('Project 0 + Jupiter V2')}</h2>
           <p>
-            The concrete atomic transaction adapter still needs the operator margin account, signer,
-            bank discovery, lookup tables, and current Jupiter V2 build integration.
+            {localize(
+              'The concrete atomic transaction adapter still needs the operator margin account, signer, bank discovery, lookup tables, and current Jupiter V2 build integration.',
+            )}
           </p>
         </article>
         <article className="panel">
           <div className="flash-readiness-icon locked">
             <Icon name="shield" size={22} />
           </div>
-          <span className="eyebrow">LIVE LOCKED</span>
-          <h2>Mainnet submit</h2>
+          <span className="eyebrow">{localize('LIVE LOCKED')}</span>
+          <h2>{localize('Mainnet submit')}</h2>
           <p>
-            No flash loan or swap can be submitted from this page yet. Live stays locked until a
-            complete mainnet simulation proves borrow, both swaps, and repayment fit atomically.
+            {localize(
+              'No flash loan or swap can be submitted from this page yet. Live stays locked until a complete mainnet simulation proves borrow, both swaps, and repayment fit atomically.',
+            )}
           </p>
         </article>
       </section>
@@ -254,15 +267,15 @@ export default function PublicFlashArbitrage() {
       <div className="flash-safety-banner">
         <Icon name="shield" size={24} />
         <div>
-          <strong>This page does not borrow funds or sign transactions.</strong>
+          <strong>{localize('This page does not borrow funds or sign transactions.')}</strong>
           <p>
-            The calculator is a scenario tool. A positive spread is not realized profit; network
-            fees, priority fees, route changes, slippage, failed simulations, liquidity, and
-            transaction-size limits can remove the opportunity before execution.
+            {localize(
+              'The calculator is a scenario tool. A positive spread is not realized profit; network fees, priority fees, route changes, slippage, failed simulations, liquidity, and transaction-size limits can remove the opportunity before execution.',
+            )}
           </p>
         </div>
         <Link className="text-link" to="/wallet">
-          Wallet connection ↗
+          {localize('Wallet connection ↗')}
         </Link>
       </div>
     </div>

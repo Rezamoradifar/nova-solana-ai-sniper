@@ -8,6 +8,7 @@ import { CopyButton } from '../components/CopyButton.js';
 import { StatCard } from '../components/StatCard.js';
 import { lamportsToSol, sol, usd, timeAgo } from '../lib/format.js';
 import type { AuditLogEntry, LedgerEntry, Wallet } from '../lib/types.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 /** Admin-only — records a withdrawal that was already executed manually,
  * out-of-band. Never signs or broadcasts a transaction: this is purely an
@@ -22,6 +23,7 @@ function RecordWithdrawalModal({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const { t: localize } = useLanguage();
   const [amountSol, setAmountSol] = useState('');
   const [txSignature, setTxSignature] = useState('');
   const [note, setNote] = useState('');
@@ -46,14 +48,15 @@ function RecordWithdrawalModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
       <div className="card w-full max-w-sm space-y-4">
-        <h2 className="text-lg font-semibold text-white">Record withdrawal</h2>
+        <h2 className="text-lg font-semibold text-white">{localize('Record withdrawal')}</h2>
         <p className="text-sm text-slate-400">
-          Records that this withdrawal was already sent manually, out-of-band. This does not send
-          any funds — it only creates an immutable ledger/audit entry.
+          {localize(
+            'Records that this withdrawal was already sent manually, out-of-band. This does not send any funds — it only creates an immutable ledger/audit entry.',
+          )}
         </p>
         <form onSubmit={onSubmit} className="space-y-3">
           <div>
-            <label className="label">Amount (SOL)</label>
+            <label className="label">{localize('Amount (SOL)')}</label>
             <input
               value={amountSol}
               onChange={(e) => setAmountSol(e.target.value)}
@@ -66,31 +69,31 @@ function RecordWithdrawalModal({
             />
           </div>
           <div>
-            <label className="label">Transaction signature</label>
+            <label className="label">{localize('Transaction signature')}</label>
             <input
               value={txSignature}
               onChange={(e) => setTxSignature(e.target.value)}
               required
               className="input-field"
-              placeholder="On-chain signature of the withdrawal"
+              placeholder={localize('On-chain signature of the withdrawal')}
             />
           </div>
           <div>
-            <label className="label">Note (optional)</label>
+            <label className="label">{localize('Note (optional)')}</label>
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
               className="input-field"
-              placeholder="Reason / reference"
+              placeholder={localize('Reason / reference')}
             />
           </div>
           {error && <div className="text-sm text-loss">{error}</div>}
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="btn-secondary flex-1">
-              Cancel
+              {localize('Cancel')}
             </button>
             <button type="submit" disabled={submitting} className="btn-primary flex-1">
-              Record withdrawal
+              {localize('Record withdrawal')}
             </button>
           </div>
         </form>
@@ -119,6 +122,7 @@ function LedgerRow({ entry }: { entry: LedgerEntry }) {
 }
 
 export function WalletDetail() {
+  const { t: localize } = useLanguage();
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const [refreshSignal, setRefreshSignal] = useState(0);
@@ -179,7 +183,7 @@ export function WalletDetail() {
     return (
       <div className="space-y-4">
         <Link to="/dashboard/wallets" className="text-sm text-accent hover:underline">
-          ← Back to Wallets
+          {localize('← Back to Wallets')}
         </Link>
         <div className="text-sm text-loss">{walletError.message}</div>
       </div>
@@ -187,7 +191,7 @@ export function WalletDetail() {
   }
 
   if (!wallet) {
-    return <div className="text-sm text-slate-500">Loading…</div>;
+    return <div className="text-sm text-slate-500">{localize('Loading…')}</div>;
   }
 
   const balanceSol = lamportsToSol(wallet.lastKnownBalanceLamports);
@@ -208,7 +212,7 @@ export function WalletDetail() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <Link to="/dashboard/wallets" className="text-xs text-accent hover:underline">
-            ← Back to Wallets
+            {localize('← Back to Wallets')}
           </Link>
           <h1 className="mt-1 text-2xl font-semibold text-white">{wallet.label}</h1>
           <div className="mt-1 flex items-center gap-2 font-mono text-xs text-slate-400">
@@ -220,18 +224,18 @@ export function WalletDetail() {
           <span
             className={`rounded-full px-2 py-1 text-xs ${wallet.isActive ? 'bg-profit/20 text-profit' : 'bg-surface-hover text-slate-400'}`}
           >
-            {wallet.isActive ? 'Active' : 'Disabled'}
+            {wallet.isActive ? localize('Active') : localize('Disabled')}
           </span>
           <button
             onClick={onRefreshBalance}
             disabled={refreshing}
             className="btn-secondary text-xs"
           >
-            {refreshing ? 'Refreshing…' : '🔄 Refresh Balance'}
+            {refreshing ? localize('Refreshing…') : localize('🔄 Refresh Balance')}
           </button>
           {user?.role === 'ADMIN' && (
             <button onClick={() => setShowWithdrawalModal(true)} className="btn-secondary text-xs">
-              Record Withdrawal
+              {localize('Record Withdrawal')}
             </button>
           )}
         </div>
@@ -240,17 +244,17 @@ export function WalletDetail() {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="grid grid-cols-2 gap-4">
-          <StatCard label="Current Balance" value={sol(balanceSol)} />
-          <StatCard label="Last Updated" value={timeAgo(wallet.balanceUpdatedAt)} />
+          <StatCard label={localize('Current Balance')} value={sol(balanceSol)} />
+          <StatCard label={localize('Last Updated')} value={timeAgo(wallet.balanceUpdatedAt)} />
         </div>
 
         <div className="card space-y-3">
-          <div className="label">Deposit — Solana Mainnet</div>
+          <div className="label">{localize('Deposit — Solana Mainnet')}</div>
           <div className="flex items-center gap-4">
             {qrDataUrl ? (
               <img
                 src={qrDataUrl}
-                alt="Deposit address QR code"
+                alt={localize('Deposit address QR code')}
                 className="h-32 w-32 rounded-lg bg-white p-1"
               />
             ) : (
@@ -258,9 +262,9 @@ export function WalletDetail() {
             )}
             <div className="min-w-0 space-y-2">
               <div className="break-all font-mono text-xs text-slate-300">{wallet.publicKey}</div>
-              <CopyButton text={wallet.publicKey} label="Copy Address" />
+              <CopyButton text={wallet.publicKey} label={localize('Copy Address')} />
               <p className="text-xs text-slate-500">
-                Send only SOL or SPL tokens on Solana to this address.
+                {localize('Send only SOL or SPL tokens on Solana to this address.')}
               </p>
             </div>
           </div>
@@ -269,14 +273,16 @@ export function WalletDetail() {
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="card overflow-x-auto">
-          <h2 className="mb-3 text-sm font-semibold text-white">Recent Transactions</h2>
+          <h2 className="mb-3 text-sm font-semibold text-white">
+            {localize('Recent Transactions')}
+          </h2>
           <table className="table-base">
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Type</th>
-                <th>Amount</th>
-                <th>Status</th>
+                <th>{localize('Time')}</th>
+                <th>{localize('Type')}</th>
+                <th>{localize('Amount')}</th>
+                <th>{localize('Status')}</th>
               </tr>
             </thead>
             <tbody>
@@ -286,7 +292,7 @@ export function WalletDetail() {
               {transactions?.length === 0 && (
                 <tr>
                   <td colSpan={4} className="py-6 text-center text-slate-500">
-                    No transactions yet.
+                    {localize('No transactions yet.')}
                   </td>
                 </tr>
               )}
@@ -295,13 +301,13 @@ export function WalletDetail() {
         </div>
 
         <div className="card overflow-x-auto">
-          <h2 className="mb-3 text-sm font-semibold text-white">Wallet History</h2>
+          <h2 className="mb-3 text-sm font-semibold text-white">{localize('Wallet History')}</h2>
           <table className="table-base">
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Action</th>
-                <th>Status</th>
+                <th>{localize('Time')}</th>
+                <th>{localize('Action')}</th>
+                <th>{localize('Status')}</th>
               </tr>
             </thead>
             <tbody>
@@ -317,7 +323,7 @@ export function WalletDetail() {
               {history?.length === 0 && (
                 <tr>
                   <td colSpan={3} className="py-6 text-center text-slate-500">
-                    No history yet.
+                    {localize('No history yet.')}
                   </td>
                 </tr>
               )}

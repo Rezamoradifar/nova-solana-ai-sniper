@@ -4,6 +4,7 @@ import { api, ApiError } from '../lib/api.js';
 import { usePolling } from '../lib/usePolling.js';
 import { CopyButton } from '../components/CopyButton.js';
 import type { Wallet, WalletCreateResult, WalletBackupFile } from '../lib/types.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 function downloadJson(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -23,15 +24,19 @@ function SeedPhraseModal({
   mnemonic: string;
   onAcknowledge: () => void;
 }) {
+  const { t: localize } = useLanguage();
   const [confirmed, setConfirmed] = useState(false);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
       <div className="card max-w-lg space-y-4">
-        <h2 className="text-lg font-semibold text-white">Save your seed phrase</h2>
+        <h2 className="text-lg font-semibold text-white">{localize('Save your seed phrase')}</h2>
         <p className="text-sm text-slate-400">
-          This is the <strong>only time</strong> this seed phrase will ever be shown. Anyone with it
-          can take everything in this wallet. Write it down and store it offline — it is never saved
-          on this server.
+          {localize('This is the') + ' '}
+          <strong>{localize('only time')}</strong>
+          {' ' +
+            localize(
+              'this seed phrase will ever be shown. Anyone with it can take everything in this wallet. Write it down and store it offline — it is never saved on this server.',
+            )}
         </p>
         <div className="grid grid-cols-3 gap-2 rounded-lg border border-surface-border bg-surface p-4 font-mono text-sm text-slate-100">
           {mnemonic.split(' ').map((word, i) => (
@@ -48,10 +53,10 @@ function SeedPhraseModal({
             onChange={(e) => setConfirmed(e.target.checked)}
             className="h-4 w-4"
           />
-          I've saved this seed phrase somewhere safe
+          {localize("I've saved this seed phrase somewhere safe")}
         </label>
         <button disabled={!confirmed} onClick={onAcknowledge} className="btn-primary w-full">
-          Done
+          {localize('Done')}
         </button>
       </div>
     </div>
@@ -67,6 +72,7 @@ function BackupModal({
   onClose: () => void;
   onDone: (backup: WalletBackupFile) => void;
 }) {
+  const { t: localize } = useLanguage();
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
@@ -88,14 +94,18 @@ function BackupModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
       <div className="card w-full max-w-sm space-y-4">
-        <h2 className="text-lg font-semibold text-white">Backup "{wallet.label}"</h2>
+        <h2 className="text-lg font-semibold text-white">
+          {localize('Backup "')}
+          {wallet.label}"
+        </h2>
         <p className="text-sm text-slate-400">
-          Choose a password to encrypt this wallet's key (AES-256-GCM). You'll need the same
-          password to restore it later — it is not saved anywhere.
+          {localize(
+            "Choose a password to encrypt this wallet's key (AES-256-GCM). You'll need the same password to restore it later — it is not saved anywhere.",
+          )}
         </p>
         <form onSubmit={onSubmit} className="space-y-3">
           <div>
-            <label className="label">Backup password</label>
+            <label className="label">{localize('Backup password')}</label>
             <input
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -103,16 +113,16 @@ function BackupModal({
               minLength={8}
               type="password"
               className="input-field"
-              placeholder="At least 8 characters"
+              placeholder={localize('At least 8 characters')}
             />
           </div>
           {error && <div className="text-sm text-loss">{error}</div>}
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="btn-secondary flex-1">
-              Cancel
+              {localize('Cancel')}
             </button>
             <button type="submit" disabled={submitting} className="btn-primary flex-1">
-              Download backup
+              {localize('Download backup')}
             </button>
           </div>
         </form>
@@ -122,6 +132,7 @@ function BackupModal({
 }
 
 export function Wallets() {
+  const { t: localize } = useLanguage();
   const navigate = useNavigate();
   const { data: wallets, error: pollError } = usePolling(
     () => api.get<Wallet[]>('/wallets'),
@@ -199,7 +210,7 @@ export function Wallets() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-white">Wallets</h1>
+      <h1 className="text-2xl font-semibold text-white">{localize('Wallets')}</h1>
 
       {revealMnemonic && (
         <SeedPhraseModal
@@ -226,63 +237,65 @@ export function Wallets() {
               onClick={() => setMode('create')}
               className={mode === 'create' ? 'btn-primary text-xs' : 'btn-secondary text-xs'}
             >
-              Generate new
+              {localize('Generate new')}
             </button>
             <button
               onClick={() => setMode('import')}
               className={mode === 'import' ? 'btn-primary text-xs' : 'btn-secondary text-xs'}
             >
-              Import existing
+              {localize('Import existing')}
             </button>
           </div>
 
           <form onSubmit={onSubmit} className="space-y-3">
             <div>
-              <label className="label">Label</label>
+              <label className="label">{localize('Label')}</label>
               <input
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
                 required
                 className="input-field"
-                placeholder="Main trading wallet"
+                placeholder={localize('Main trading wallet')}
               />
             </div>
             {mode === 'import' && (
               <div>
-                <label className="label">Private key (base58)</label>
+                <label className="label">{localize('Private key (base58)')}</label>
                 <input
                   value={secretKey}
                   onChange={(e) => setSecretKey(e.target.value)}
                   required
                   type="password"
                   className="input-field"
-                  placeholder="Never shared or logged — encrypted at rest immediately"
+                  placeholder={localize('Never shared or logged — encrypted at rest immediately')}
                 />
               </div>
             )}
             {error && <div className="text-sm text-loss">{error}</div>}
             {notice && <div className="text-sm text-profit">{notice}</div>}
             <button type="submit" disabled={submitting} className="btn-primary w-full">
-              {mode === 'create' ? 'Generate wallet' : 'Import wallet'}
+              {mode === 'create' ? localize('Generate wallet') : localize('Import wallet')}
             </button>
           </form>
         </div>
 
         <div className="card max-w-lg flex-1">
-          <h2 className="mb-4 text-sm font-semibold text-white">Restore from backup</h2>
+          <h2 className="mb-4 text-sm font-semibold text-white">
+            {localize('Restore from backup')}
+          </h2>
           <form onSubmit={onRestoreSubmit} className="space-y-3">
             <div>
-              <label className="label">Label</label>
+              <label className="label">{localize('Label')}</label>
               <input
                 value={restoreLabel}
                 onChange={(e) => setRestoreLabel(e.target.value)}
                 required
                 className="input-field"
-                placeholder="Restored wallet"
+                placeholder={localize('Restored wallet')}
               />
             </div>
             <div>
-              <label className="label">Backup file</label>
+              <label className="label">{localize('Backup file')}</label>
               <input
                 type="file"
                 accept="application/json"
@@ -292,20 +305,20 @@ export function Wallets() {
               />
             </div>
             <div>
-              <label className="label">Backup password</label>
+              <label className="label">{localize('Backup password')}</label>
               <input
                 value={restorePassword}
                 onChange={(e) => setRestorePassword(e.target.value)}
                 required
                 type="password"
                 className="input-field"
-                placeholder="The password used to create this backup"
+                placeholder={localize('The password used to create this backup')}
               />
             </div>
             {restoreError && <div className="text-sm text-loss">{restoreError}</div>}
             {restoreNotice && <div className="text-sm text-profit">{restoreNotice}</div>}
             <button type="submit" disabled={restoreSubmitting} className="btn-primary w-full">
-              Restore wallet
+              {localize('Restore wallet')}
             </button>
           </form>
         </div>
@@ -315,10 +328,10 @@ export function Wallets() {
         <table className="table-base">
           <thead>
             <tr>
-              <th>Label</th>
-              <th>Public Key</th>
-              <th>Status</th>
-              <th>Created</th>
+              <th>{localize('Label')}</th>
+              <th>{localize('Public Key')}</th>
+              <th>{localize('Status')}</th>
+              <th>{localize('Created')}</th>
               <th />
             </tr>
           </thead>
@@ -338,20 +351,20 @@ export function Wallets() {
                     </span>
                   </div>
                 </td>
-                <td>{wallet.isActive ? 'Active' : 'Disabled'}</td>
+                <td>{wallet.isActive ? localize('Active') : localize('Disabled')}</td>
                 <td>{new Date(wallet.createdAt).toLocaleDateString()}</td>
                 <td className="space-x-3 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                   <button
                     onClick={() => setBackupTarget(wallet)}
                     className="text-xs text-accent hover:underline"
                   >
-                    Backup
+                    {localize('Backup')}
                   </button>
                   <button
                     onClick={() => onRemove(wallet.id)}
                     className="text-xs text-loss hover:underline"
                   >
-                    Remove
+                    {localize('Remove')}
                   </button>
                 </td>
               </tr>
@@ -359,7 +372,7 @@ export function Wallets() {
             {wallets?.length === 0 && (
               <tr>
                 <td colSpan={5} className="py-6 text-center text-slate-500">
-                  No wallets yet.
+                  {localize('No wallets yet.')}
                 </td>
               </tr>
             )}

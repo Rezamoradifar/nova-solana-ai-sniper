@@ -11,11 +11,14 @@ import './MobileWalletActions.css';
 export function MobileWalletActions({ lang }: { lang: 'en' | 'fa' }) {
   const [copied, setCopied] = useState<'idle' | 'success' | 'error'>('idle');
   const links =
-    typeof window === 'undefined' ? null : getMobileWalletLinks(window.location.origin);
+    typeof window === 'undefined' ? null : getMobileWalletLinks(window.location.origin, lang);
   if (!links) return null;
   const fa = lang === 'fa';
   return (
-    <section className="nova-mobile-wallet-actions" aria-label={fa ? 'اتصال با کیف پول موبایل' : 'Mobile wallet connection'}>
+    <section
+      className="nova-mobile-wallet-actions"
+      aria-label={fa ? 'اتصال با کیف پول موبایل' : 'Mobile wallet connection'}
+    >
       <strong>{fa ? 'اتصال با گوشی' : 'Connect from a phone'}</strong>
       <p>
         {fa
@@ -44,10 +47,16 @@ export function MobileWalletActions({ lang }: { lang: 'en' | 'fa' }) {
         }}
       >
         {copied === 'success'
-          ? fa ? 'آدرس سایت کپی شد' : 'Website address copied'
+          ? fa
+            ? 'آدرس سایت کپی شد'
+            : 'Website address copied'
           : copied === 'error'
-            ? fa ? 'کپی نشد؛ آدرس را دستی وارد کنید' : 'Could not copy; enter the address manually'
-            : fa ? 'کپی آدرس سایت' : 'Copy website address'}
+            ? fa
+              ? 'کپی نشد؛ آدرس را دستی وارد کنید'
+              : 'Could not copy; enter the address manually'
+            : fa
+              ? 'کپی آدرس سایت'
+              : 'Copy website address'}
       </button>
       <small>{links.page}</small>
     </section>

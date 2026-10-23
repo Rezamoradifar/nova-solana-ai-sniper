@@ -18,11 +18,15 @@ COPY apps/miniapp ./apps/miniapp
 # Relative path: nginx proxies /api/ to the api service and strips the prefix,
 # so the browser calls same-origin /api/... regardless of the public domain.
 ENV VITE_API_BASE_URL=/api
+ARG VITE_WALLETCONNECT_PROJECT_ID=""
+ENV VITE_WALLETCONNECT_PROJECT_ID=${VITE_WALLETCONNECT_PROJECT_ID}
+ARG NOVA_WALLET_UI_RELEASE=development
 # Must run as the workspace script (not a bare `npx vite`/`npx tsc` from /repo):
 # npm sets cwd to apps/dashboard for `--workspace` scripts, which is what makes
 # both the nested vite@6 (root node_modules has an unrelated vite@5 from
 # vitest) and the local tailwind.config.js content globs resolve correctly.
 RUN npm run build --workspace apps/dashboard
+RUN node -e "require('fs').writeFileSync('apps/dashboard/dist/nova-wallet-release.json', JSON.stringify({release: process.argv[1], walletConnectConfigured: /^[a-f0-9]{32}$/i.test(process.env.VITE_WALLETCONNECT_PROJECT_ID || '')}))" "$NOVA_WALLET_UI_RELEASE"
 # Telegram Mini App, served under /app/ (its vite base).
 RUN npm run build --workspace apps/miniapp
 

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api, ApiError } from '../lib/api.js';
 import { usePolling } from '../lib/usePolling.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 type Snipe = {
   id: string;
@@ -112,6 +113,7 @@ function errText(e: unknown) {
 }
 
 export function TradingLab() {
+  const { t: localize } = useLanguage();
   const [refresh, setRefresh] = useState(0);
   const snipes = usePolling(() => api.get<Snipe[]>('/snipes'), 10_000, refresh);
   const winners = usePolling(
@@ -159,18 +161,19 @@ export function TradingLab() {
     <div className="space-y-6">
       <div>
         <div className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">
-          Trading Intelligence
+          {localize('Trading Intelligence')}
         </div>
-        <h1 className="mt-1 text-2xl font-semibold text-white">Trading Lab</h1>
+        <h1 className="mt-1 text-2xl font-semibold text-white">{localize('Trading Lab')}</h1>
         <p className="mt-1 max-w-3xl text-sm text-slate-400">
-          Strategy controls, verified external network winners and a paper arbitrage radar. Nothing
-          here guarantees profit; the tools are for filtering, risk control and decision support.
+          {localize(
+            'Strategy controls, verified external network winners and a paper arbitrage radar. Nothing here guarantees profit; the tools are for filtering, risk control and decision support.',
+          )}
         </p>
       </div>
 
       {message && (
         <div className="rounded-lg border border-profit/30 bg-profit/10 p-3 text-sm text-green-300">
-          {message}
+          {localize(message ?? '')}
         </div>
       )}
       {error && (
@@ -182,13 +185,15 @@ export function TradingLab() {
       <section className="card">
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
-            <h2 className="font-semibold text-white">Strategy presets</h2>
+            <h2 className="font-semibold text-white">{localize('Strategy presets')}</h2>
             <p className="mt-1 text-xs text-slate-500">
-              Applies to one of your Snipe Configs. Existing open positions keep their frozen exit settings.
+              {localize(
+                'Applies to one of your Snipe Configs. Existing open positions keep their frozen exit settings.',
+              )}
             </p>
           </div>
           <div className="min-w-64">
-            <label className="label">Snipe Config</label>
+            <label className="label">{localize('Snipe Config')}</label>
             <select
               className="input-field"
               value={selected?.id ?? ''}
@@ -196,7 +201,9 @@ export function TradingLab() {
             >
               {(snipes.data ?? []).map((s, index) => (
                 <option key={s.id} value={s.id}>
-                  #{index + 1} · {s.buyAmountSol} SOL · AI {s.minAiScore} · {s.isActive ? 'Active' : 'Paused'}
+                  #{index + 1} · {s.buyAmountSol}
+                  {' ' + localize('SOL · AI') + ' '}
+                  {s.minAiScore} · {s.isActive ? localize('Active') : localize('Paused')}
                 </option>
               ))}
             </select>
@@ -216,80 +223,140 @@ export function TradingLab() {
                   <div className="font-semibold text-white">{preset.name}</div>
                   <div className="mt-1 text-xs text-slate-500">{preset.note}</div>
                   <div className="mt-3 text-xs text-violet-300">
-                    AI ≥ {preset.patch.minAiScore} · Liquidity ≥ ${preset.patch.minLiquidityUsd.toLocaleString()}
+                    {localize('AI ≥') + ' '}
+                    {preset.patch.minAiScore}
+                    {' ' + localize('· Liquidity ≥ $')}
+                    {preset.patch.minLiquidityUsd.toLocaleString()}
                   </div>
                 </button>
               ))}
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm md:grid-cols-6">
-              <Mini label="Buy" value={selected.buyAmountSol + ' SOL'} />
-              <Mini label="AI" value={String(selected.minAiScore)} />
-              <Mini label="Liquidity" value={'$' + selected.minLiquidityUsd.toLocaleString()} />
-              <Mini label="TP" value={(selected.takeProfitPercent ?? 0) + '%'} />
-              <Mini label="SL" value={(selected.stopLossPercent ?? 0) + '%'} />
-              <Mini label="Trail" value={(selected.trailingStopPercent ?? 0) + '%'} />
+              <Mini label={localize('Buy')} value={selected.buyAmountSol + ' SOL'} />
+              <Mini label={localize('AI')} value={String(selected.minAiScore)} />
+              <Mini
+                label={localize('Liquidity')}
+                value={'$' + selected.minLiquidityUsd.toLocaleString()}
+              />
+              <Mini label={localize('TP')} value={(selected.takeProfitPercent ?? 0) + '%'} />
+              <Mini label={localize('SL')} value={(selected.stopLossPercent ?? 0) + '%'} />
+              <Mini label={localize('Trail')} value={(selected.trailingStopPercent ?? 0) + '%'} />
             </div>
           </>
         ) : (
           <div className="mt-4 text-sm text-slate-500">
-            Create a Snipe Config first, then strategy presets can be applied here.
+            {localize('Create a Snipe Config first, then strategy presets can be applied here.')}
           </div>
         )}
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
         <div className="card">
-          <h2 className="font-semibold text-white">Risk / reward calculator</h2>
+          <h2 className="font-semibold text-white">{localize('Risk / reward calculator')}</h2>
           <p className="mt-1 text-xs text-slate-500">
-            Simple scenario math before fees, slippage and price impact. It is not a profit forecast.
+            {localize(
+              'Simple scenario math before fees, slippage and price impact. It is not a profit forecast.',
+            )}
           </p>
           <div className="mt-4 grid grid-cols-3 gap-3">
             <div>
-              <label className="label">Position SOL</label>
-              <input className="input-field" type="number" min="0" step="0.01" value={positionSol} onChange={(e) => setPositionSol(e.target.value)} />
+              <label className="label">{localize('Position SOL')}</label>
+              <input
+                className="input-field"
+                type="number"
+                min="0"
+                step="0.01"
+                value={positionSol}
+                onChange={(e) => setPositionSol(e.target.value)}
+              />
             </div>
             <div>
-              <label className="label">TP %</label>
-              <input className="input-field" type="number" min="0" value={takeProfit} onChange={(e) => setTakeProfit(e.target.value)} />
+              <label className="label">{localize('TP %')}</label>
+              <input
+                className="input-field"
+                type="number"
+                min="0"
+                value={takeProfit}
+                onChange={(e) => setTakeProfit(e.target.value)}
+              />
             </div>
             <div>
-              <label className="label">SL %</label>
-              <input className="input-field" type="number" min="0" max="20" value={stopLoss} onChange={(e) => setStopLoss(e.target.value)} />
+              <label className="label">{localize('SL %')}</label>
+              <input
+                className="input-field"
+                type="number"
+                min="0"
+                max="20"
+                value={stopLoss}
+                onChange={(e) => setStopLoss(e.target.value)}
+              />
             </div>
           </div>
           <div className="mt-4 grid grid-cols-3 gap-3">
-            <Mini label="Target gain" value={calculator.target.toFixed(4) + ' SOL'} tone="text-profit" />
-            <Mini label="Risk at SL" value={calculator.risk.toFixed(4) + ' SOL'} tone="text-loss" />
-            <Mini label="Reward / risk" value={calculator.ratio.toFixed(2) + 'x'} />
+            <Mini
+              label={localize('Target gain')}
+              value={calculator.target.toFixed(4) + ' SOL'}
+              tone="text-profit"
+            />
+            <Mini
+              label={localize('Risk at SL')}
+              value={calculator.risk.toFixed(4) + ' SOL'}
+              tone="text-loss"
+            />
+            <Mini label={localize('Reward / risk')} value={calculator.ratio.toFixed(2) + 'x'} />
           </div>
           <p className="mt-3 text-[11px] text-slate-500">
-            The platform hard-loss ceiling is 20%; actual fills can differ because of liquidity, slippage and route conditions.
+            {localize(
+              'The platform hard-loss ceiling is 20%; actual fills can differ because of liquidity, slippage and route conditions.',
+            )}
           </p>
         </div>
 
         <div className="card">
-          <h2 className="font-semibold text-white">Arbitrage Radar</h2>
+          <h2 className="font-semibold text-white">{localize('Arbitrage Radar')}</h2>
           <p className="mt-1 text-xs text-slate-500">
-            This scanner is paper/theoretical. It compares quote routes but does not borrow or execute funds.
+            {localize(
+              'This scanner is paper/theoretical. It compares quote routes but does not borrow or execute funds.',
+            )}
           </p>
           {!arbitrage.data ? (
-            <div className="mt-4 text-sm text-slate-500">Loading…</div>
+            <div className="mt-4 text-sm text-slate-500">{localize('Loading…')}</div>
           ) : (
             <>
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <Mini label="Status" value={arbitrage.data.enabled ? 'ON' : 'OFF'} />
-                <Mini label="Scans" value={String(arbitrage.data.scans ?? 0)} />
-                <Mini label="Opportunities" value={String(arbitrage.data.opportunities ?? 0)} />
-                <Mini label="Best net" value={arbitrage.data.bestNetSol == null ? '—' : arbitrage.data.bestNetSol.toFixed(5) + ' SOL'} tone="text-profit" />
+                <Mini label={localize('Status')} value={arbitrage.data.enabled ? 'ON' : 'OFF'} />
+                <Mini label={localize('Scans')} value={String(arbitrage.data.scans ?? 0)} />
+                <Mini
+                  label={localize('Opportunities')}
+                  value={String(arbitrage.data.opportunities ?? 0)}
+                />
+                <Mini
+                  label={localize('Best net')}
+                  value={
+                    arbitrage.data.bestNetSol == null
+                      ? '—'
+                      : arbitrage.data.bestNetSol.toFixed(5) + ' SOL'
+                  }
+                  tone="text-profit"
+                />
               </div>
               <div className="mt-4 space-y-2">
                 {(arbitrage.data.recent ?? []).slice(0, 5).map((row, index) => (
-                  <div key={row.mint + row.at + index} className="rounded-lg border border-surface-border p-3 text-xs">
+                  <div
+                    key={row.mint + row.at + index}
+                    className="rounded-lg border border-surface-border p-3 text-xs"
+                  >
                     <div className="flex items-center justify-between gap-3">
                       <span className="font-mono text-slate-300">{short(row.mint)}</span>
-                      <span className={row.netSol >= 0 ? 'text-profit' : 'text-loss'}>{signed(row.netSol, 5, ' SOL')}</span>
+                      <span className={row.netSol >= 0 ? 'text-profit' : 'text-loss'}>
+                        {signed(row.netSol, 5, ' SOL')}
+                      </span>
                     </div>
-                    <div className="mt-1 text-slate-500">{row.buyDex} → {row.sellDex} · input {row.inSol.toFixed(3)} SOL</div>
+                    <div className="mt-1 text-slate-500">
+                      {row.buyDex} → {row.sellDex}
+                      {' ' + localize('· input') + ' '}
+                      {row.inSol.toFixed(3)} SOL
+                    </div>
                   </div>
                 ))}
               </div>
@@ -301,12 +368,16 @@ export function TradingLab() {
       <section className="card">
         <div className="flex flex-col justify-between gap-2 md:flex-row md:items-end">
           <div>
-            <h2 className="font-semibold text-white">Verified Network Winners</h2>
+            <h2 className="font-semibold text-white">{localize('Verified Network Winners')}</h2>
             <p className="mt-1 text-xs text-slate-500">
-              Completed profitable trades from external Solana wallets. These are not Nova/GSP bot performance.
+              {localize(
+                'Completed profitable trades from external Solana wallets. These are not Nova/GSP bot performance.',
+              )}
             </p>
           </div>
-          <span className="text-xs text-slate-500">Last 7 days · positive realized ROI + PnL only</span>
+          <span className="text-xs text-slate-500">
+            {localize('Last 7 days · positive realized ROI + PnL only')}
+          </span>
         </div>
 
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -314,41 +385,100 @@ export function TradingLab() {
             <article key={w.id} className="rounded-xl border border-surface-border bg-surface p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="font-semibold text-white">{w.tokenSymbol ? '$' + w.tokenSymbol : w.tokenName ?? short(w.mint)}</div>
-                  <div className="mt-0.5 text-xs text-slate-500">{w.dex ?? 'Solana'} · external wallet</div>
+                  <div className="font-semibold text-white">
+                    {w.tokenSymbol ? '$' + w.tokenSymbol : (w.tokenName ?? short(w.mint))}
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    {w.dex ?? 'Solana'}
+                    {' ' + localize('· external wallet')}
+                  </div>
                 </div>
                 <div className="text-right">
-                  <div className="font-mono text-lg font-bold text-profit">{signed(w.realizedRoiPercent, 1, '%')}</div>
-                  <div className="font-mono text-xs text-green-300">+${w.realizedPnlUsd.toFixed(2)}</div>
+                  <div className="font-mono text-lg font-bold text-profit">
+                    {signed(w.realizedRoiPercent, 1, '%')}
+                  </div>
+                  <div className="font-mono text-xs text-green-300">
+                    +${w.realizedPnlUsd.toFixed(2)}
+                  </div>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <Mini label="Invested" value={w.entryAmountSol == null ? '—' : w.entryAmountSol.toFixed(4) + ' SOL'} />
-                <Mini label="Returned" value={w.exitAmountSol == null ? '—' : w.exitAmountSol.toFixed(4) + ' SOL'} />
+                <Mini
+                  label={localize('Invested')}
+                  value={w.entryAmountSol == null ? '—' : w.entryAmountSol.toFixed(4) + ' SOL'}
+                />
+                <Mini
+                  label={localize('Returned')}
+                  value={w.exitAmountSol == null ? '—' : w.exitAmountSol.toFixed(4) + ' SOL'}
+                />
               </div>
               <div className="mt-3 text-xs text-slate-500">
-                Wallet <a className="text-violet-300 hover:underline" target="_blank" rel="noreferrer" href={'https://solscan.io/account/' + w.walletAddress}>{short(w.walletAddress)}</a>
-                {' · '}closed {new Date(w.exitAt).toLocaleString()}
+                {localize('Wallet') + ' '}
+                <a
+                  className="text-violet-300 hover:underline"
+                  target="_blank"
+                  rel="noreferrer"
+                  href={'https://solscan.io/account/' + w.walletAddress}
+                >
+                  {short(w.walletAddress)}
+                </a>
+                {' · '}
+                {localize('closed') + ' '}
+                {new Date(w.exitAt).toLocaleString()}
               </div>
               <div className="mt-3 flex gap-3 text-xs">
-                <a className="text-violet-300 hover:underline" target="_blank" rel="noreferrer" href={'https://solscan.io/tx/' + w.entrySignature}>Buy TX</a>
-                {w.exitSignature && <a className="text-violet-300 hover:underline" target="_blank" rel="noreferrer" href={'https://solscan.io/tx/' + w.exitSignature}>Sell TX</a>}
-                <a className="ml-auto text-slate-400 hover:text-white" target="_blank" rel="noreferrer" href={'https://dexscreener.com/solana/' + w.mint}>Chart</a>
+                <a
+                  className="text-violet-300 hover:underline"
+                  target="_blank"
+                  rel="noreferrer"
+                  href={'https://solscan.io/tx/' + w.entrySignature}
+                >
+                  {localize('Buy TX')}
+                </a>
+                {w.exitSignature && (
+                  <a
+                    className="text-violet-300 hover:underline"
+                    target="_blank"
+                    rel="noreferrer"
+                    href={'https://solscan.io/tx/' + w.exitSignature}
+                  >
+                    {localize('Sell TX')}
+                  </a>
+                )}
+                <a
+                  className="ml-auto text-slate-400 hover:text-white"
+                  target="_blank"
+                  rel="noreferrer"
+                  href={'https://dexscreener.com/solana/' + w.mint}
+                >
+                  {localize('Chart')}
+                </a>
               </div>
             </article>
           ))}
         </div>
-        {winners.data?.length === 0 && <div className="mt-4 text-sm text-slate-500">No verified profitable external exits are available in the selected window yet.</div>}
+        {winners.data?.length === 0 && (
+          <div className="mt-4 text-sm text-slate-500">
+            {localize(
+              'No verified profitable external exits are available in the selected window yet.',
+            )}
+          </div>
+        )}
       </section>
     </div>
   );
 }
 
 function Mini(props: { label: string; value: string; tone?: string }) {
+  const { t: localize } = useLanguage();
   return (
     <div className="rounded-lg border border-surface-border bg-surface-raised/40 p-3">
-      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{props.label}</div>
-      <div className={'mt-1 font-mono text-sm font-semibold ' + (props.tone ?? 'text-slate-200')}>{props.value}</div>
+      <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+        {localize(props.label)}
+      </div>
+      <div className={'mt-1 font-mono text-sm font-semibold ' + (props.tone ?? 'text-slate-200')}>
+        {props.value}
+      </div>
     </div>
   );
 }

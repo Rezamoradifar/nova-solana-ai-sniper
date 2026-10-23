@@ -2,7 +2,10 @@
  * Open this site's public-address connection page inside a mobile Solana wallet.
  * Build links only for secure HTTPS origins; never forward query strings or hashes.
  */
-export function getMobileWalletLinks(origin: string): {
+export function getMobileWalletLinks(
+  origin: string,
+  language?: 'en' | 'fa',
+): {
   page: string;
   phantom: string;
   solflare: string;
@@ -10,7 +13,9 @@ export function getMobileWalletLinks(origin: string): {
   try {
     const url = new URL(origin);
     if (url.protocol !== 'https:' || url.username || url.password) return null;
-    const page = new URL('/wallet', url.origin).href;
+    const targetPage = new URL('/wallet', url.origin);
+    if (language) targetPage.searchParams.set('lang', language);
+    const page = targetPage.href;
     const target = encodeURIComponent(page);
     const ref = encodeURIComponent(url.origin);
     return {

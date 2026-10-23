@@ -2,26 +2,28 @@ import { api } from '../lib/api.js';
 import { usePolling } from '../lib/usePolling.js';
 import { useLiveEvents } from '../lib/useLiveEvents.js';
 import type { Position } from '../lib/types.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 export function Positions() {
+  const { t: localize } = useLanguage();
   const liveTick = useLiveEvents(['position.updated']);
   const { data: positions } = usePolling(() => api.get<Position[]>('/positions'), 5000, liveTick);
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-white">Positions</h1>
+      <h1 className="text-2xl font-semibold text-white">{localize('Positions')}</h1>
 
       <div className="card overflow-x-auto">
         <table className="table-base">
           <thead>
             <tr>
-              <th>Token</th>
-              <th>Status</th>
-              <th>Entry Price</th>
-              <th>Invested (SOL)</th>
-              <th>TP / SL / Trail</th>
-              <th>Realized PnL</th>
-              <th>Opened</th>
+              <th>{localize('Token')}</th>
+              <th>{localize('Status')}</th>
+              <th>{localize('Entry Price')}</th>
+              <th>{localize('Invested (SOL)')}</th>
+              <th>{localize('TP / SL / Trail')}</th>
+              <th>{localize('Realized PnL')}</th>
+              <th>{localize('Opened')}</th>
             </tr>
           </thead>
           <tbody>
@@ -56,7 +58,7 @@ export function Positions() {
             {positions?.length === 0 && (
               <tr>
                 <td colSpan={7} className="py-6 text-center text-slate-500">
-                  No positions yet.
+                  {localize('No positions yet.')}
                 </td>
               </tr>
             )}

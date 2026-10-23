@@ -1,0 +1,225 @@
+.nova-wallet-button,
+.nova-language-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1px solid #ffffff24;
+  border-radius: 12px;
+  background: #ffffff07;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.nova-wallet-button {
+  background: linear-gradient(120deg, #00e5ff18, #8b5cf620);
+  border-color: #00e5ff44;
+}
+.nova-wallet-button:hover,
+.nova-language-switch:hover {
+  border-color: #00e5ff;
+  background-color: #00e5ff12;
+}
+.nova-wallet-dialog {
+  width: min(470px, calc(100vw - 24px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 1px solid #ffffff26;
+  border-radius: 24px;
+  color: #eef3ff;
+  background: #101522;
+  box-shadow: 0 25px 100px #0008;
+  font:
+    14px/1.7 Inter,
+    Arial,
+    sans-serif;
+  overflow: auto;
+}
+.nova-wallet-dialog::backdrop {
+  background: #030713b8;
+  backdrop-filter: blur(12px);
+}
+.nova-wallet-sheet {
+  padding: 24px;
+}
+.nova-wallet-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.nova-wallet-heading small {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #00e5ff;
+}
+.nova-wallet-heading h2 {
+  margin: 3px 0;
+  font-size: 23px;
+  font-weight: 700;
+}
+.nova-wallet-close {
+  height: 36px;
+  width: 36px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid #ffffff26;
+  background: #ffffff08;
+  color: #dae4f7;
+  font-size: 24px;
+  cursor: pointer;
+}
+.nova-wallet-description {
+  color: #9caac3;
+  font-size: 13px;
+  margin: 12px 0;
+}
+.nova-wallet-options {
+  display: grid;
+  gap: 10px;
+  margin: 20px 0;
+}
+.nova-wallet-choice {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid #ffffff1c;
+  border-radius: 16px;
+  background: #ffffff05;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.nova-wallet-choice:hover {
+  border-color: #00e5ff77;
+  background: #00e5ff0a;
+}
+.nova-wallet-choice img {
+  border-radius: 11px;
+}
+.nova-wallet-choice > span:nth-child(2) {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+.nova-wallet-choice small {
+  font-size: 11px;
+  color: #9caac3;
+}
+.nova-wallet-choice:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.nova-wallet-primary {
+  display: block;
+  padding: 11px 16px;
+  text-align: center;
+  border: 1px solid #00e5ff66;
+  background: #00e5ff18;
+  border-radius: 12px;
+  color: #e4fcff;
+  text-decoration: none;
+  margin-top: 14px;
+}
+.nova-wallet-actions {
+  display: flex;
+  gap: 10px;
+}
+.nova-wallet-actions button,
+.nova-wallet-refresh {
+  padding: 9px 12px;
+  border: 1px solid #ffffff24;
+  border-radius: 10px;
+  background: #ffffff08;
+  color: inherit;
+  cursor: pointer;
+}
+.nova-wallet-refresh {
+  width: 100%;
+}
+.nova-wallet-account {
+  padding: 16px;
+  border: 1px solid #ffffff18;
+  border-radius: 16px;
+  margin: 18px 0;
+}
+.nova-wallet-address {
+  font-family: monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  margin: 14px 0;
+  text-align: start;
+}
+.nova-wallet-network {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #22c55e;
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+.nova-wallet-network i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.nova-wallet-account select {
+  background: #101522;
+  width: 100%;
+  max-width: 100%;
+  font-size: 12px;
+  color: inherit;
+  padding: 8px;
+  margin: 8px 0;
+  border: 1px solid #ffffff30;
+  border-radius: 8px;
+  direction: ltr;
+}
+.nova-wallet-error {
+  padding: 12px;
+  border: 1px solid #ef444455;
+  border-radius: 10px;
+  color: #fca5a5;
+  font-size: 12px;
+}
+.nova-wallet-footer {
+  border-top: 1px solid #ffffff18;
+  padding-top: 16px;
+  margin-top: 20px;
+  color: #8d9ab3;
+  font-size: 11px;
+}
+[dir='rtl'] .nova-wallet-dialog,
+[dir='rtl'] .nova-wallet-sheet {
+  font-family: Tahoma, Arial, sans-serif;
+}
+.nova-wallet-dialog :focus-visible,
+.nova-language-switch:focus-visible,
+.nova-wallet-button:focus-visible {
+  outline: 2px solid #00e5ff;
+  outline-offset: 3px;
+}
+@media (max-width: 480px) {
+  .nova-wallet-sheet {
+    padding: 18px;
+  }
+  .nova-wallet-dialog {
+    border-radius: 20px;
+  }
+  .nova-wallet-button,
+  .nova-language-switch {
+    font-size: 12px;
+    padding: 9px 10px;
+  }
+  .nova-wallet-heading h2 {
+    font-size: 21px;
+  }
+}

@@ -8,15 +8,29 @@ import {
 } from 'react';
 import { getWallets } from '@wallet-standard/app';
 import { registerLegacyInjectedWallets, WalletConnectionStore } from './walletConnection.js';
+import { createWalletConnectWallet, validWalletConnectProjectId } from './walletConnect.js';
+
+export const walletConnectProjectId = validWalletConnectProjectId(
+  import.meta.env.VITE_WALLETCONNECT_PROJECT_ID,
+);
 
 const WalletContext = createContext<WalletConnectionStore | null>(null);
 
 export function WalletConnectionProvider({ children }: { children: ReactNode }) {
   const [store] = useState(() => new WalletConnectionStore());
+  const [remote] = useState(() =>
+    walletConnectProjectId
+      ? createWalletConnectWallet(async () => {
+          const { loadWalletConnect } = await import('./walletConnectSdk.js');
+          return loadWalletConnect(walletConnectProjectId);
+        })
+      : null,
+  );
   useEffect(() => {
     const registry = getWallets();
     const seen = new Set<object>();
     const cleanups: Array<() => void> = [];
+    if (remote) cleanups.push(registry.register(remote));
     const registerInjected = () => {
       cleanups.push(...registerLegacyInjectedWallets(registry, window, seen));
       store.refresh();
@@ -46,7 +60,7 @@ export function WalletConnectionProvider({ children }: { children: ReactNode }) 
       cleanups.splice(0).forEach((off) => off());
       store.stop();
     };
-  }, [store]);
+  }, [store, remote]);
   return <WalletContext.Provider value={store}>{children}</WalletContext.Provider>;
 }
 
