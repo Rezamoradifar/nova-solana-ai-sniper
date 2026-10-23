@@ -43,6 +43,16 @@ async function mockServices(page: Page) {
       json = { token: 'test-account-token' };
     else if (pathname === '/api/auth/me')
       json = { id: 'test-account', email: 'user@example.com', role: 'USER' };
+    else if (pathname === '/api/wallets')
+      json = [
+        {
+          id: 'wallet-1',
+          label: 'Home',
+          publicKey: address,
+          isActive: true,
+          createdAt: '2026-10-24T00:00:00Z',
+        },
+      ];
     else if (pathname === '/api/public/gmgn/markets')
       json = { status: 'not_configured', tokens: [] };
     await route.fulfill({ json });
@@ -148,6 +158,19 @@ test('language switch translates connected tools and survives reload in both dir
 test('account changes and disconnect update every approved-address surface without stale balances', async ({
   page,
 }) => {
+  await page.addInitScript((firstAddress) => {
+    const original = Response.prototype.json;
+    Response.prototype.json = async function () {
+      const value = await original.call(this);
+      if (this.url.endsWith('/api/public/wallet/' + firstAddress)) {
+        Object.assign(window, { __oldWalletJsonReading: true });
+        await new Promise<void>((resolve) =>
+          Object.assign(window, { __releaseOldWalletJson: resolve }),
+        );
+      }
+      return value;
+    };
+  }, address);
   await injectWallet(page);
   await page.goto('/wallet?lang=fa');
   await page.getByRole('button', { name: 'اتصال یا مدیریت کیف پول' }).first().click();
@@ -157,10 +180,22 @@ test('account changes and disconnect update every approved-address surface witho
     .click();
   await page.getByRole('dialog').getByRole('button', { name: 'بستن', exact: true }).click();
   await expect(page.locator('.wallet-address code')).toHaveText(address);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as unknown as { __oldWalletJsonReading?: boolean }).__oldWalletJsonReading,
+      ),
+    )
+    .toBe(true);
   await page.evaluate((next) => {
     (window as unknown as { __novaWalletChange: (value: string) => void }).__novaWalletChange(next);
   }, secondAddress);
   await expect(page.locator('.wallet-address code')).toHaveText(secondAddress);
+  await expect(page.locator('.wallet-access-details')).toContainText('2.000000 SOL');
+  await page.evaluate(async () => {
+    (window as unknown as { __releaseOldWalletJson: () => void }).__releaseOldWalletJson();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
   await expect(page.locator('.wallet-access-details')).toContainText('2.000000 SOL');
   await page.getByRole('button', { name: 'اتصال یا مدیریت کیف پول' }).first().click();
   await page
@@ -197,6 +232,7 @@ test('login returns to the requested account tool and preserves the selected lan
   await expect(page).toHaveURL(/\/dashboard\/wallets\?lang=fa$/);
   await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
   await expect(page.getByRole('heading', { name: 'کیف پول‌ها', exact: true })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Home', exact: true })).toBeVisible();
 });
 
 test('wallet chooser remains within the viewport and is keyboard dismissible', async ({

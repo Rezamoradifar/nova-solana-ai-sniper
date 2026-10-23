@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -50,6 +51,7 @@ export function WalletUIProvider({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
   const title = useId();
   const description = useId();
+  const copyGate = useRef({ active: false, address: undefined as string | undefined });
   const { state, connect, cancel, disconnect, selectAccount, refresh } = useWalletConnection();
   const { lang, t } = useLanguage();
   const show = useCallback(() => {
@@ -71,8 +73,13 @@ export function WalletUIProvider({ children }: { children: ReactNode }) {
       if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus();
     };
   }, [open]);
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const gate = { active: true, address: state.account?.address };
+    copyGate.current = gate;
     setCopied(false);
+    return () => {
+      gate.active = false;
+    };
   }, [state.account?.address]);
 
   const choose = async (wallet: (typeof state.available)[number]) => {
@@ -151,7 +158,11 @@ export function WalletUIProvider({ children }: { children: ReactNode }) {
                   type="button"
                   onClick={() => {
                     const address = state.account?.address;
-                    if (address) void copyToClipboard(address).then(setCopied);
+                    const gate = copyGate.current;
+                    if (address)
+                      void copyToClipboard(address).then((ok) => {
+                        if (gate.active && gate.address === address) setCopied(ok);
+                      });
                   }}
                 >
                   {copied ? t('Copied', 'کپی شد') : t('Copy address', 'کپی آدرس')}

@@ -140,3 +140,17 @@ html[dir='rtl'] .nova-site .interior-page h3 {
     backdrop-filter: none;
   }
 }
+
+/* Wallet management remains available at every breakpoint, including the older terminal. */
+.ml2-root .ml2-header-actions .nova-wallet-button.ml2-wallet-top {
+  display: inline-flex;
+}
+@media (max-width: 760px) {
+  .ml2-root .ml2-header-actions {
+    gap: 6px;
+  }
+  .ml2-root .ml2-header-actions .nova-wallet-button {
+    padding: 8px;
+    font-size: 11px;
+  }
+}

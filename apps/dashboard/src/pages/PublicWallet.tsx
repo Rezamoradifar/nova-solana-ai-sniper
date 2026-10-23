@@ -29,7 +29,8 @@ export default function PublicWallet() {
   const { t: localize } = useLanguage();
   const { state, selectAccount } = useWalletConnection();
   const { lang } = useLanguage();
-  const [network, setNetwork] = useState<WalletNetworkSnapshot | null>(null);
+  const [snapshot, setNetwork] = useState<WalletNetworkSnapshot | null>(null);
+  const network = snapshot?.address === state.account?.address ? snapshot : null;
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copyGuard = useRef<{ address?: string; active: boolean; attempt: number }>({
@@ -70,8 +71,10 @@ export default function PublicWallet() {
           },
         );
         if (!response.ok) throw new Error('Solana RPC data is currently unavailable.');
+        const next = (await response.json()) as WalletNetworkSnapshot;
+        if (next.address !== address) throw new Error('Solana RPC data is currently unavailable.');
         if (!controller.signal.aborted) {
-          setNetwork((await response.json()) as WalletNetworkSnapshot);
+          setNetwork(next);
           setNetworkError(null);
         }
       } catch (error) {
