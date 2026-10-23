@@ -70,6 +70,9 @@ export function LiveExecutionHub() {
     'watcher-stopped': ['Watcher stopped', 'اسکنر کپی متوقف'],
     'watcher-degraded': ['Watcher degraded', 'اختلال در اسکنر کپی'],
     'paper': ['PAPER: no live spending', 'آزمایشی: بدون خرج واقعی'],
+    'scanner-degraded': ['Scanner readiness not confirmed', 'سلامت اسکنر تأیید نشده'],
+    'buy-paused': ['New copy buys are paused', 'خریدهای جدید کپی‌ترید متوقف‌اند'],
+    'readiness-unavailable': ['Buy readiness not verified', 'آمادگی خرید تأیید نشده'],
     'live-backend-ready': ['LIVE backend: user enrollment required', 'موتور LIVE: نیازمند فعال‌سازی حساب کاربر'],
   };
 

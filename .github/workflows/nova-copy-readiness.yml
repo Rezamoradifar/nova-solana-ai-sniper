@@ -1,0 +1,29 @@
+name: Nova copy buy readiness
+on:
+  push:
+    branches: [codex/nova-copy-readiness-20261024]
+  pull_request:
+    branches: [codex/nova-copy-miniapp-ops-20261023]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --schema apps/api/prisma/schema.prisma
+      - name: Typecheck API and dependencies
+        run: npx tsc -b apps/api
+      - name: Copy engine, status and frontend readiness checks
+        run: npx vitest run apps/api/src/routes/publicCopyTrading.test.ts apps/api/src/trading/copyTradeWatcher.test.ts apps/api/src/trading/copyTrading.test.ts apps/dashboard/src/neon/realReadiness.test.ts
+      - name: Production dashboard build
+        run: npm run build --workspace @nova/dashboard
+      - run: git diff --check

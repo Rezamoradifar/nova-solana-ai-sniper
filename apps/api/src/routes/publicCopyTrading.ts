@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
+import { KILL_SWITCH_REDIS_KEY, SCANNER_AUTOBUY_PAUSE_REDIS_KEY } from '@nova/shared';
 import { fetchGmgnSmartMoney } from '../integrations/gmgn.js';
 import { loadRankedCopyWallets, COPY_RECOMMENDATION_POLICY } from '../trading/copyWalletRanking.js';
+import { copyBuyReadiness } from '../trading/copyExecutionReadiness.js';
 
 export function publicWalletScore(wallet: {
   confidenceScore: number | null;
@@ -34,6 +36,22 @@ export default async function publicCopyTradingRoutes(fastify: FastifyInstance) 
         });
     }
     return rankedWalletLoad;
+  }
+
+  async function readStops(): Promise<Array<string | null> | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        fastify.redis.mget(KILL_SWITCH_REDIS_KEY, SCANNER_AUTOBUY_PAUSE_REDIS_KEY),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), 1000);
+        }),
+      ]);
+    } catch {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   fastify.get(
@@ -115,6 +133,15 @@ export default async function publicCopyTradingRoutes(fastify: FastifyInstance) 
         : fastify.tradingMode === 'LIVE'
           ? 'live'
           : 'paper';
+      const readiness = copyBuyReadiness({
+        enabled: fastify.config.COPY_TRADING_EXECUTION_ENABLED === true,
+        mode: fastify.tradingMode,
+        workersReady: fastify.backgroundWorkersReady === true,
+        watcher,
+        scanner: fastify.scannerHealthCoordinator?.snapshot(),
+        envKillSwitch: fastify.config.KILL_SWITCH === true,
+        stops: await readStops(),
+      });
 
       return {
         chain: 'solana',
@@ -132,6 +159,7 @@ export default async function publicCopyTradingRoutes(fastify: FastifyInstance) 
         copyWatcherReady: watcherReady,
         executionMode,
         liveExecutionEnabled: executionMode === 'live',
+        buyReadiness: { ...readiness, checkedAt: Date.now() },
         updatedAt: Date.now(),
         localWallets,
         gmgn,

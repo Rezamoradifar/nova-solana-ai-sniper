@@ -4,6 +4,7 @@ import { Icon, PageHeading } from '../components/public/PublicLayout.js';
 import { api, ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.js';
 import { PUBLIC_API_BASE } from '../lib/publicMarket.js';
+import { liveCopyBuysReady, type PublicCopyReadiness } from '../neon/realReadiness.js';
 
 interface LocalWallet {
   address: string;
@@ -68,6 +69,7 @@ interface PublicCopyData {
   copyWatcherReady: boolean;
   executionMode: 'disabled' | 'paper' | 'live';
   liveExecutionEnabled: boolean;
+  buyReadiness?: PublicCopyReadiness['buyReadiness'];
   updatedAt: number;
   localWallets: LocalWallet[];
   gmgn:
@@ -142,6 +144,24 @@ export default function PublicCopyTrading() {
   }, [user]);
 
   const configured = useMemo(() => new Set(configs.map((item) => item.targetAddress)), [configs]);
+  const liveBuysReady = liveCopyBuysReady(data);
+  const executionLabel =
+    data?.executionMode === 'live'
+      ? liveBuysReady
+        ? 'LIVE COPY READY'
+        : data.buyReadiness
+          ? 'NEW COPY BUYS PAUSED'
+          : 'BUY READINESS NOT VERIFIED'
+      : data?.executionMode === 'paper'
+        ? 'PAPER COPY BUYS'
+        : 'WATCHER NOT READY';
+  const executionNotice = liveBuysReady
+    ? 'New verified buys may spend real SOL, subject to your wallet and trade limits.'
+    : data?.executionMode === 'paper'
+      ? 'Paper mode only; live spending is disabled.'
+      : data?.executionMode === 'live'
+        ? 'New copy buys are paused or their readiness could not be verified.'
+        : 'The copy configuration is stored while the server watcher is unavailable.';
 
   async function addCopy(address: string) {
     if (!user || busyAddress) return;
@@ -167,7 +187,7 @@ export default function PublicCopyTrading() {
       });
       setConfigs((current) => [...current.filter((item) => item.id !== created.id), created]);
       setMessage(
-        `Copy enabled for ${short(address)} · cap ${created.maxAmountSol} SOL. ${data?.executionMode === 'live' ? 'New verified buys may spend real SOL.' : data?.executionMode === 'paper' ? 'Paper mode only.' : 'Waiting for the server watcher.'}`,
+        `Copy configuration enabled for ${short(address)} · cap ${created.maxAmountSol} SOL. ${executionNotice}`,
       );
     } catch (error) {
       setMessage(
@@ -188,7 +208,7 @@ export default function PublicCopyTrading() {
       setConfigs((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setMessage(
         updated.isActive
-          ? 'Copy buys resumed.'
+          ? `Copy configuration enabled. ${executionNotice}`
           : 'New copy buys paused. Existing positions retain their exits.',
       );
     } catch (error) {
@@ -205,13 +225,8 @@ export default function PublicCopyTrading() {
         title="Track conviction. Copy with limits."
         text="Rank tracked Solana wallets using GSP on-chain history, inspect GMGN Smart Money activity when the official API is connected, and create bounded copy configurations."
       >
-        <span className="observation-badge">
-          <Icon name="activity" size={17} />{' '}
-          {data?.executionMode === 'live'
-            ? 'LIVE COPY BUYS'
-            : data?.executionMode === 'paper'
-              ? 'PAPER COPY BUYS'
-              : 'WATCHER NOT READY'}
+        <span className="observation-badge" role="status" aria-live="polite">
+          <Icon name="activity" size={17} /> {executionLabel}
         </span>
       </PageHeading>
 
@@ -258,17 +273,23 @@ export default function PublicCopyTrading() {
           <span>Execution</span>
           <strong>
             {data?.executionMode === 'live'
-              ? 'LIVE'
+              ? liveBuysReady
+                ? 'LIVE'
+                : 'BUYS PAUSED / UNVERIFIED'
               : data?.executionMode === 'paper'
                 ? 'PAPER MIRROR'
                 : 'EXECUTION LOCKED'}
           </strong>
           <small>
-            {data?.copyWatcherReady
-              ? 'Copies SOL-funded buys and mirrors source sells proportionally. Stop-loss and trailing exits remain active independently.'
-              : data?.watcher?.running
-                ? 'Watcher health is degraded. Copy signals may be missed for unavailable targets.'
-                : 'Watcher is stopped. Copy configurations are stored.'}
+            {data?.executionMode === 'live' && !liveBuysReady
+              ? executionNotice
+              : data?.executionMode === 'paper'
+                ? executionNotice
+                : data?.copyWatcherReady
+                  ? 'Copies SOL-funded buys and mirrors source sells proportionally. Stop-loss and trailing exits remain active independently.'
+                  : data?.watcher?.running
+                    ? 'Watcher health is degraded. Copy signals may be missed for unavailable targets.'
+                    : 'Watcher is stopped. Copy configurations are stored.'}
           </small>
         </div>
         <div className="copy-mode">
