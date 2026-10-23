@@ -14,3 +14,6 @@ docs
 backups
 apps/dashboard/node_modules
 apps/dashboard/dist
+
+# A host incremental cache cannot prove image build outputs exist.
+**/*.tsbuildinfo

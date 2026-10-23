@@ -20,7 +20,7 @@ COPY apps/api ./apps/api
 COPY apps/telegram-bot ./apps/telegram-bot
 
 RUN npx prisma generate --schema apps/api/prisma/schema.prisma
-RUN npx tsc -b packages/shared packages/ai apps/telegram-bot apps/api
+RUN npx tsc -b --force packages/shared packages/ai apps/telegram-bot apps/api
 
 # ---- prod-deps (prune devDependencies for the slim runtime image) ----
 FROM build AS prod-deps
