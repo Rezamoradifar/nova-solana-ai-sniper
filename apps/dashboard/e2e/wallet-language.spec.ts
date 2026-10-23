@@ -284,10 +284,12 @@ test('a delayed chart response cannot access a removed route and the next visit 
     await route.fulfill({ contentType: 'application/javascript', body: chartScriptFixture });
   });
   try {
-    await page.goto('/terminal?lang=fa');
+    await page.goto('/copy-trading?lang=fa');
+    await page.locator('footer').getByRole('link', { name: 'محیط معاملاتی', exact: true }).click();
     await expect.poll(() => requested).toBe(true);
-    await page.locator('footer').getByRole('link', { name: 'کپی ترید', exact: true }).click();
+    await page.locator('footer a[href="/terminal/copy"]').click();
     await expect(page).toHaveURL(/\/copy-trading$/);
+    await expect(page.getByTitle('نمودار بازار TradingView', { exact: true })).toHaveCount(0);
     release();
     for (let visit = 0; visit < 2; visit++) {
       await page.locator('footer').getByRole('link', { name: 'محیط معاملاتی', exact: true }).click();
@@ -296,7 +298,7 @@ test('a delayed chart response cannot access a removed route and the next visit 
       const embeddedChart = chart.contentFrame().getByTitle('Fixture TradingView chart', { exact: true });
       await expect(embeddedChart).toHaveAttribute('data-symbol', 'COINBASE:SOLUSD');
       await expect(embeddedChart.contentFrame().locator('body')).toHaveText('Approved chart fixture');
-      await page.locator('footer').getByRole('link', { name: 'کپی ترید', exact: true }).click();
+      await page.locator('footer a[href="/terminal/copy"]').click();
     }
     expect(errors).toEqual([]);
   } finally {
