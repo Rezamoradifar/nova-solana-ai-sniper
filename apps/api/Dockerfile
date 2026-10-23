@@ -33,6 +33,8 @@ COPY apps/marketing-engine/assets/fonts/ /usr/share/fonts/gsp/
 RUN fc-cache -f
 WORKDIR /repo
 ENV NODE_ENV=production
+ARG NOVA_SITE_RELEASE
+ENV NOVA_SITE_RELEASE=${NOVA_SITE_RELEASE}
 
 COPY --from=prod-deps /repo/node_modules ./node_modules
 COPY --from=prod-deps /repo/package.json ./package.json

@@ -12,6 +12,7 @@ import { fetchMarkets, type MarketToken } from '../lib/publicMarket.js';
 import { useLanguage } from '../lib/LanguageContext.js';
 import { WalletButton, useWalletUI } from '../components/WalletUI.js';
 import { SiteBrand } from '../components/SiteBrand.js';
+import { MainnetRibbon } from '../components/MainnetRibbon.js';
 import './moneyland-v2.css';
 
 export type Language = 'en' | 'fa';
@@ -417,6 +418,7 @@ function MoneylandContents() {
   return <div className="ml2-root" dir={lang === 'fa' ? 'rtl' : 'ltr'}>
     <a className="ml2-skip" href="#ml2-main">{lang === 'fa' ? 'رفتن به محتوای اصلی' : 'Skip to main content'}</a>
     <MLNavigation />
+    <MainnetRibbon />
     {isWorkspace
       ? <div className="ml2-workspace"><MLSidebar/><main id="ml2-main" className="ml2-workspace-main"><Outlet /></main></div>
       : <main id="ml2-main"><Outlet /></main>}

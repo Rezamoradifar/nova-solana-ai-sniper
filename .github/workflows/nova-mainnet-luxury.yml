@@ -1,0 +1,47 @@
+name: Nova Solana mainnet and luxury interface
+on:
+  push:
+    branches: [codex/nova-solana-luxury-mainnet-20261024]
+  pull_request:
+    branches: [codex/nova-unified-wallet-language-20261024]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --schema apps/api/prisma/schema.prisma
+      - run: npx tsc -b apps/api
+      - name: Mainnet identity, wallet and copy engine invariants
+        run: npx vitest run apps/dashboard/src apps/api/src/solana/mainnetGateway.test.ts apps/api/src/routes/publicNetwork.test.ts apps/api/src/routes/publicCopyTrading.test.ts apps/api/src/trading/copyTradeWatcher.test.ts apps/api/src/trading/copyTrading.test.ts
+      - name: Build configured production dashboard
+        run: npm run build --workspace @nova/dashboard
+        env:
+          VITE_WALLETCONNECT_PROJECT_ID: 1a2b3c4d5e6f708192a3b4c5d6e7f809
+      - name: Build actual API image and verify release identity
+        run: |
+          docker build --build-arg NOVA_SITE_RELEASE="$GITHUB_SHA" -t nova-mainnet-api-ci -f apps/api/Dockerfile .
+          docker run --rm --entrypoint node nova-mainnet-api-ci -e 'if(process.env.NOVA_SITE_RELEASE!==process.argv[1])process.exit(1)' "$GITHUB_SHA"
+      - name: Build actual web image including wallet configuration
+        run: |
+          docker build --build-arg VITE_WALLETCONNECT_PROJECT_ID=1a2b3c4d5e6f708192a3b4c5d6e7f809 --build-arg NOVA_WALLET_UI_RELEASE="$GITHUB_SHA" -t nova-mainnet-web-ci -f apps/dashboard/Dockerfile .
+          docker run --rm --entrypoint cat nova-mainnet-web-ci /usr/share/nginx/html/nova-wallet-release.json > /tmp/wallet-release.json
+          python3 -c 'import json,os; d=json.load(open("/tmp/wallet-release.json")); assert d["release"]==os.environ["GITHUB_SHA"] and d["walletConnectConfigured"] is True'
+      - name: Browser engines
+        run: npx playwright install --with-deps chromium webkit
+      - name: Desktop, Android and iPhone mainnet and wallet flows
+        run: npm run test:wallet-ui
+      - run: git diff --check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nova-mainnet-luxury-browser-results
+          path: test-results/wallet-language
+          retention-days: 5

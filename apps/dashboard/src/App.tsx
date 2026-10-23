@@ -4,6 +4,8 @@ import { AuthProvider } from './lib/AuthContext.js';
 import { WalletConnectionProvider } from './lib/WalletContext.js';
 import { LanguageProvider } from './lib/LanguageContext.js';
 import { WalletUIProvider } from './components/WalletUI.js';
+import { MainnetProvider } from './lib/MainnetContext.js';
+import NetworkOverview from './pages/NetworkOverview.js';
 import { ProtectedRoute } from './components/ProtectedRoute.js';
 import { Layout } from './components/Layout.js';
 import { Login } from './pages/Login.js';
@@ -37,6 +39,7 @@ import { NeonFlashLoans, NeonDesignSystem } from './neon/Automation.js';
 import { MoneylandFrame } from './moneyland-v2/core.js';
 import './neon/refinements.css';
 import './site-language.css';
+import './luxury.css';
 const MoneylandLanding = lazy(() => import('./moneyland-v2/Landing.js'));
 const OverviewScreen = lazy(() =>
   import('./moneyland-v2/TerminalCorePages.js').then((m) => ({ default: m.OverviewScreen })),
@@ -76,6 +79,7 @@ export function App() {
       <AuthProvider>
         <WalletConnectionProvider>
           <BrowserRouter>
+            <MainnetProvider>
             <WalletUIProvider>
               <Routes>
                 <Route element={<NeonLayout />}>
@@ -165,6 +169,7 @@ export function App() {
                   <Route path="/tools" element={<PublicPlatform />} />
                   <Route path="/telegram" element={<PublicTelegram />} />
                   <Route path="/wallet" element={<PublicWallet />} />
+                  <Route path="/network" element={<NetworkOverview />} />
                   <Route path="/security" element={<PublicSecurity />} />
                   <Route path="/pricing" element={<PublicPricing />} />
                   <Route path="*" element={<Landing />} />
@@ -192,6 +197,7 @@ export function App() {
                 </Route>
               </Routes>
             </WalletUIProvider>
+            </MainnetProvider>
           </BrowserRouter>
         </WalletConnectionProvider>
       </AuthProvider>
