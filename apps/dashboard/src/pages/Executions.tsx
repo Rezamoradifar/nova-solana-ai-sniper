@@ -4,6 +4,7 @@ import { PageHeading } from '../components/public/PublicLayout.js';
 import { useAuth } from '../lib/AuthContext.js';
 import { api } from '../lib/api.js';
 import { money } from '../lib/publicMarket.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 interface Row {
   id: string;
   side?: string;
@@ -25,6 +26,7 @@ interface Report {
   summary: { confirmedTrades: number; closedPositions: number; realizedPnlUsd: number | null };
 }
 export default function Executions() {
+  const { t: localize } = useLanguage();
   const { user, loading: authLoading } = useAuth();
   const [mode, setMode] = useState('live'),
     [view, setView] = useState('trades'),
@@ -79,17 +81,18 @@ export default function Executions() {
     setCursors([]);
     set(value);
   }
-  if (authLoading) return <div className="site-container interior-page">Loading account…</div>;
+  if (authLoading)
+    return <div className="site-container interior-page">{localize('Loading account…')}</div>;
   if (!user)
     return (
       <div className="site-container interior-page">
         <PageHeading
-          eyebrow="EXECUTION HISTORY"
-          title="Your trades. Your record."
-          text="Sign in to view your confirmed trades and realized position results."
+          eyebrow={localize('EXECUTION HISTORY')}
+          title={localize('Your trades. Your record.')}
+          text={localize('Sign in to view your confirmed trades and realized position results.')}
         />
         <Link className="nova-button" to="/login">
-          Sign in ↗
+          {localize('Sign in ↗')}
         </Link>
       </div>
     );
@@ -97,31 +100,33 @@ export default function Executions() {
   return (
     <div className="site-container interior-page">
       <PageHeading
-        eyebrow="EXECUTION HISTORY"
-        title="Executed trades & results."
-        text="Confirmed buys and sells, with closed-position profit and loss shown separately."
+        eyebrow={localize('EXECUTION HISTORY')}
+        title={localize('Executed trades & results.')}
+        text={localize(
+          'Confirmed buys and sells, with closed-position profit and loss shown separately.',
+        )}
       />
       <div className="gmgn-tool-form panel gmgn-tool-panel">
         <label>
-          Trading mode
+          {localize('Trading mode')}
           <select value={mode} onChange={(e) => reset(setMode, e.target.value)}>
-            <option value="live">Live trades</option>
-            <option value="paper">Paper simulation</option>
+            <option value="live">{localize('Live trades')}</option>
+            <option value="paper">{localize('Paper simulation')}</option>
           </select>
         </label>
         <label>
-          Report
+          {localize('Report')}
           <select value={view} onChange={(e) => reset(setView, e.target.value)}>
-            <option value="trades">Confirmed buys & sells</option>
-            <option value="positions">Closed positions · realized P&amp;L</option>
+            <option value="trades">{localize('Confirmed buys & sells')}</option>
+            <option value="positions">{localize('Closed positions · realized P&L')}</option>
           </select>
         </label>
         {admin ? (
           <label>
-            Accounts
+            {localize('Accounts')}
             <select value={scope} onChange={(e) => reset(setScope, e.target.value)}>
-              <option value="mine">My account</option>
-              <option value="all">All accounts · admin</option>
+              <option value="mine">{localize('My account')}</option>
+              <option value="all">{localize('All accounts · admin')}</option>
             </select>
           </label>
         ) : null}
@@ -130,30 +135,30 @@ export default function Executions() {
           disabled={loading}
           onClick={() => setRefresh((n) => n + 1)}
         >
-          Refresh
+          {localize('Refresh')}
         </button>
         <Link className="text-link" to="/research">
-          GMGN research ↗
+          {localize('GMGN research ↗')}
         </Link>
       </div>
       {mode === 'paper' ? (
         <p className="inline-notice">
-          Paper simulation · These records do not represent real fund movements.
+          {localize('Paper simulation · These records do not represent real fund movements.')}
         </p>
       ) : null}
       <div className="stat-grid">
         <div className="stat-card">
-          <span>Confirmed executions</span>
+          <span>{localize('Confirmed executions')}</span>
           <strong>{data?.summary.confirmedTrades ?? '—'}</strong>
         </div>
         <div className="stat-card">
-          <span>Closed positions</span>
+          <span>{localize('Closed positions')}</span>
           <strong>{data?.summary.closedPositions ?? '—'}</strong>
         </div>
         <div className="stat-card">
-          <span>Recorded realized P&amp;L · USD</span>
+          <span>{localize('Recorded realized P&L · USD')}</span>
           <strong>{money(data?.summary.realizedPnlUsd ?? undefined)}</strong>
-          <small>All closed positions in the selected mode and account scope</small>
+          <small>{localize('All closed positions in the selected mode and account scope')}</small>
         </div>
       </div>
       {error ? (
@@ -166,21 +171,21 @@ export default function Executions() {
           <table className="nova-table">
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Token</th>
-                <th>Wallet</th>
+                <th>{localize('Time')}</th>
+                <th>{localize('Token')}</th>
+                <th>{localize('Wallet')}</th>
                 {view === 'trades' ? (
                   <>
-                    <th>Side</th>
-                    <th>SOL amount</th>
-                    <th>USD price</th>
-                    <th>Transaction</th>
+                    <th>{localize('Side')}</th>
+                    <th>{localize('SOL amount')}</th>
+                    <th>{localize('USD price')}</th>
+                    <th>{localize('Transaction')}</th>
                   </>
                 ) : (
                   <>
-                    <th>Invested SOL</th>
-                    <th>Realized P&amp;L · USD</th>
-                    <th>Origin</th>
+                    <th>{localize('Invested SOL')}</th>
+                    <th>{localize('Realized P&L · USD')}</th>
+                    <th>{localize('Origin')}</th>
                   </>
                 )}
               </tr>
@@ -190,7 +195,7 @@ export default function Executions() {
                 <tr key={r.id}>
                   <td>{new Date(r.closedAt ?? r.confirmedAt ?? r.createdAt).toLocaleString()}</td>
                   <td>{r.token.symbol ?? r.token.mint.slice(0, 8)}</td>
-                  <td title={r.wallet.publicKey}>{r.wallet.label}</td>
+                  <td title={r.wallet.publicKey}>{localize(r.wallet.label)}</td>
                   {view === 'trades' ? (
                     <>
                       <td>{r.side}</td>
@@ -206,12 +211,12 @@ export default function Executions() {
                             target="_blank"
                             rel="noreferrer"
                           >
-                            View on Solscan ↗
+                            {localize('View on Solscan ↗')}
                           </a>
                         ) : mode === 'paper' ? (
-                          'Simulated'
+                          localize('Simulated')
                         ) : (
-                          'Not recorded'
+                          localize('Not recorded')
                         )}
                       </td>
                     </>
@@ -221,7 +226,11 @@ export default function Executions() {
                       <td className={(r.realizedPnlUsd ?? 0) < 0 ? 'negative' : 'positive'}>
                         {money(r.realizedPnlUsd ?? undefined)}
                       </td>
-                      <td>{r.copyTradeTargetAddress ? 'Copy trade' : 'Direct / automated'}</td>
+                      <td>
+                        {r.copyTradeTargetAddress
+                          ? localize('Copy trade')
+                          : localize('Direct / automated')}
+                      </td>
                     </>
                   )}
                 </tr>
@@ -231,7 +240,9 @@ export default function Executions() {
         </div>
         {!data?.rows.length ? (
           <div className="empty-state">
-            {loading ? 'Loading executions…' : 'No completed records for this selection.'}
+            {loading
+              ? localize('Loading executions…')
+              : localize('No completed records for this selection.')}
           </div>
         ) : null}
         <div className="table-bottom">
@@ -240,9 +251,13 @@ export default function Executions() {
             disabled={!cursors.length || loading}
             onClick={() => setCursors((c) => c.slice(0, -1))}
           >
-            ← Newer
+            {localize('← Newer')}
           </button>
-          <span>Page {cursors.length + 1} · refreshes every 10s</span>
+          <span>
+            {localize('Page') + ' '}
+            {cursors.length + 1}
+            {' ' + localize('· refreshes every 10s')}
+          </span>
           <button
             className="text-link"
             disabled={!data?.nextCursor || loading}
@@ -250,7 +265,7 @@ export default function Executions() {
               if (data?.nextCursor) setCursors((c) => [...c, data.nextCursor!]);
             }}
           >
-            Older →
+            {localize('Older →')}
           </button>
         </div>
       </section>

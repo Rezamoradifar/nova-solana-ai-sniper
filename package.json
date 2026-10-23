@@ -28,9 +28,11 @@
     "prisma:generate": "prisma generate --schema apps/api/prisma/schema.prisma",
     "prisma:migrate": "dotenv -e .env -- prisma migrate dev --schema apps/api/prisma/schema.prisma",
     "prisma:deploy": "dotenv -e .env -- prisma migrate deploy --schema apps/api/prisma/schema.prisma",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test:wallet-ui": "playwright test --config apps/dashboard/playwright.config.ts"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.1",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "dotenv-cli": "^11.0.0",

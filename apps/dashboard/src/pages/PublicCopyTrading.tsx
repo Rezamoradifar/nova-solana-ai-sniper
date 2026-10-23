@@ -5,6 +5,7 @@ import { api, ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.js';
 import { PUBLIC_API_BASE } from '../lib/publicMarket.js';
 import { liveCopyBuysReady, type PublicCopyReadiness } from '../neon/realReadiness.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 interface LocalWallet {
   address: string;
@@ -99,6 +100,7 @@ const usd = (value: number | null | undefined) =>
       }).format(value);
 
 export default function PublicCopyTrading() {
+  const { t: localize } = useLanguage();
   const { user } = useAuth();
   const [data, setData] = useState<PublicCopyData | null>(null);
   const [configs, setConfigs] = useState<CopyConfig[]>([]);
@@ -187,7 +189,7 @@ export default function PublicCopyTrading() {
       });
       setConfigs((current) => [...current.filter((item) => item.id !== created.id), created]);
       setMessage(
-        `Copy configuration enabled for ${short(address)} · cap ${created.maxAmountSol} SOL. ${executionNotice}`,
+        `${localize('Copy configuration enabled for')} ${short(address)} · ${localize('cap')} ${created.maxAmountSol} SOL. ${localize(executionNotice)}`,
       );
     } catch (error) {
       setMessage(
@@ -208,7 +210,7 @@ export default function PublicCopyTrading() {
       setConfigs((current) => current.map((item) => (item.id === updated.id ? updated : item)));
       setMessage(
         updated.isActive
-          ? `Copy configuration enabled. ${executionNotice}`
+          ? `${localize('Copy configuration enabled.')} ${localize(executionNotice)}`
           : 'New copy buys paused. Existing positions retain their exits.',
       );
     } catch (error) {
@@ -221,30 +223,36 @@ export default function PublicCopyTrading() {
   return (
     <div className="site-container interior-page copy-trading-page">
       <PageHeading
-        eyebrow="SOLANA COPY TRADING"
-        title="Track conviction. Copy with limits."
-        text="Rank tracked Solana wallets using GSP on-chain history, inspect GMGN Smart Money activity when the official API is connected, and create bounded copy configurations."
+        eyebrow={localize('SOLANA COPY TRADING')}
+        title={localize('Track conviction. Copy with limits.')}
+        text={localize(
+          'Rank tracked Solana wallets using GSP on-chain history, inspect GMGN Smart Money activity when the official API is connected, and create bounded copy configurations.',
+        )}
       >
         <span className="observation-badge" role="status" aria-live="polite">
-          <Icon name="activity" size={17} /> {executionLabel}
+          <Icon name="activity" size={17} /> {localize(executionLabel ?? '')}
         </span>
       </PageHeading>
 
       <div className="copy-hero-visual panel">
         <img
           src="/images/gsp-copy-network.svg"
-          alt="Solana smart-wallet copy-trading network visualization"
+          alt={localize('Solana smart-wallet copy-trading network visualization')}
         />
         <div className="copy-hero-overlay">
-          <span className="eyebrow">GSP TRADING · SMART WALLET NETWORK</span>
-          <h2>Follow the wallet, not the noise.</h2>
-          <p>On-chain scoring + optional GMGN Smart Money feed + per-wallet position limits.</p>
+          <span className="eyebrow">{localize('GSP TRADING · SMART WALLET NETWORK')}</span>
+          <h2>{localize('Follow the wallet, not the noise.')}</h2>
+          <p>
+            {localize(
+              'On-chain scoring + optional GMGN Smart Money feed + per-wallet position limits.',
+            )}
+          </p>
         </div>
       </div>
 
       <section className="copy-control-strip">
         <label>
-          <span>Copy size</span>
+          <span>{localize('Copy size')}</span>
           <div className="input-unit">
             <input
               value={copyPercent}
@@ -257,7 +265,7 @@ export default function PublicCopyTrading() {
           </div>
         </label>
         <label>
-          <span>Max per copied buy</span>
+          <span>{localize('Max per copied buy')}</span>
           <div className="input-unit">
             <input
               value={maxSol}
@@ -270,15 +278,15 @@ export default function PublicCopyTrading() {
           </div>
         </label>
         <div className="copy-mode">
-          <span>Execution</span>
+          <span>{localize('Execution')}</span>
           <strong>
             {data?.executionMode === 'live'
               ? liveBuysReady
                 ? 'LIVE'
-                : 'BUYS PAUSED / UNVERIFIED'
+                : localize('BUYS PAUSED / UNVERIFIED')
               : data?.executionMode === 'paper'
-                ? 'PAPER MIRROR'
-                : 'EXECUTION LOCKED'}
+                ? localize('PAPER MIRROR')
+                : localize('EXECUTION LOCKED')}
           </strong>
           <small>
             {data?.executionMode === 'live' && !liveBuysReady
@@ -286,19 +294,25 @@ export default function PublicCopyTrading() {
               : data?.executionMode === 'paper'
                 ? executionNotice
                 : data?.copyWatcherReady
-                  ? 'Copies SOL-funded buys and mirrors source sells proportionally. Stop-loss and trailing exits remain active independently.'
+                  ? localize(
+                      'Copies SOL-funded buys and mirrors source sells proportionally. Stop-loss and trailing exits remain active independently.',
+                    )
                   : data?.watcher?.running
-                    ? 'Watcher health is degraded. Copy signals may be missed for unavailable targets.'
-                    : 'Watcher is stopped. Copy configurations are stored.'}
+                    ? localize(
+                        'Watcher health is degraded. Copy signals may be missed for unavailable targets.',
+                      )
+                    : localize('Watcher is stopped. Copy configurations are stored.')}
           </small>
         </div>
         <div className="copy-mode">
-          <span>GMGN provider</span>
-          <strong>{data?.gmgn.status === 'connected' ? 'CONNECTED' : 'OPTIONAL'}</strong>
+          <span>{localize('GMGN provider')}</span>
+          <strong>
+            {data?.gmgn.status === 'connected' ? localize('CONNECTED') : localize('OPTIONAL')}
+          </strong>
           <small>
             {data?.gmgn.status === 'connected'
-              ? 'Official OpenAPI'
-              : 'Add GMGN_API_KEY on the server'}
+              ? localize('Official OpenAPI')
+              : localize('Add GMGN_API_KEY on the server')}
           </small>
         </div>
       </section>
@@ -306,29 +320,32 @@ export default function PublicCopyTrading() {
       {message && (
         <div className="inline-notice">
           <Icon name="shield" size={18} />
-          <span>{message}</span>
+          <span>{localize(message ?? '')}</span>
         </div>
       )}
 
       <section className="panel copy-wallet-panel">
         <div className="table-toolbar">
           <div>
-            <h2>Recommended from verified history</h2>
+            <h2>{localize('Recommended from verified history')}</h2>
             <p>
-              30-day recorded sample · 20+ closed trades · 5+ tokens · positive realized SOL · risk
-              and freshness checks.
+              {localize(
+                '30-day recorded sample · 20+ closed trades · 5+ tokens · positive realized SOL · risk and freshness checks.',
+              )}
             </p>
           </div>
-          <span className="outline-tag">UP TO 3 CANDIDATES</span>
+          <span className="outline-tag">{localize('UP TO 3 CANDIDATES')}</span>
         </div>
         {(data?.recommendations ?? []).map((wallet) => (
           <div className="table-toolbar" key={wallet.address}>
             <div>
               <strong>{wallet.label || short(wallet.address)}</strong>
               <p>
-                {wallet.recommendation.closedTrades} verified closes ·{' '}
-                {num(wallet.recommendation.realizedPnlSol, ' SOL')} realized ·{' '}
-                {num(wallet.recommendation.winRatePct, '%')} wins
+                {wallet.recommendation.closedTrades}
+                {' ' + localize('verified closes ·')}{' '}
+                {num(wallet.recommendation.realizedPnlSol, ' SOL')}
+                {' ' + localize('realized ·')} {num(wallet.recommendation.winRatePct, '%')}
+                {' ' + localize('wins')}
               </p>
               <p>{wallet.recommendation.warnings.join(' · ')}</p>
               <a
@@ -337,41 +354,49 @@ export default function PublicCopyTrading() {
                 target="_blank"
                 rel="noreferrer"
               >
-                Inspect wallet ↗
+                {localize('Inspect wallet ↗')}
               </a>
             </div>
             {configured.has(wallet.address) ? (
-              <span className="copy-active-pill">Configured below</span>
+              <span className="copy-active-pill">{localize('Configured below')}</span>
             ) : user ? (
               <button
                 className="nova-button button-sm"
                 disabled={busyAddress !== null}
                 onClick={() => void addCopy(wallet.address)}
               >
-                Enable copy buys
+                {localize('Enable copy buys')}
               </button>
             ) : (
-              <Link className="nova-button button-sm" to="/login">
-                Sign in to copy
+              <Link
+                className="nova-button button-sm"
+                to="/login"
+                state={{ returnTo: '/copy-trading' }}
+              >
+                {localize('Sign in to copy')}
               </Link>
             )}
           </div>
         ))}
         {!data?.recommendations?.length && (
           <div className="empty-state">
-            <h3>No qualified wallet yet</h3>
+            <h3>{localize('No qualified wallet yet')}</h3>
             <p>
-              We wait for enough verified history. Recent volume or a Smart Money tag alone does not
-              qualify a wallet.
+              {localize(
+                'We wait for enough verified history. Recent volume or a Smart Money tag alone does not qualify a wallet.',
+              )}
             </p>
           </div>
         )}
         {data?.limits && (
           <p className="inline-notice">
-            Server ceilings: {data.limits.maxBuySol} SOL per buy · {data.limits.maxDailyBuys}{' '}
-            attempts per Tehran day · {data.limits.maxOpenPositions} open positions ·{' '}
-            {data.limits.slippageBps / 100}% slippage. Your account and plan can impose tighter
-            limits.
+            {localize('Server ceilings:') + ' '}
+            {data.limits.maxBuySol}
+            {' ' + localize('SOL per buy ·') + ' '}
+            {data.limits.maxDailyBuys} {localize('attempts per Tehran day ·') + ' '}
+            {data.limits.maxOpenPositions}
+            {' ' + localize('open positions ·')} {data.limits.slippageBps / 100}
+            {localize('% slippage. Your account and plan can impose tighter limits.')}
           </p>
         )}
       </section>
@@ -380,10 +405,11 @@ export default function PublicCopyTrading() {
         <section className="panel copy-wallet-panel">
           <div className="table-toolbar">
             <div>
-              <h2>Your copy wallets</h2>
+              <h2>{localize('Your copy wallets')}</h2>
               <p>
-                Enabling a wallet allows new buys whenever server mode is LIVE. Failed submission
-                attempts also count toward the daily limit.
+                {localize(
+                  'New buys require verified server readiness, account authorization and limits. Failed submissions count toward the daily limit.',
+                )}
               </p>
             </div>
           </div>
@@ -395,17 +421,17 @@ export default function PublicCopyTrading() {
             }}
           >
             <label>
-              <span>Reviewed Solana wallet address</span>
+              <span>{localize('Reviewed Solana wallet address')}</span>
               <input
                 className="input-field"
                 required
                 value={manualAddress}
                 onChange={(event) => setManualAddress(event.target.value)}
-                placeholder="Wallet address"
+                placeholder={localize('Wallet address')}
               />
             </label>
             <button className="nova-button button-sm" disabled={busyAddress !== null} type="submit">
-              Enable copy buys
+              {localize('Enable copy buys')}
             </button>
           </form>
           {configs.map((config) => (
@@ -413,9 +439,11 @@ export default function PublicCopyTrading() {
               <div>
                 <strong>{short(config.targetAddress)}</strong>
                 <p>
-                  {config.copyPercentSize}% of source · cap{' '}
-                  {config.maxAmountSol ?? data?.limits?.maxBuySol ?? 'server limit'} SOL ·{' '}
-                  {config.isActive ? 'Enabled' : 'Paused'}
+                  {config.copyPercentSize}
+                  {localize('% of source · cap')}{' '}
+                  {config.maxAmountSol ?? data?.limits?.maxBuySol ?? localize('server limit')}
+                  {' ' + localize('SOL ·')}{' '}
+                  {config.isActive ? localize('Enabled') : localize('Paused')}
                 </p>
               </div>
               <button
@@ -423,12 +451,14 @@ export default function PublicCopyTrading() {
                 disabled={busyAddress !== null}
                 onClick={() => void toggleCopy(config)}
               >
-                {config.isActive ? 'Pause' : 'Resume'}
+                {config.isActive ? localize('Pause') : localize('Resume')}
               </button>
             </div>
           ))}
           {!configs.length && (
-            <p className="empty-state">No copy wallets configured for this account.</p>
+            <p className="empty-state">
+              {localize('No copy wallets configured for this account.')}
+            </p>
           )}
         </section>
       )}
@@ -436,25 +466,26 @@ export default function PublicCopyTrading() {
       <section className="panel copy-wallet-panel">
         <div className="table-toolbar">
           <div>
-            <h2>GSP ranked Solana wallets</h2>
+            <h2>{localize('GSP ranked Solana wallets')}</h2>
             <p>
-              Candidate score uses verified closed trades. Expand your review using the reasons
-              below each wallet.
+              {localize(
+                'Candidate score uses verified closed trades. Expand your review using the reasons below each wallet.',
+              )}
             </p>
           </div>
-          <span className="outline-tag">ON-CHAIN GSP DATA</span>
+          <span className="outline-tag">{localize('ON-CHAIN GSP DATA')}</span>
         </div>
         <div className="table-scroll">
           <table className="nova-table copy-wallet-table">
             <thead>
               <tr>
                 <th>#</th>
-                <th>Wallet</th>
-                <th>Signal</th>
-                <th>Sample</th>
-                <th>Median ROI</th>
-                <th>Early entries</th>
-                <th>Rug exposure</th>
+                <th>{localize('Wallet')}</th>
+                <th>{localize('Signal')}</th>
+                <th>{localize('Sample')}</th>
+                <th>{localize('Median ROI')}</th>
+                <th>{localize('Early entries')}</th>
+                <th>{localize('Rug exposure')}</th>
                 <th />
               </tr>
             </thead>
@@ -472,7 +503,10 @@ export default function PublicCopyTrading() {
                     </small>
                   </td>
                   <td className="number positive">{wallet.signalScore}/100</td>
-                  <td className="number">{wallet.recommendation.closedTrades} verified closes</td>
+                  <td className="number">
+                    {wallet.recommendation.closedTrades}
+                    {' ' + localize('verified closes')}
+                  </td>
                   <td
                     className={
                       wallet.medianRoiPercent != null && wallet.medianRoiPercent >= 0
@@ -486,18 +520,24 @@ export default function PublicCopyTrading() {
                   <td className="number">{num(wallet.rugExposureRatePct, '%')}</td>
                   <td>
                     {configured.has(wallet.address) ? (
-                      <span className="copy-active-pill">Configured</span>
+                      <span className="copy-active-pill">{localize('Configured')}</span>
                     ) : user ? (
                       <button
                         className="nova-button button-sm"
                         disabled={busyAddress !== null}
                         onClick={() => void addCopy(wallet.address)}
                       >
-                        {busyAddress === wallet.address ? 'Adding…' : 'Enable copy buys'}
+                        {busyAddress === wallet.address
+                          ? localize('Adding…')
+                          : localize('Enable copy buys')}
                       </button>
                     ) : (
-                      <Link className="nova-button button-sm button-outline" to="/login">
-                        Sign in to copy
+                      <Link
+                        className="nova-button button-sm button-outline"
+                        to="/login"
+                        state={{ returnTo: '/copy-trading' }}
+                      >
+                        {localize('Sign in to copy')}
                       </Link>
                     )}
                   </td>
@@ -508,10 +548,11 @@ export default function PublicCopyTrading() {
           {!data?.localWallets.length && (
             <div className="empty-state">
               <Icon name="wallet" size={30} />
-              <h3>Building wallet history</h3>
+              <h3>{localize('Building wallet history')}</h3>
               <p>
-                Enable Smart Money analysis and the network trade scanner to populate scored wallets
-                from on-chain activity.
+                {localize(
+                  'Enable Smart Money analysis and the network trade scanner to populate scored wallets from on-chain activity.',
+                )}
               </p>
             </div>
           )}
@@ -521,14 +562,17 @@ export default function PublicCopyTrading() {
       <section className="panel gmgn-wallet-panel">
         <div className="table-toolbar">
           <div>
-            <h2>GMGN Smart Money wallets</h2>
+            <h2>{localize('GMGN Smart Money wallets')}</h2>
             <p>
-              Wallets observed in the official GMGN Solana Smart Money feed, ranked by recent
-              observed volume.
+              {localize(
+                'Wallets observed in the official GMGN Solana Smart Money feed, ranked by recent observed volume.',
+              )}
             </p>
           </div>
           <span className="outline-tag">
-            {data?.gmgn.status === 'connected' ? 'OFFICIAL OPENAPI' : 'GMGN API KEY REQUIRED'}
+            {data?.gmgn.status === 'connected'
+              ? localize('OFFICIAL OPENAPI')
+              : localize('GMGN API KEY REQUIRED')}
           </span>
         </div>
         {data?.gmgn.status === 'connected' && data.gmgn.wallets.length ? (
@@ -537,11 +581,11 @@ export default function PublicCopyTrading() {
               <thead>
                 <tr>
                   <th>#</th>
-                  <th>Wallet</th>
-                  <th>Observed trades</th>
-                  <th>Buys / sells</th>
-                  <th>Observed volume</th>
-                  <th>Tags</th>
+                  <th>{localize('Wallet')}</th>
+                  <th>{localize('Observed trades')}</th>
+                  <th>{localize('Buys / sells')}</th>
+                  <th>{localize('Observed volume')}</th>
+                  <th>{localize('Tags')}</th>
                   <th />
                 </tr>
               </thead>
@@ -559,18 +603,24 @@ export default function PublicCopyTrading() {
                     <td>{wallet.tags.slice(0, 2).join(' · ') || '—'}</td>
                     <td>
                       {configured.has(wallet.address) ? (
-                        <span className="copy-active-pill">Configured</span>
+                        <span className="copy-active-pill">{localize('Configured')}</span>
                       ) : user ? (
                         <button
                           className="nova-button button-sm"
                           disabled={busyAddress !== null}
                           onClick={() => void addCopy(wallet.address)}
                         >
-                          {busyAddress === wallet.address ? 'Adding…' : 'Enable copy buys'}
+                          {busyAddress === wallet.address
+                            ? localize('Adding…')
+                            : localize('Enable copy buys')}
                         </button>
                       ) : (
-                        <Link className="nova-button button-sm button-outline" to="/login">
-                          Sign in to copy
+                        <Link
+                          className="nova-button button-sm button-outline"
+                          to="/login"
+                          state={{ returnTo: '/copy-trading' }}
+                        >
+                          {localize('Sign in to copy')}
                         </Link>
                       )}
                     </td>
@@ -584,12 +634,13 @@ export default function PublicCopyTrading() {
             <Icon name="activity" size={30} />
             <h3>
               {data?.gmgn.status === 'not_configured'
-                ? 'Connect the official GMGN OpenAPI'
-                : 'No GMGN Smart Money wallets available'}
+                ? localize('Connect the official GMGN OpenAPI')
+                : localize('No GMGN Smart Money wallets available')}
             </h3>
             <p>
-              Add an approved GMGN_API_KEY directly to the server environment. GSP TRADING does not
-              scrape private GMGN endpoints.
+              {localize(
+                'Add an approved GMGN_API_KEY directly to the server environment. GSP TRADING does not scrape private GMGN endpoints.',
+              )}
             </p>
           </div>
         )}
@@ -598,11 +649,13 @@ export default function PublicCopyTrading() {
       <section className="panel gmgn-feed-panel">
         <div className="table-toolbar">
           <div>
-            <h2>GMGN Smart Money activity</h2>
-            <p>Official GMGN OpenAPI data when your server API key is configured.</p>
+            <h2>{localize('GMGN Smart Money activity')}</h2>
+            <p>{localize('Official GMGN OpenAPI data when your server API key is configured.')}</p>
           </div>
           <span className="outline-tag">
-            {data?.gmgn.status === 'connected' ? 'GMGN CONNECTED' : 'GMGN API KEY REQUIRED'}
+            {data?.gmgn.status === 'connected'
+              ? localize('GMGN CONNECTED')
+              : localize('GMGN API KEY REQUIRED')}
           </span>
         </div>
         {data?.gmgn.status === 'connected' && data.gmgn.trades.length ? (
@@ -610,13 +663,13 @@ export default function PublicCopyTrading() {
             <table className="nova-table">
               <thead>
                 <tr>
-                  <th>Wallet</th>
-                  <th>Side</th>
-                  <th>Token</th>
-                  <th>Trade value</th>
-                  <th>Price</th>
-                  <th>Tags</th>
-                  <th>Time</th>
+                  <th>{localize('Wallet')}</th>
+                  <th>{localize('Side')}</th>
+                  <th>{localize('Token')}</th>
+                  <th>{localize('Trade value')}</th>
+                  <th>{localize('Price')}</th>
+                  <th>{localize('Tags')}</th>
+                  <th>{localize('Time')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -658,12 +711,13 @@ export default function PublicCopyTrading() {
             <Icon name="activity" size={30} />
             <h3>
               {data?.gmgn.status === 'not_configured'
-                ? 'GMGN integration is ready for a key'
-                : 'GMGN feed unavailable'}
+                ? localize('GMGN integration is ready for a key')
+                : localize('GMGN feed unavailable')}
             </h3>
             <p>
-              GSP does not scrape private GMGN endpoints. Configure an approved GMGN OpenAPI key on
-              the server to enable this feed.
+              {localize(
+                'GSP does not scrape private GMGN endpoints. Configure an approved GMGN OpenAPI key on the server to enable this feed.',
+              )}
             </p>
           </div>
         )}
@@ -672,15 +726,15 @@ export default function PublicCopyTrading() {
       <div className="flash-safety-banner">
         <Icon name="shield" size={24} />
         <div>
-          <strong>Copy trading can copy losses as quickly as gains.</strong>
+          <strong>{localize('Copy trading can copy losses as quickly as gains.')}</strong>
           <p>
-            Wallet scores and Smart Money tags describe observed history, not future performance.
-            Use a dedicated wallet, small per-trade caps, stop-loss rules, and verify the token
-            before enabling real execution.
+            {localize(
+              'Wallet scores and Smart Money tags describe observed history, not future performance. Use a dedicated wallet, small per-trade caps, stop-loss rules, and verify the token before enabling real execution.',
+            )}
           </p>
         </div>
         <Link className="text-link" to="/security">
-          Risk controls ↗
+          {localize('Risk controls ↗')}
         </Link>
       </div>
     </div>

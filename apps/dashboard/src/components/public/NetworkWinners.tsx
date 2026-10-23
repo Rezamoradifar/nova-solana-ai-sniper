@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { PUBLIC_API_BASE } from '../../lib/publicMarket.js';
 import { Icon } from './PublicLayout.js';
+import { useLanguage } from '../../lib/LanguageContext.js';
 
 interface NetworkWinner {
   id: string;
@@ -22,16 +23,17 @@ const shortAddress = (value: string) =>
   value.length > 14 ? value.slice(0, 6) + '…' + value.slice(-6) : value;
 
 export function NetworkWinners() {
+  const { t: localize } = useLanguage();
   const [rows, setRows] = useState<NetworkWinner[]>([]);
 
   useEffect(() => {
     let active = true;
     const load = async () => {
       try {
-        const response = await fetch(
-          PUBLIC_API_BASE + '/public/network-winners?limit=5&days=7',
-          { cache: 'no-store', signal: AbortSignal.timeout(10_000) },
-        );
+        const response = await fetch(PUBLIC_API_BASE + '/public/network-winners?limit=5&days=7', {
+          cache: 'no-store',
+          signal: AbortSignal.timeout(10_000),
+        });
         if (!response.ok) return;
         const data = (await response.json()) as NetworkWinner[];
         if (active) setRows(data);
@@ -52,21 +54,24 @@ export function NetworkWinners() {
       <div className="section-heading">
         <div>
           <div className="eyebrow">
-            <span /> VERIFIED NETWORK WINNERS
+            <span />
+            {' ' + localize('VERIFIED NETWORK WINNERS')}
           </div>
           <h2>
-            Real exits.
+            {localize('Real exits.')}
             <br />
-            <span className="muted">External wallets. On-chain proof.</span>
+            <span className="muted">{localize('External wallets. On-chain proof.')}</span>
           </h2>
         </div>
         <div className="section-heading-aside">
           <p>
-            Completed profitable trades detected from external Solana wallets. These are selected
-            network observations — not GSP bot performance.
+            {localize(
+              'Completed profitable trades detected from external Solana wallets. These are selected network observations — not GSP bot performance.',
+            )}
           </p>
           <Link className="text-link" to="/copy-trading">
-            Explore smart wallets <span aria-hidden="true">↗</span>
+            {localize('Explore smart wallets') + ' '}
+            <span aria-hidden="true">↗</span>
           </Link>
         </div>
       </div>
@@ -74,21 +79,22 @@ export function NetworkWinners() {
       <div className="market-preview panel">
         <div className="panel-label">
           <span>
-            <Icon name="activity" size={16} /> External wallet exits
+            <Icon name="activity" size={16} />
+            {' ' + localize('External wallet exits')}
           </span>
-          <span className="subtle-label">REALIZED PNL · BUY + SELL VERIFIED</span>
+          <span className="subtle-label">{localize('REALIZED PNL · BUY + SELL VERIFIED')}</span>
         </div>
         {rows.length ? (
           <div className="table-scroll">
             <table className="nova-table">
               <thead>
                 <tr>
-                  <th>Token</th>
-                  <th>Wallet</th>
-                  <th>Realized ROI</th>
-                  <th>Realized PnL</th>
-                  <th>Invested / returned</th>
-                  <th>Proof</th>
+                  <th>{localize('Token')}</th>
+                  <th>{localize('Wallet')}</th>
+                  <th>{localize('Realized ROI')}</th>
+                  <th>{localize('Realized PnL')}</th>
+                  <th>{localize('Invested / returned')}</th>
+                  <th>{localize('Proof')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -98,10 +104,11 @@ export function NetworkWinners() {
                       <strong>
                         {row.tokenSymbol
                           ? '$' + row.tokenSymbol
-                          : row.tokenName ?? shortAddress(row.mint)}
+                          : (row.tokenName ?? shortAddress(row.mint))}
                       </strong>
                       <small className="cell-subtext">
-                        {row.dex ?? 'Solana'} · external wallet
+                        {row.dex ?? 'Solana'}
+                        {' ' + localize('· external wallet')}
                       </small>
                     </td>
                     <td className="number">
@@ -117,9 +124,7 @@ export function NetworkWinners() {
                     <td className="number positive">
                       {'+' + row.realizedRoiPercent.toFixed(1) + '%'}
                     </td>
-                    <td className="number positive">
-                      {'+$' + row.realizedPnlUsd.toFixed(2)}
-                    </td>
+                    <td className="number positive">{'+$' + row.realizedPnlUsd.toFixed(2)}</td>
                     <td className="number muted">
                       {row.entryAmountSol?.toFixed(4) ?? '—'} /{' '}
                       {row.exitAmountSol?.toFixed(4) ?? '—'} SOL
@@ -132,7 +137,7 @@ export function NetworkWinners() {
                           target="_blank"
                           rel="noreferrer"
                         >
-                          Buy ↗
+                          {localize('Buy ↗')}
                         </a>
                         {row.exitSignature && (
                           <a
@@ -141,7 +146,7 @@ export function NetworkWinners() {
                             target="_blank"
                             rel="noreferrer"
                           >
-                            Sell ↗
+                            {localize('Sell ↗')}
                           </a>
                         )}
                       </div>
@@ -154,17 +159,19 @@ export function NetworkWinners() {
         ) : (
           <div className="empty-state">
             <Icon name="activity" size={30} />
-            <h3>Waiting for a verified profitable exit</h3>
+            <h3>{localize('Waiting for a verified profitable exit')}</h3>
             <p>
-              GSP only shows fully resolved positive external trades here. No synthetic or
-              backfilled winners are inserted.
+              {localize(
+                'GSP only shows fully resolved positive external trades here. No synthetic or backfilled winners are inserted.',
+              )}
             </p>
           </div>
         )}
       </div>
       <p className="source-note">
-        External-wallet history is selective and does not imply future returns. Every displayed
-        result links to its on-chain buy and sell evidence.
+        {localize(
+          'External-wallet history is selective and does not imply future returns. Every displayed result links to its on-chain buy and sell evidence.',
+        )}
       </p>
     </section>
   );

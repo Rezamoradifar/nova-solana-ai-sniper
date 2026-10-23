@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { copyToClipboard } from '../lib/clipboard.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+  const { t: localize } = useLanguage();
   const [copied, setCopied] = useState(false);
 
   async function onClick() {
@@ -17,9 +19,9 @@ export function CopyButton({ text, label = 'Copy' }: { text: string; label?: str
       type="button"
       onClick={onClick}
       className="text-xs text-accent hover:underline"
-      title="Copy to clipboard"
+      title={localize('Copy to clipboard')}
     >
-      {copied ? 'Copied!' : label}
+      {copied ? localize('Copied!') : label}
     </button>
   );
 }

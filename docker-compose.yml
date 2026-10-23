@@ -137,6 +137,8 @@ services:
     build:
       context: .
       dockerfile: apps/dashboard/Dockerfile
+      args:
+        VITE_WALLETCONNECT_PROJECT_ID: ${VITE_WALLETCONNECT_PROJECT_ID:-}
     restart: unless-stopped
     ports:
       - '${GSP_WEB_BIND_HOST:-0.0.0.0}:${GSP_WEB_PORT:-8088}:80'

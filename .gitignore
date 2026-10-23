@@ -46,3 +46,8 @@ apps/marketing-engine/generated-images/*
 .claude/
 .scratch/
 backups/
+
+# Browser verification artifacts
+/test-results/
+/playwright-report/
+**/__pycache__/

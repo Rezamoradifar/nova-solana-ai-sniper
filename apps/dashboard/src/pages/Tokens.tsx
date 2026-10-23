@@ -3,10 +3,12 @@ import { api } from '../lib/api.js';
 import { usePolling } from '../lib/usePolling.js';
 import { useLiveEvents } from '../lib/useLiveEvents.js';
 import type { Token } from '../lib/types.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 const DEX_FILTERS = ['ALL', 'PUMPFUN', 'RAYDIUM', 'ORCA', 'JUPITER'] as const;
 
 export function Tokens() {
+  const { t: localize } = useLanguage();
   const [dexFilter, setDexFilter] = useState<(typeof DEX_FILTERS)[number]>('ALL');
   const liveTick = useLiveEvents(['token.created']);
 
@@ -19,7 +21,7 @@ export function Tokens() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-white">Live Tokens</h1>
+        <h1 className="text-2xl font-semibold text-white">{localize('Live Tokens')}</h1>
         <div className="flex gap-2">
           {DEX_FILTERS.map((dex) => (
             <button
@@ -37,12 +39,12 @@ export function Tokens() {
         <table className="table-base">
           <thead>
             <tr>
-              <th>Token</th>
-              <th>DEX</th>
-              <th>Liquidity</th>
-              <th>AI Score</th>
-              <th>Risk</th>
-              <th>Detected</th>
+              <th>{localize('Token')}</th>
+              <th>{localize('DEX')}</th>
+              <th>{localize('Liquidity')}</th>
+              <th>{localize('AI Score')}</th>
+              <th>{localize('Risk')}</th>
+              <th>{localize('Detected')}</th>
             </tr>
           </thead>
           <tbody>
@@ -54,9 +56,9 @@ export function Tokens() {
                 <td>{token.aiScore != null ? token.aiScore.toFixed(0) : '—'}</td>
                 <td>
                   {token.isHoneypotSuspected ? (
-                    <span className="text-loss">⚠ Suspected</span>
+                    <span className="text-loss">{localize('⚠ Suspected')}</span>
                   ) : (
-                    <span className="text-profit">OK</span>
+                    <span className="text-profit">{localize('OK')}</span>
                   )}
                 </td>
                 <td>{new Date(token.createdAt).toLocaleTimeString()}</td>
@@ -65,8 +67,9 @@ export function Tokens() {
             {tokens?.length === 0 && (
               <tr>
                 <td colSpan={6} className="py-6 text-center text-slate-500">
-                  No tokens detected yet. The sniper worker populates this feed as pump.fun launches
-                  are detected.
+                  {localize(
+                    'No tokens detected yet. The sniper worker populates this feed as pump.fun launches are detected.',
+                  )}
                 </td>
               </tr>
             )}

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Icon, PageHeading } from '../components/public/PublicLayout.js';
 import { BOT_URL, PUBLIC_API_BASE } from '../lib/publicMarket.js';
 import { WebsiteTools } from '../components/public/WebsiteTools.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 const QUESTIONS = [
   [
@@ -32,30 +33,35 @@ const QUESTIONS = [
 ] as const;
 
 export function PublicPlatform() {
+  const { t: localize } = useLanguage();
   return (
     <div className="site-container interior-page">
       <PageHeading
-        eyebrow="WEBSITE TOOLS"
-        title="Your Solana workspace."
-        text="Explore live markets, compare cross-DEX routes, and connect your own wallet. Choose a tool to get started."
+        eyebrow={localize('WEBSITE TOOLS')}
+        title={localize('Your Solana workspace.')}
+        text={localize(
+          'Explore live markets, compare cross-DEX routes, and connect your own wallet. Choose a tool to get started.',
+        )}
       />
       <WebsiteTools />
       <div className="platform-banner">
         <img
           src="/images/gsp-trading-hero.svg"
-          alt="GSP TRADING Solana execution matrix with smart-wallet and route telemetry"
+          alt={localize(
+            'GSP TRADING Solana execution matrix with smart-wallet and route telemetry',
+          )}
           width="1536"
           height="1024"
         />
         <div>
-          <span className="eyebrow">CONNECTED PERSPECTIVE</span>
+          <span className="eyebrow">{localize('CONNECTED PERSPECTIVE')}</span>
           <h2>
-            Follow the market.
+            {localize('Follow the market.')}
             <br />
-            Understand the route.
+            {localize('Understand the route.')}
           </h2>
           <Link className="nova-button" to="/arbitrage">
-            Explore the terminal ↗
+            {localize('Explore the terminal ↗')}
           </Link>
         </div>
       </div>
@@ -63,9 +69,10 @@ export function PublicPlatform() {
         <div className="section-heading">
           <div>
             <div className="eyebrow">
-              <span /> FROM SIGNAL TO UNDERSTANDING
+              <span />
+              {' ' + localize('FROM SIGNAL TO UNDERSTANDING')}
             </div>
-            <h2>A more considered workflow.</h2>
+            <h2>{localize('A more considered workflow.')}</h2>
           </div>
         </div>
         <div className="workflow-grid">
@@ -108,10 +115,10 @@ export function PublicPlatform() {
                 <Icon name={w.icon} size={26} />
                 <span>{w.n}</span>
               </div>
-              <h3>{w.title}</h3>
-              <p>{w.text}</p>
+              <h3>{localize(w.title)}</h3>
+              <p>{localize(w.text)}</p>
               <Link className="text-link" to={w.link}>
-                {w.action} ↗
+                {localize(w.action)} ↗
               </Link>
             </article>
           ))}
@@ -120,34 +127,35 @@ export function PublicPlatform() {
       <section className="faq-section" id="questions">
         <div>
           <div className="eyebrow">
-            <span /> THE DETAILS MATTER
+            <span />
+            {' ' + localize('THE DETAILS MATTER')}
           </div>
           <h2>
-            Good questions.
+            {localize('Good questions.')}
             <br />
-            <span className="muted">Clear answers.</span>
+            <span className="muted">{localize('Clear answers.')}</span>
           </h2>
-          <p>Know what you are looking at, and what happens next.</p>
+          <p>{localize('Know what you are looking at, and what happens next.')}</p>
         </div>
         <div className="faq-list">
           {QUESTIONS.map(([q, a]) => (
             <details key={q}>
               <summary>
-                {q}
+                {localize(q)}
                 <Icon name="chevron" size={18} />
               </summary>
-              <p>{a}</p>
+              <p>{localize(a)}</p>
             </details>
           ))}
         </div>
       </section>
       <div className="inline-cta">
         <div>
-          <span className="eyebrow">FIND YOUR PERSPECTIVE</span>
-          <h2>The next view is yours.</h2>
+          <span className="eyebrow">{localize('FIND YOUR PERSPECTIVE')}</span>
+          <h2>{localize('The next view is yours.')}</h2>
         </div>
         <Link className="nova-button" to="/arbitrage">
-          Open the terminal ↗
+          {localize('Open the terminal ↗')}
         </Link>
       </div>
     </div>
@@ -155,29 +163,34 @@ export function PublicPlatform() {
 }
 
 export function PublicSecurity() {
+  const { t: localize } = useLanguage();
   return (
     <div className="site-container interior-page">
       <PageHeading
-        eyebrow="RISK & SECURITY"
-        title="Know what you control."
-        text="Clear boundaries, transparent assumptions, and an honest view of how the system works."
+        eyebrow={localize('RISK & SECURITY')}
+        title={localize('Know what you control.')}
+        text={localize(
+          'Clear boundaries, transparent assumptions, and an honest view of how the system works.',
+        )}
       />
       <div className="security-banner">
         <img
           src="/images/gsp-risk-grid.svg"
-          alt="Sculptural titanium enclosure with a thin luminous green seam"
+          alt={localize('Sculptural titanium enclosure with a thin luminous green seam')}
           width="1536"
           height="1024"
         />
         <div>
           <Icon name="shield" size={32} />
           <h2>
-            A quote is a view.
-            <br />A trade is a commitment.
+            {localize('A quote is a view.')}
+            <br />
+            {localize('A trade is a commitment.')}
           </h2>
           <p>
-            The public terminal is an observation tool. Trading features live in a separate
-            account-based service.
+            {localize(
+              'The public terminal is an observation tool. Trading features live in a separate account-based service.',
+            )}
           </p>
         </div>
       </div>
@@ -214,28 +227,37 @@ export function PublicSecurity() {
       <section className="risk-panel">
         <div>
           <div className="eyebrow">
-            <span /> BEFORE COMMITTING CAPITAL
+            <span />
+            {' ' + localize('BEFORE COMMITTING CAPITAL')}
           </div>
           <h2>
-            Give the details
+            {localize('Give the details')}
             <br />
-            your attention.
+            {localize('your attention.')}
           </h2>
         </div>
         <div className="risk-guidelines">
           <p>
-            <span>01</span> Verify the app, network, and token address through trusted sources.
+            <span>01</span>
+            {' ' + localize('Verify the app, network, and token address through trusted sources.')}
           </p>
           <p>
-            <span>02</span> Understand custody and withdrawal access before funding an account.
+            <span>02</span>
+            {' ' + localize('Understand custody and withdrawal access before funding an account.')}
           </p>
           <p>
-            <span>03</span> Review position limits, stop settings, and the impact of failed
-            transactions.
+            <span>03</span>
+            {' ' +
+              localize(
+                'Review position limits, stop settings, and the impact of failed transactions.',
+              )}
           </p>
           <p>
-            <span>04</span> Treat quotes as time-sensitive estimates. Digital asset trading can
-            result in loss of capital.
+            <span>04</span>
+            {' ' +
+              localize(
+                'Treat quotes as time-sensitive estimates. Digital asset trading can result in loss of capital.',
+              )}
           </p>
           <a
             className="text-link"
@@ -243,17 +265,17 @@ export function PublicSecurity() {
             target="_blank"
             rel="noreferrer"
           >
-            Source security policy ↗
+            {localize('Source security policy ↗')}
           </a>
         </div>
       </section>
       <div className="inline-cta">
         <div>
-          <span className="eyebrow">EXPLORE WITH CONTEXT</span>
-          <h2>See the numbers. Know their limits.</h2>
+          <span className="eyebrow">{localize('EXPLORE WITH CONTEXT')}</span>
+          <h2>{localize('See the numbers. Know their limits.')}</h2>
         </div>
         <Link className="nova-button" to="/arbitrage">
-          Explore the terminal ↗
+          {localize('Explore the terminal ↗')}
         </Link>
       </div>
     </div>
@@ -291,6 +313,7 @@ const TIERS = [
   },
 ];
 export function PublicPricing() {
+  const { t: localize } = useLanguage();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -331,20 +354,24 @@ export function PublicPricing() {
   return (
     <div className="site-container interior-page">
       <PageHeading
-        eyebrow="TELEGRAM BOT PACKAGES"
-        title="Your bot. Your package."
-        text="Start free — upgrade in Packages for a lower fee and higher limits. Explore current options in the GSP TRADING Telegram app."
+        eyebrow={localize('TELEGRAM BOT PACKAGES')}
+        title={localize('Your bot. Your package.')}
+        text={localize(
+          'Start free — upgrade in Packages for a lower fee and higher limits. Explore current options in the GSP TRADING Telegram app.',
+        )}
       />
       <div className="access-banner">
         <div>
           <Icon name="globe" size={24} />
           <span>
-            <strong>Explore before you commit.</strong>
-            <small>The public markets and quote terminal require no wallet or account.</small>
+            <strong>{localize('Explore before you commit.')}</strong>
+            <small>
+              {localize('The public markets and quote terminal require no wallet or account.')}
+            </small>
           </span>
         </div>
         <Link className="text-link" to="/arbitrage">
-          Open terminal ↗
+          {localize('Open terminal ↗')}
         </Link>
       </div>
       <div className="pricing-grid">
@@ -354,22 +381,26 @@ export function PublicPricing() {
             <article className={`pricing-card ${i === 1 ? 'featured' : ''}`} key={tier.key}>
               <div className="plan-top">
                 <span>{tier.name}</span>
-                {i === 1 && <span className="outline-tag">MORE POSSIBILITY</span>}
+                {i === 1 && <span className="outline-tag">{localize('MORE POSSIBILITY')}</span>}
               </div>
-              <h2>{tier.label}</h2>
-              <p>{tier.description}</p>
+              <h2>{localize(tier.label)}</h2>
+              <p>{localize(tier.description)}</p>
               <div className="plan-price">
                 {plan ? (
                   <>
                     <strong>
                       {plan.priceSol} <small>SOL</small>
                     </strong>
-                    <span>per {plan.durationDays} days</span>
+                    <span>
+                      {localize('per') + ' '}
+                      {plan.durationDays}
+                      {' ' + localize('days')}
+                    </span>
                   </>
                 ) : (
                   <>
-                    <strong>{loading ? 'Loading…' : 'View in app'}</strong>
-                    <span>Confirm current price and terms</span>
+                    <strong>{loading ? localize('Loading…') : localize('View in app')}</strong>
+                    <span>{localize('Confirm current price and terms')}</span>
                   </>
                 )}
               </div>
@@ -379,7 +410,8 @@ export function PublicPricing() {
                 target="_blank"
                 rel="noreferrer"
               >
-                Explore {tier.name} <span aria-hidden="true">↗</span>
+                {localize('Explore') + ' '}
+                {tier.name} <span aria-hidden="true">↗</span>
               </a>
               <div className="plan-details">
                 {plan ? (
@@ -388,34 +420,34 @@ export function PublicPricing() {
                       <Icon name="check" size={16} />
                       {Number.isFinite(plan.maxOpenPositions)
                         ? `${plan.maxOpenPositions} maximum open positions`
-                        : 'Position limits shown in app'}
+                        : localize('Position limits shown in app')}
                     </p>
                     <p>
                       <Icon name="check" size={16} />
                       {Number.isFinite(plan.maxBuySol)
                         ? `${plan.maxBuySol} SOL maximum buy`
-                        : 'Buy limits shown in app'}
+                        : localize('Buy limits shown in app')}
                     </p>
                     <p>
                       <Icon name="check" size={16} />
                       {Number.isFinite(plan.feeBps)
                         ? `${plan.feeBps / 100}% listed performance fee`
-                        : 'Performance fee shown in app'}
+                        : localize('Performance fee shown in app')}
                     </p>
                   </>
                 ) : (
                   <>
                     <p>
                       <Icon name="check" size={16} />
-                      Review current feature access
+                      {localize('Review current feature access')}
                     </p>
                     <p>
                       <Icon name="check" size={16} />
-                      Check position and buy limits
+                      {localize('Check position and buy limits')}
                     </p>
                     <p>
                       <Icon name="check" size={16} />
-                      Confirm fees before subscribing
+                      {localize('Confirm fees before subscribing')}
                     </p>
                   </>
                 )}
@@ -426,47 +458,54 @@ export function PublicPricing() {
       </div>
       <p className="pricing-note">
         {plans.length
-          ? 'Plan details are supplied by the connected GSP TRADING service. Confirm the final terms in the app.'
-          : 'The pricing service is not connected in this website session. Current prices are not being estimated or substituted.'}{' '}
-        Network costs and trading risk are separate from plan access.
+          ? localize(
+              'Plan details are supplied by the connected GSP TRADING service. Confirm the final terms in the app.',
+            )
+          : localize(
+              'The pricing service is not connected in this website session. Current prices are not being estimated or substituted.',
+            )}{' '}
+        {localize('Network costs and trading risk are separate from plan access.')}
       </p>
       <section className="faq-section pricing-faq">
         <div>
           <div className="eyebrow">
-            <span /> BEFORE YOU START
+            <span />
+            {' ' + localize('BEFORE YOU START')}
           </div>
-          <h2>A little more clarity.</h2>
+          <h2>{localize('A little more clarity.')}</h2>
         </div>
         <div className="faq-list">
           <details>
             <summary>
-              Can I explore without paying?
+              {localize('Can I explore without paying?')}
               <Icon name="chevron" size={18} />
             </summary>
             <p>
-              Yes. Public market discovery and the read-only arbitrage terminal are accessible here
-              without an account. Quote availability depends on the external data source.
+              {localize(
+                'Yes. Public market discovery and the read-only arbitrage terminal are accessible here without an account. Quote availability depends on the external data source.',
+              )}
             </p>
           </details>
           <details>
             <summary>
-              Does a plan include guaranteed returns?
+              {localize('Does a plan include guaranteed returns?')}
               <Icon name="chevron" size={18} />
             </summary>
             <p>
-              No. Plan access does not guarantee execution, profitable routes, or trading returns.
-              Review the risk and custody information before using account-based features.
+              {localize(
+                'No. Plan access does not guarantee execution, profitable routes, or trading returns. Review the risk and custody information before using account-based features.',
+              )}
             </p>
           </details>
           <details>
             <summary>
-              Where do I manage my subscription?
+              {localize('Where do I manage my subscription?')}
               <Icon name="chevron" size={18} />
             </summary>
             <p>
-              Open the linked GSP TRADING Telegram app to review the available account and plan
-              workflows. Confirm the operator, current pricing, and payment instructions inside the
-              app.
+              {localize(
+                'Open the linked GSP TRADING Telegram app to review the available account and plan workflows. Confirm the operator, current pricing, and payment instructions inside the app.',
+              )}
             </p>
           </details>
         </div>

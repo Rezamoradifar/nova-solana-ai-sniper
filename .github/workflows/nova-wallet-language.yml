@@ -1,0 +1,49 @@
+name: Nova wallet connection and shared language
+on:
+  push:
+    branches: [codex/nova-unified-wallet-language-20261024]
+  pull_request:
+    branches: [codex/nova-copy-readiness-20261024]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate --schema apps/api/prisma/schema.prisma
+      - run: npx tsc -b apps/api
+      - name: Wallet, language and copy-engine regressions
+        run: npx vitest run apps/dashboard/src apps/api/src/routes/publicCopyTrading.test.ts apps/api/src/trading/copyTradeWatcher.test.ts apps/api/src/trading/copyTrading.test.ts
+      - name: Web-only installer safety checks
+        run: python3 scripts/test-deploy-nova-wallet-language.py
+      - name: Build with WalletConnect enabled using a non-production test identifier
+        run: npm run build --workspace @nova/dashboard
+        env:
+          VITE_WALLETCONNECT_PROJECT_ID: 1a2b3c4d5e6f708192a3b4c5d6e7f809
+      - name: Build the actual web image including the configured release manifest
+        run: |
+          docker build --build-arg VITE_WALLETCONNECT_PROJECT_ID=1a2b3c4d5e6f708192a3b4c5d6e7f809 --build-arg NOVA_WALLET_UI_RELEASE="$GITHUB_SHA" -t nova-wallet-ci -f apps/dashboard/Dockerfile .
+          docker run --rm --entrypoint cat nova-wallet-ci /usr/share/nginx/html/nova-wallet-release.json > /tmp/wallet-release.json
+          python3 -c 'import json,os; d=json.load(open("/tmp/wallet-release.json")); assert d["release"]==os.environ["GITHUB_SHA"] and d["walletConnectConfigured"] is True'
+      - name: Real Compose configuration lease and image-only replacement
+        run: NOVA_UI_COMPOSE_INTEGRATION=1 python3 scripts/test-deploy-nova-wallet-language.py
+      - name: Browser engines
+        run: npx playwright install --with-deps chromium webkit
+      - name: Chrome desktop, Android and iPhone WebKit flows
+        run: npm run test:wallet-ui
+      - run: git diff --check
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: wallet-language-browser-results
+          path: test-results/wallet-language
+          retention-days: 5

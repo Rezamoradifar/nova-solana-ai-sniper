@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '../lib/api.js';
 import { usePolling } from '../lib/usePolling.js';
 import type { SnipeConfig } from '../lib/types.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 const DEFAULTS = {
   buyAmountSol: '0.1',
@@ -14,6 +15,7 @@ const DEFAULTS = {
 };
 
 export function Snipes() {
+  const { t: localize } = useLanguage();
   const { data: configs } = usePolling(() => api.get<SnipeConfig[]>('/snipes'), 8000);
   const [form, setForm] = useState(DEFAULTS);
   const [autoBuyOnLaunch, setAutoBuyOnLaunch] = useState(false);
@@ -75,11 +77,11 @@ export function Snipes() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-white">Snipe Settings</h1>
+      <h1 className="text-2xl font-semibold text-white">{localize('Snipe Settings')}</h1>
 
       <form onSubmit={onSubmit} className="card grid max-w-2xl grid-cols-2 gap-4">
         <div>
-          <label className="label">Buy amount (SOL)</label>
+          <label className="label">{localize('Buy amount (SOL)')}</label>
           <input
             className="input-field"
             type="number"
@@ -89,7 +91,7 @@ export function Snipes() {
           />
         </div>
         <div>
-          <label className="label">Max slippage (bps)</label>
+          <label className="label">{localize('Max slippage (bps)')}</label>
           <input
             className="input-field"
             type="number"
@@ -98,7 +100,7 @@ export function Snipes() {
           />
         </div>
         <div>
-          <label className="label">Min liquidity (USD)</label>
+          <label className="label">{localize('Min liquidity (USD)')}</label>
           <input
             className="input-field"
             type="number"
@@ -107,7 +109,7 @@ export function Snipes() {
           />
         </div>
         <div>
-          <label className="label">Min AI score</label>
+          <label className="label">{localize('Min AI score')}</label>
           <input
             className="input-field"
             type="number"
@@ -116,7 +118,7 @@ export function Snipes() {
           />
         </div>
         <div>
-          <label className="label">Take profit %</label>
+          <label className="label">{localize('Take profit %')}</label>
           <input
             className="input-field"
             type="number"
@@ -125,7 +127,7 @@ export function Snipes() {
           />
         </div>
         <div>
-          <label className="label">Stop loss %</label>
+          <label className="label">{localize('Stop loss %')}</label>
           <input
             className="input-field"
             type="number"
@@ -136,7 +138,7 @@ export function Snipes() {
           />
         </div>
         <div>
-          <label className="label">Trailing stop %</label>
+          <label className="label">{localize('Trailing stop %')}</label>
           <input
             className="input-field"
             type="number"
@@ -152,7 +154,7 @@ export function Snipes() {
             onChange={(e) => setAutoBuyOnLaunch(e.target.checked)}
           />
           <label htmlFor="autoBuy" className="text-sm text-slate-300">
-            Auto-buy on launch
+            {localize('Auto-buy on launch')}
           </label>
         </div>
 
@@ -160,7 +162,7 @@ export function Snipes() {
 
         <div className="col-span-2">
           <button type="submit" disabled={submitting} className="btn-primary">
-            Create snipe config
+            {localize('Create snipe config')}
           </button>
         </div>
       </form>
@@ -169,12 +171,12 @@ export function Snipes() {
         <table className="table-base">
           <thead>
             <tr>
-              <th>Buy (SOL)</th>
-              <th>Min Liquidity</th>
-              <th>Min AI Score</th>
-              <th>TP / SL / Trail</th>
-              <th>Auto-buy</th>
-              <th>Active</th>
+              <th>{localize('Buy (SOL)')}</th>
+              <th>{localize('Min Liquidity')}</th>
+              <th>{localize('Min AI Score')}</th>
+              <th>{localize('TP / SL / Trail')}</th>
+              <th>{localize('Auto-buy')}</th>
+              <th>{localize('Active')}</th>
               <th />
             </tr>
           </thead>
@@ -198,20 +200,22 @@ export function Snipes() {
                         onClick={() => onSaveStopLoss(config.id)}
                         className="text-primary hover:underline"
                       >
-                        Save
+                        {localize('Save')}
                       </button>
                       <button
                         onClick={() => setEditingStopLossId(null)}
                         className="hover:underline"
                       >
-                        Cancel
+                        {localize('Cancel')}
                       </button>
                     </span>
                   ) : (
                     <button
                       onClick={() => startEditStopLoss(config)}
                       className="hover:underline"
-                      title="Never honored looser than the platform's default max-loss ceiling, regardless of what's set here"
+                      title={localize(
+                        "Never honored looser than the platform's default max-loss ceiling, regardless of what's set here",
+                      )}
                     >
                       {config.stopLossPercent ?? '—'}%
                     </button>
@@ -221,14 +225,14 @@ export function Snipes() {
                     <div className="text-loss">{stopLossError}</div>
                   )}
                 </td>
-                <td>{config.autoBuyOnLaunch ? 'Yes' : 'No'}</td>
-                <td>{config.isActive ? 'Active' : 'Paused'}</td>
+                <td>{config.autoBuyOnLaunch ? localize('Yes') : localize('No')}</td>
+                <td>{config.isActive ? localize('Active') : localize('Paused')}</td>
                 <td>
                   <button
                     onClick={() => onDelete(config.id)}
                     className="text-xs text-loss hover:underline"
                   >
-                    Delete
+                    {localize('Delete')}
                   </button>
                 </td>
               </tr>
@@ -236,7 +240,7 @@ export function Snipes() {
             {configs?.length === 0 && (
               <tr>
                 <td colSpan={7} className="py-6 text-center text-slate-500">
-                  No snipe configs yet.
+                  {localize('No snipe configs yet.')}
                 </td>
               </tr>
             )}

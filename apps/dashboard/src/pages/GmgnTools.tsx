@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { PageHeading } from '../components/public/PublicLayout.js';
 import { PUBLIC_API_BASE, SOL_MINT, money } from '../lib/publicMarket.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 const TOOLS = [
   ['trending', 'Trending tokens', 'market'],
@@ -60,9 +61,11 @@ function valueText(value: unknown): string {
   );
 }
 function DataView({ data, depth = 0 }: { data: unknown; depth?: number }) {
-  if (data === null || data === undefined) return <p className="source-note">No data returned.</p>;
+  const { t: localize } = useLanguage();
+  if (data === null || data === undefined)
+    return <p className="source-note">{localize('No data returned.')}</p>;
   if (Array.isArray(data)) {
-    if (!data.length) return <p className="source-note">No matching records.</p>;
+    if (!data.length) return <p className="source-note">{localize('No matching records.')}</p>;
     const rows = data.slice(0, 30);
     if (rows.every((r) => r && typeof r === 'object' && !Array.isArray(r))) {
       const preferred = [
@@ -109,7 +112,11 @@ function DataView({ data, depth = 0 }: { data: unknown; depth?: number }) {
             </tbody>
           </table>
           {data.length > 30 ? (
-            <p className="source-note">Showing 30 of {data.length} returned records.</p>
+            <p className="source-note">
+              {localize('Showing 30 of') + ' '}
+              {data.length}
+              {' ' + localize('returned records.')}
+            </p>
           ) : null}
         </div>
       );
@@ -142,6 +149,7 @@ function DataView({ data, depth = 0 }: { data: unknown; depth?: number }) {
   return <p className="source-note">{valueText(data)}</p>;
 }
 function CandleChart({ data }: { data: unknown }) {
+  const { t: localize } = useLanguage();
   const list =
     data && typeof data === 'object' && 'list' in data ? (data as { list: unknown }).list : data;
   if (!Array.isArray(list)) return <DataView data={data} />;
@@ -162,7 +170,8 @@ function CandleChart({ data }: { data: unknown }) {
     )
     .sort((a, b) => a.time - b.time)
     .slice(-100);
-  if (!candles.length) return <p className="source-note">No valid candles returned.</p>;
+  if (!candles.length)
+    return <p className="source-note">{localize('No valid candles returned.')}</p>;
   const low = Math.min(...candles.map((c) => c.low)),
     high = Math.max(...candles.map((c) => c.high));
   const y = (p: number) => 240 - ((p - low) / (high - low || low * 0.01)) * 210;
@@ -211,6 +220,7 @@ function CandleChart({ data }: { data: unknown }) {
   );
 }
 export default function GmgnTools() {
+  const { t: localize } = useLanguage();
   const [tool, setTool] = useState('trending'),
     [address, setAddress] = useState(SOL_MINT as string),
     [query, setQuery] = useState('');
@@ -280,22 +290,22 @@ export default function GmgnTools() {
   return (
     <div className="site-container interior-page">
       <PageHeading
-        eyebrow="GMGN RESEARCH WORKSPACE"
-        title="Explore on-chain activity."
-        text="Market discovery, token research, charts and wallet analysis on Solana."
+        eyebrow={localize('GMGN RESEARCH WORKSPACE')}
+        title={localize('Explore on-chain activity.')}
+        text={localize('Market discovery, token research, charts and wallet analysis on Solana.')}
       />
       <div className="inline-cta">
         <Link className="text-link" to="/markets">
-          Live prices & trending ↗
+          {localize('Live prices & trending ↗')}
         </Link>
         <Link className="nova-button button-sm" to="/executions">
-          My executed trades ↗
+          {localize('My executed trades ↗')}
         </Link>
       </div>
       <section className="panel gmgn-tool-panel">
         <form onSubmit={submit} className="gmgn-tool-form">
           <label>
-            Research tool
+            {localize('Research tool')}
             <select
               value={tool}
               onChange={(e) => {
@@ -308,14 +318,14 @@ export default function GmgnTools() {
             >
               {TOOLS.map(([value, label]) => (
                 <option key={value} value={value}>
-                  {label}
+                  {localize(label)}
                 </option>
               ))}
             </select>
           </label>
           {['address', 'wallet'].includes(selected[2]) ? (
             <label>
-              {selected[2] === 'wallet' ? 'Wallet address' : 'Token address'}
+              {selected[2] === 'wallet' ? localize('Wallet address') : localize('Token address')}
               <input
                 required
                 value={address}
@@ -327,19 +337,19 @@ export default function GmgnTools() {
           ) : null}
           {tool === 'search' ? (
             <label>
-              Token or wallet name
+              {localize('Token or wallet name')}
               <input
                 required
                 maxLength={80}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="SOL or a Solana address"
+                placeholder={localize('SOL or a Solana address')}
               />
             </label>
           ) : null}
           {tool === 'trending' || tool === 'hot-searches' ? (
             <label>
-              Market window
+              {localize('Market window')}
               <select value={interval} onChange={(e) => setInterval(e.target.value)}>
                 {['1m', '5m', '1h', '6h', '24h'].map((v) => (
                   <option key={v}>{v}</option>
@@ -349,7 +359,7 @@ export default function GmgnTools() {
           ) : null}
           {tool === 'kline' ? (
             <label>
-              Candle interval
+              {localize('Candle interval')}
               <select value={resolution} onChange={(e) => setResolution(e.target.value)}>
                 {['1m', '5m', '15m', '1h', '4h', '1d'].map((v) => (
                   <option key={v}>{v}</option>
@@ -358,12 +368,13 @@ export default function GmgnTools() {
             </label>
           ) : null}
           <button className="nova-button" disabled={loading}>
-            {loading ? 'Loading…' : 'Run research ↗'}
+            {loading ? localize('Loading…') : localize('Run research ↗')}
           </button>
         </form>
         <p className="source-note">
-          Research runs on demand. Wallet performance uses the last 7 days; charts cover the last 24
-          hours. Prices and provider labels are indicative.
+          {localize(
+            'Research runs on demand. Wallet performance uses the last 7 days; charts cover the last 24 hours. Prices and provider labels are indicative.',
+          )}
         </p>
       </section>
       <section className="panel gmgn-tool-panel" aria-live="polite" aria-busy={loading}>
@@ -375,12 +386,14 @@ export default function GmgnTools() {
         ) : null}
         {statusMessage ? <p className="inline-notice">{statusMessage}</p> : null}
         {loading ? (
-          <p className="source-note">Requesting current GMGN data…</p>
+          <p className="source-note">{localize('Requesting current GMGN data…')}</p>
         ) : result?.status === 'connected' ? (
           <>
             <p className="source-note">
-              {result.requestLabel} · Received {new Date(result.updatedAt!).toLocaleString()} ·
-              Source: GMGN
+              {result.requestLabel}
+              {' ' + localize('· Received') + ' '}
+              {new Date(result.updatedAt!).toLocaleString()}
+              {' ' + localize('· Source: GMGN')}
             </p>
             {result.tool === 'kline' ? (
               <CandleChart data={result.data} />
@@ -389,7 +402,9 @@ export default function GmgnTools() {
             )}
           </>
         ) : !error && !statusMessage ? (
-          <p className="source-note">Choose a tool and run research to view its results.</p>
+          <p className="source-note">
+            {localize('Choose a tool and run research to view its results.')}
+          </p>
         ) : null}
       </section>
     </div>

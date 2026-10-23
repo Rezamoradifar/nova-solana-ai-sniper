@@ -9,6 +9,8 @@ import type {
 
 export type ConnectionWallet = Wallet & {
   features: StandardConnectFeature & StandardEventsFeature & Partial<StandardDisconnectFeature>;
+  cancelConnect?: () => void;
+  connectionTimeoutMs?: number;
 };
 
 interface LegacyInjectedPublicKey {
@@ -39,7 +41,7 @@ const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvw
 const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /** Convert an approved Solana base58 address into exactly 32 public-key bytes. */
-function addressBytes(address: string): Uint8Array | null {
+export function addressBytes(address: string): Uint8Array | null {
   if (!SOLANA_ADDRESS.test(address)) return null;
   let value = 0n;
   for (const character of address) {
@@ -67,15 +69,17 @@ function legacyAccount(
   publicKey: LegacyInjectedPublicKey | string | null | undefined,
 ): WalletAccount | null {
   if (!publicKey) return null;
-  const address = typeof publicKey === 'string'
-    ? publicKey
-    : typeof publicKey.toBase58 === 'function'
-      ? publicKey.toBase58()
-      : publicKey.toString();
+  const address =
+    typeof publicKey === 'string'
+      ? publicKey
+      : typeof publicKey.toBase58 === 'function'
+        ? publicKey.toBase58()
+        : publicKey.toString();
   if (!SOLANA_ADDRESS.test(address)) return null;
-  const supplied = typeof publicKey === 'string' || typeof publicKey.toBytes !== 'function'
-    ? null
-    : publicKey.toBytes();
+  const supplied =
+    typeof publicKey === 'string' || typeof publicKey.toBytes !== 'function'
+      ? null
+      : publicKey.toBytes();
   const bytes = supplied?.length === 32 ? supplied : addressBytes(address);
   if (!bytes || bytes.length !== 32) return null;
   return {
@@ -124,7 +128,7 @@ function legacyWallet(
               : null;
           // SafePal may expose the address via getAccount() after approval.
           // Read only public account data; never request a signature or transaction.
-          const fallback = resultKey ?? provider.publicKey ?? await provider.getAccount?.();
+          const fallback = resultKey ?? provider.publicKey ?? (await provider.getAccount?.());
           current = legacyAccount(legacyPublicKey(fallback));
           return { accounts: current ? [current] : [] };
         },
@@ -196,8 +200,7 @@ export function registerLegacyInjectedWallets(
       icon: SAFEPAL_ICON,
       provider: injected.safepal,
       // The Solana provider documents getAccount(); do not register an EVM-only object.
-      valid: (provider) =>
-        typeof provider.getAccount === 'function' || provider.publicKey != null,
+      valid: (provider) => typeof provider.getAccount === 'function' || provider.publicKey != null,
     },
   ];
 
@@ -323,7 +326,10 @@ export class WalletConnectionStore {
     this.refresh();
   }
   stop() {
+    const cancelConnect =
+      this.state.status === 'connecting' ? this.state.wallet?.cancelConnect : undefined;
     this.release();
+    cancelConnect?.();
     this.registryOff.forEach((off) => off());
     this.registryOff = [];
     this.registry = null;
@@ -422,7 +428,7 @@ export class WalletConnectionStore {
           error:
             'The connection request timed out. Close any old request in your wallet, then try again.',
         });
-      }, 60_000);
+      }, wallet.connectionTimeoutMs ?? 60_000);
       const result = await wallet.features['standard:connect'].connect();
       if (attempt !== this.attempt) return;
       this.clearTimeout();
@@ -459,7 +465,9 @@ export class WalletConnectionStore {
   };
   cancel = () => {
     if (this.state.status !== 'connecting') return;
+    const cancelConnect = this.state.wallet?.cancelConnect;
     this.release();
+    cancelConnect?.();
     this.update({
       ...initialState(),
       available: this.state.available,

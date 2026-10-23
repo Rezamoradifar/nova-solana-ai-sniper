@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Icon } from './PublicLayout.js';
+import { useLanguage } from '../../lib/LanguageContext.js';
 
 const TOOLS = [
   {
@@ -50,19 +51,20 @@ const TOOLS = [
 ];
 
 export function WebsiteTools() {
+  const { t: localize } = useLanguage();
   return (
-    <div className="website-tools" aria-label="Website tools">
+    <div className="website-tools" aria-label={localize('Website tools')}>
       {TOOLS.map((tool) => (
         <Link className="website-tool" to={tool.route} key={tool.route}>
           <div className="website-tool-top">
             <Icon name={tool.icon} size={27} />
             <span>
-              {tool.number} / {tool.tag}
+              {tool.number} / {localize(tool.tag)}
             </span>
           </div>
-          <h3>{tool.title}</h3>
-          <p>{tool.text}</p>
-          <span className="website-tool-action">{tool.action}</span>
+          <h3>{localize(tool.title)}</h3>
+          <p>{localize(tool.text)}</p>
+          <span className="website-tool-action">{localize(tool.action)}</span>
         </Link>
       ))}
     </div>

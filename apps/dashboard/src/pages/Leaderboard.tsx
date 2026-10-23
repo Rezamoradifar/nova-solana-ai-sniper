@@ -1,22 +1,24 @@
 import { api } from '../lib/api.js';
 import { usePolling } from '../lib/usePolling.js';
 import type { LeaderboardEntry } from '../lib/types.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 export function Leaderboard() {
+  const { t: localize } = useLanguage();
   const { data: entries } = usePolling(() => api.get<LeaderboardEntry[]>('/leaderboard'), 15000);
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-white">Leaderboard</h1>
+      <h1 className="text-2xl font-semibold text-white">{localize('Leaderboard')}</h1>
 
       <div className="card overflow-x-auto">
         <table className="table-base">
           <thead>
             <tr>
               <th>#</th>
-              <th>Wallet</th>
-              <th>Closed Trades</th>
-              <th>Realized PnL</th>
+              <th>{localize('Wallet')}</th>
+              <th>{localize('Closed Trades')}</th>
+              <th>{localize('Realized PnL')}</th>
             </tr>
           </thead>
           <tbody>
@@ -38,7 +40,7 @@ export function Leaderboard() {
             {entries?.length === 0 && (
               <tr>
                 <td colSpan={4} className="py-6 text-center text-slate-500">
-                  No closed trades yet.
+                  {localize('No closed trades yet.')}
                 </td>
               </tr>
             )}

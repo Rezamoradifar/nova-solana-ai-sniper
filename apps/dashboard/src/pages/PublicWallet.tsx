@@ -4,6 +4,9 @@ import { Icon, PageHeading } from '../components/public/PublicLayout.js';
 import { copyToClipboard } from '../lib/clipboard.js';
 import { useWalletConnection } from '../lib/WalletContext.js';
 import { PUBLIC_API_BASE } from '../lib/publicMarket.js';
+import { WalletButton } from '../components/WalletUI.js';
+import { MobileWalletActions } from '../components/MobileWalletActions.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 interface WalletNetworkSnapshot {
   chain: 'solana';
@@ -23,7 +26,9 @@ interface WalletNetworkSnapshot {
 }
 
 export default function PublicWallet() {
-  const { state, connect, disconnect, cancel, selectAccount, refresh } = useWalletConnection();
+  const { t: localize } = useLanguage();
+  const { state, selectAccount } = useWalletConnection();
+  const { lang } = useLanguage();
   const [network, setNetwork] = useState<WalletNetworkSnapshot | null>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -31,17 +36,6 @@ export default function PublicWallet() {
     active: false,
     attempt: 0,
   });
-  const busy = state.status === 'connecting' || state.status === 'disconnecting';
-  const mobileUrl =
-    typeof window !== 'undefined' && window.location.protocol === 'https:'
-      ? `${window.location.origin}/wallet`
-      : null;
-  const embedded = typeof window !== 'undefined' && window.self !== window.top;
-  const mobileBrowser =
-    typeof navigator !== 'undefined' &&
-    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) &&
-    !/Phantom|Solflare/i.test(navigator.userAgent);
-
   useLayoutEffect(() => {
     const guard = { address: state.account?.address, active: true, attempt: 0 };
     copyGuard.current = guard;
@@ -64,6 +58,8 @@ export default function PublicWallet() {
       return;
     }
 
+    setNetwork(null);
+    setNetworkError(null);
     const controller = new AbortController();
     const load = async () => {
       try {
@@ -105,9 +101,11 @@ export default function PublicWallet() {
   return (
     <div className="site-container interior-page wallet-page">
       <PageHeading
-        eyebrow="WEBSITE WALLET"
-        title="Your wallet. Your connection."
-        text="Choose a Solana wallet and approve access to your public address. Manage the connection here."
+        eyebrow={localize('WEBSITE WALLET')}
+        title={localize('Your wallet. Your connection.')}
+        text={localize(
+          'Choose a Solana wallet and approve access to your public address. Manage the connection here.',
+        )}
       />
       <div className="wallet-workspace">
         <section className="wallet-connect-panel panel" aria-labelledby="wallet-connect-title">
@@ -115,154 +113,27 @@ export default function PublicWallet() {
             <span className="wallet-step">01</span>
             <div>
               <h2 id="wallet-connect-title">
-                {state.account ? 'Wallet connected' : 'Connect a wallet'}
+                {state.account ? localize('Wallet connected') : localize('Connect a wallet')}
               </h2>
-              <p>
-                {state.account
-                  ? 'Your approved account is available on this website.'
-                  : 'Select a detected wallet to request a connection.'}
-              </p>
+              <p>{localize('One wallet connection across your Moneyland workspace.')}</p>
             </div>
             <Icon name="wallet" size={27} />
           </div>
-
-          {state.account && state.wallet ? (
-            <div className="wallet-approved">
-              <div className="wallet-approved-brand">
-                <img src={state.wallet.icon} width="48" height="48" alt="" />
-                <div>
-                  <strong>{state.wallet.name}</strong>
-                  <span>
-                    <Icon name="check" size={15} /> Connected
-                  </span>
-                </div>
-              </div>
-              <div className="wallet-permission">
-                <Icon name="shield" size={22} />
-                <div>
-                  <strong>Public address access</strong>
-                  <p>
-                    This connection lets the website display your approved account. Your keys stay
-                    in your wallet.
-                  </p>
-                </div>
-              </div>
-              <button className="nova-button button-outline" onClick={() => void disconnect()}>
-                <Icon name="disconnect" size={18} />
-                Disconnect wallet
-              </button>
-            </div>
-          ) : state.status === 'connecting' ? (
-            <div className="wallet-waiting" role="status">
-              <div className="wallet-pending-icon">
-                <Icon name="wallet" size={35} />
-              </div>
-              <h3>Check {state.wallet?.name}</h3>
-              <p>Unlock your wallet and review its connection request.</p>
-              <button className="nova-button button-outline" onClick={cancel}>
-                Cancel connection
-              </button>
-            </div>
-          ) : state.status === 'disconnecting' ? (
-            <div className="wallet-waiting" role="status">
-              <Icon name="disconnect" size={32} />
-              <h3>Disconnecting wallet…</h3>
-              <p>Your address has been cleared from this website.</p>
-            </div>
-          ) : (
-            <>
-              {state.available.length ? (
-                <div className="detected-wallets" aria-label="Detected wallets">
-                  {state.available.map((wallet, index) => (
-                    <button
-                      className="wallet-choice"
-                      key={`${wallet.name}-${index}`}
-                      disabled={busy}
-                      onClick={() => void connect(wallet)}
-                    >
-                      <img src={wallet.icon} width="42" height="42" alt="" />
-                      <span>
-                        <strong>{wallet.name}</strong>
-                        <small>Detected in this browser</small>
-                      </span>
-                      <span className="wallet-choice-action">Connect</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="wallet-not-found">
-                  <span className="wallet-empty-icon">
-                    <Icon name="wallet" size={35} />
-                  </span>
-                  <h3>No compatible wallet detected</h3>
-                  <p>
-                    {mobileBrowser
-                      ? 'Mobile Chrome/Safari may not expose Phantom, Solflare or SafePal. Open this site in the wallet DApp browser, then connect again.'
-                      : 'Use a browser with a Solana wallet extension, or open this page in a supported wallet’s in-app browser.'}
-                  </p>
-                  {embedded && (
-                    <div className="wallet-embedded-note">
-                      <p>Wallet extensions may be unavailable inside an embedded preview.</p>
-                      <a href="/wallet" target="_blank" rel="noreferrer" className="text-link">
-                        Open this page directly
-                      </a>
-                    </div>
-                  )}
-                  <div className="wallet-install-links">
-                    <a href="https://phantom.com/download" target="_blank" rel="noreferrer">
-                      Get Phantom <Icon name="external" size={14} />
-                    </a>
-                    <a href="https://solflare.com/download" target="_blank" rel="noreferrer">
-                      Get Solflare <Icon name="external" size={14} />
-                    </a>
-                    <a href="https://www.safepal.com/download?product=2" target="_blank" rel="noreferrer">
-                      Get SafePal <Icon name="external" size={14} />
-                    </a>
-                  </div>
-                </div>
+          <div className="wallet-approved">
+            <p>
+              {localize(
+                'Use a browser wallet or connect a compatible Solana wallet with WalletConnect.',
               )}
-              {mobileBrowser && mobileUrl && (
-                <div className="wallet-mobile-quickstart">
-                  <strong>Mobile connection</strong>
-                  <p>Open this exact GSP TRADING page inside your wallet app.</p>
-                  <p>SafePal: use DApps / Explore in the SafePal app to open moneyland.tr/wallet.</p>
-                  <div className="wallet-mobile-links">
-                    <a
-                      href={`https://phantom.app/ul/browse/${encodeURIComponent(mobileUrl)}?ref=${encodeURIComponent(window.location.origin)}`}
-                      className="nova-button"
-                    >
-                      Open in Phantom
-                    </a>
-                    <a
-                      href={`https://solflare.com/ul/v1/browse/${encodeURIComponent(mobileUrl)}?ref=${encodeURIComponent(window.location.origin)}`}
-                      className="nova-button button-outline"
-                    >
-                      Open in Solflare
-                    </a>
-                  </div>
-                </div>
-              )}
-              <button className="wallet-recheck" onClick={refresh}>
-                <Icon name="refresh" size={16} />
-                Check for wallets again
-              </button>
-            </>
-          )}
-          {state.error && (
-            <p className="wallet-message wallet-error" role="alert">
-              {state.error}
             </p>
-          )}
-          {state.notice && (
-            <p className="wallet-message" role="status">
-              {state.notice}
-            </p>
-          )}
+            <WalletButton />
+            <p className="muted">Phantom · Solflare · SafePal · WalletConnect</p>
+          </div>
           <div className="wallet-connect-foot">
             <Icon name="shield" size={16} />
             <span>
-              Connection requests public account access. It does not request a payment or
-              transaction signature.
+              {localize(
+                'Connecting shares your public address. Transactions need separate approval.',
+              )}
             </span>
           </div>
         </section>
@@ -271,11 +142,11 @@ export default function PublicWallet() {
           <div className="wallet-panel-heading">
             <span className="wallet-step">02</span>
             <div>
-              <h2 id="wallet-details-title">Connection details</h2>
+              <h2 id="wallet-details-title">{localize('Connection details')}</h2>
               <p>
                 {state.account
-                  ? 'Your selected public account.'
-                  : 'Your approved address will appear here.'}
+                  ? localize('Your selected public account.')
+                  : localize('Your approved address will appear here.')}
               </p>
             </div>
           </div>
@@ -284,19 +155,19 @@ export default function PublicWallet() {
               <span className="token-mark">≋</span>
               <div>
                 <strong>Solana</strong>
-                <small>Website market data · Mainnet</small>
+                <small>{localize('Website market data · Mainnet')}</small>
               </div>
               <span className={`wallet-state-pill ${state.account ? 'is-connected' : ''}`}>
                 {state.account
-                  ? 'Connected'
+                  ? localize('Connected')
                   : state.status === 'connecting'
-                    ? 'Awaiting approval'
-                    : 'Not connected'}
+                    ? localize('Awaiting approval')
+                    : localize('Not connected')}
               </span>
             </div>
             {state.accounts.length > 1 && (
               <label className="wallet-account-select">
-                Approved account
+                {localize('Approved account')}
                 <select
                   value={state.account?.address ?? ''}
                   onChange={(event) => selectAccount(event.target.value)}
@@ -310,15 +181,17 @@ export default function PublicWallet() {
                 </select>
               </label>
             )}
-            <span className="wallet-field-label">PUBLIC ADDRESS</span>
+            <span className="wallet-field-label">{localize('PUBLIC ADDRESS')}</span>
             <div className={`wallet-address ${state.account ? 'has-address' : ''}`}>
-              <code>{state.account?.address ?? 'Connect your wallet to view its address'}</code>
+              <code>
+                {state.account?.address ?? localize('Connect your wallet to view its address')}
+              </code>
             </div>
             {state.account && (
               <div className="wallet-address-actions">
                 <button className="nova-button button-outline" onClick={() => void copyAddress()}>
                   <Icon name={copyState === 'copied' ? 'check' : 'copy'} size={17} />
-                  {copyState === 'copied' ? 'Copied' : 'Copy address'}
+                  {copyState === 'copied' ? localize('Copied') : localize('Copy address')}
                 </button>
                 <a
                   className="text-link"
@@ -326,45 +199,56 @@ export default function PublicWallet() {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  View on Solscan <Icon name="external" size={15} />
+                  {localize('View on Solscan') + ' '}
+                  <Icon name="external" size={15} />
                 </a>
               </div>
             )}
             {copyState === 'failed' && (
               <p className="wallet-message" role="status">
-                Select the address above to copy it manually.
+                {localize('Select the address above to copy it manually.')}
               </p>
             )}
             <div className="wallet-access-details">
               <div>
-                <span>Account access</span>
-                <strong>{state.account ? 'Public address' : 'Not requested'}</strong>
+                <span>{localize('Account access')}</span>
+                <strong>
+                  {state.account ? localize('Public address') : localize('Not requested')}
+                </strong>
               </div>
               <div>
-                <span>Mainnet balance</span>
-                <strong>{network ? `${network.sol.toFixed(6)} SOL` : networkError ? 'Unavailable' : state.account ? 'Loading…' : '—'}</strong>
+                <span>{localize('Mainnet balance')}</span>
+                <strong>
+                  {network
+                    ? `${network.sol.toFixed(6)} SOL`
+                    : networkError
+                      ? localize('Unavailable')
+                      : state.account
+                        ? localize('Loading…')
+                        : '—'}
+                </strong>
               </div>
               <div>
-                <span>RPC slot</span>
+                <span>{localize('RPC slot')}</span>
                 <strong>{network ? network.slot.toLocaleString() : '—'}</strong>
               </div>
               <div>
-                <span>Transaction requests</span>
-                <strong>None</strong>
+                <span>{localize('Transaction requests')}</span>
+                <strong>{localize('None')}</strong>
               </div>
               <div>
-                <span>Telegram account</span>
-                <Link to="/telegram">Managed in bot</Link>
+                <span>{localize('Telegram account')}</span>
+                <Link to="/telegram">{localize('Managed in bot')}</Link>
               </div>
             </div>
             {networkError && (
               <p className="wallet-message wallet-error" role="status">
-                {networkError}
+                {localize(networkError ?? '')}
               </p>
             )}
             {network && network.signatures.length > 0 && (
               <div className="mt-4">
-                <span className="wallet-field-label">RECENT MAINNET ACTIVITY</span>
+                <span className="wallet-field-label">{localize('RECENT MAINNET ACTIVITY')}</span>
                 <div className="mt-2 space-y-2">
                   {network.signatures.slice(0, 5).map((row) => (
                     <a
@@ -378,7 +262,7 @@ export default function PublicWallet() {
                         {row.signature.slice(0, 8)}…{row.signature.slice(-8)}
                       </span>
                       <span className={row.err ? 'text-loss' : 'text-profit'}>
-                        {row.err ? 'Failed' : row.confirmationStatus ?? 'confirmed'}
+                        {row.err ? localize('Failed') : (row.confirmationStatus ?? 'confirmed')}
                       </span>
                     </a>
                   ))}
@@ -389,45 +273,14 @@ export default function PublicWallet() {
         </aside>
       </div>
 
-      <section className="wallet-mobile-help">
-        <div>
-          <Icon name="globe" size={24} />
-          <div>
-            <h2>Connecting on your phone?</h2>
-            <p>
-              Open this website in your wallet’s browser, then choose the wallet above. A normal
-              mobile browser may not expose your wallet.
-            </p>
-          </div>
-        </div>
-        {mobileUrl && (
-          <div className="wallet-mobile-links">
-            <a
-              href={`https://phantom.app/ul/browse/${encodeURIComponent(mobileUrl)}?ref=${encodeURIComponent(window.location.origin)}`}
-              className="nova-button button-outline"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open in Phantom
-            </a>
-            <a
-              href={`https://solflare.com/ul/v1/browse/${encodeURIComponent(mobileUrl)}?ref=${encodeURIComponent(window.location.origin)}`}
-              className="nova-button button-outline"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Open in Solflare
-            </a>
-          </div>
-        )}
-      </section>
+      <MobileWalletActions lang={lang} />
       <div className="wallet-next-links">
         <Link to="/tools" className="text-link">
-          Explore website tools
+          {localize('Explore website tools')}
         </Link>
         <Link to="/telegram" className="text-link">
           <Icon name="telegram" size={18} />
-          Telegram bot account
+          {localize('Telegram bot account')}
         </Link>
       </div>
     </div>

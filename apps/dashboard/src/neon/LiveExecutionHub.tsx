@@ -61,7 +61,7 @@ export function LiveExecutionHub() {
       controller.abort();
       clearInterval(timer);
     };
-  }, [reload, lang]);
+  }, [reload, lang, t]);
 
   const status: CopyReadiness = classifyCopyReadiness(state.network, state.copy);
   const descriptions: Record<CopyReadiness, [string, string]> = {

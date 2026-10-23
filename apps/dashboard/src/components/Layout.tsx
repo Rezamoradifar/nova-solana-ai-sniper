@@ -1,6 +1,10 @@
 import { useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet } from 'react-router-dom';
+import { WalletButton } from './WalletUI.js';
+import { SiteBrand } from './SiteBrand.js';
+import { LanguageSwitch } from '../lib/LanguageContext.js';
 import { useAuth } from '../lib/AuthContext.js';
+import { useLanguage } from '../lib/LanguageContext.js';
 
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Overview', end: true },
@@ -17,14 +21,27 @@ const NAV_ITEMS = [
 ];
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+  const { t: localize } = useLanguage();
   const { user, logout } = useAuth();
   return (
     <>
       <div className="border-b border-surface-border px-5 py-5">
-        <div className="text-lg font-bold text-white">GSP TRADING</div>
-        <div className="text-xs text-slate-500">AI Solana Trading</div>
+        <Link to="/">
+          <SiteBrand />
+        </Link>
+        <div className="text-xs text-slate-500">{localize('AI Solana Trading')}</div>
       </div>
       <nav className="flex-1 space-y-1 px-3 py-4">
+        <Link to="/" onClick={onNavigate} className="block px-3 py-2 text-sm text-slate-400">
+          {localize('Home')}
+        </Link>
+        <Link
+          to="/copy-trading"
+          onClick={onNavigate}
+          className="block px-3 py-2 text-sm text-slate-400"
+        >
+          {localize('Copy Trading')}
+        </Link>
         {NAV_ITEMS.map((item) => (
           <NavLink
             key={item.to}
@@ -39,7 +56,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               }`
             }
           >
-            {item.label}
+            {localize(item.label)}
           </NavLink>
         ))}
         {(user?.isAdmin || user?.role === 'ADMIN') && (
@@ -54,14 +71,18 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               }`
             }
           >
-            ⚙ Admin Control Center
+            {localize('⚙ Admin Control Center')}
           </NavLink>
         )}
       </nav>
       <div className="border-t border-surface-border px-5 py-4">
+        <div className="nova-account-actions">
+          <LanguageSwitch />
+          <WalletButton />
+        </div>
         <div className="mb-2 truncate text-xs text-slate-500">{user?.email ?? user?.id}</div>
         <button onClick={logout} className="btn-secondary w-full text-xs">
-          Sign out
+          {localize('Sign out')}
         </button>
       </div>
     </>
@@ -69,6 +90,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export function Layout() {
+  const { t: localize } = useLanguage();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
@@ -80,11 +102,13 @@ export function Layout() {
 
       {/* Mobile top bar with hamburger toggle — only shown below md. */}
       <div className="fixed inset-x-0 top-0 z-30 flex items-center justify-between border-b border-surface-border bg-surface-raised px-4 py-3 md:hidden">
-        <div className="text-base font-bold text-white">GSP TRADING</div>
+        <Link to="/">
+          <SiteBrand />
+        </Link>
         <button
           onClick={() => setMobileNavOpen(true)}
           className="rounded-lg p-2 text-slate-300 hover:bg-surface-hover"
-          aria-label="Open navigation menu"
+          aria-label={localize('Open navigation menu')}
         >
           ☰
         </button>
