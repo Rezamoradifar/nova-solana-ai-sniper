@@ -9,6 +9,7 @@ test('luxury landing shows observed prices and network proof without horizontal 
   await expect(page.getByTestId('hero-sol-price')).toHaveText('$102.63');
   await expect(page.getByTestId('mainnet-status')).toHaveText('شبکه تأیید شده');
   await expect(page.getByRole('button', {name:'اتصال یا مدیریت کیف پول'}).first()).toBeVisible();
+  await expect(page.locator('.n-header-wallet svg')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await page.evaluate(() => document.fonts.ready);
   expect(await page.evaluate(() => Array.from(document.fonts).some(f => f.family === 'MLDisplay' && f.status === 'loaded'))).toBe(true);
@@ -23,6 +24,7 @@ test('luxury landing shows observed prices and network proof without horizontal 
   await page.setViewportSize({width:320,height:740});
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await expect(page.getByRole('button',{name:'Connect or manage wallet'}).first()).toBeVisible();
+  await expect(page.locator('.n-header-wallet svg')).toBeVisible();
 });
 
 test('network programs and paper trading remain distinct and the page fits mobile', async ({page}, info) => {

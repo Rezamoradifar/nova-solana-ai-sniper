@@ -25,6 +25,7 @@ html[lang=fa] body,html[lang=fa] .neon,html[lang=fa] .ml2-root,html[lang=fa] .no
 .neon .n-panel,.nova-site .panel,.ml2-root .ml2-panel{background:linear-gradient(145deg,#181715,#10100f);border-color:var(--lux-line);box-shadow:0 18px 60px #00000018}
 .neon .n-footer,.nova-site .site-footer,.ml2-root .ml2-footer{background:#0b0b0a;border-color:var(--lux-line)}
 .neon .n-bottom-nav{background:#10100ff5;border-color:var(--lux-line)}
+.neon .n-bottom-nav>a.active{color:var(--lux-gold)}
 .neon .n-gradient-text{background:linear-gradient(115deg,#f5e5bd,#a48d58);background-clip:text;-webkit-text-fill-color:transparent}
 .nova-wallet-dialog,.nova-wallet-dialog button,.nova-language-switch{font-family:var(--lux-body)}
 .nova-wallet-dialog{background:linear-gradient(145deg,#1a1916,#0e0e0d);border-color:#dec59135;color:#f5f1e9}
