@@ -1,7 +1,6 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import { address, secondAddress, mockServices, injectWallet } from './fixtures.js';
 
-const address = '11111111111111111111111111111111';
-const secondAddress = 'So11111111111111111111111111111111111111112';
 const chartScriptUrl = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
 // Exercise the asynchronous embed boundary without depending on the live vendor's
 // network, market data or cross-origin ResizeObserver implementation.
@@ -16,104 +15,6 @@ const chartScriptFixture = `(() => {
   frame.style.cssText = 'display:block;width:100%;height:100%;border:0';
   host.append(frame);
 })();`;
-
-async function mockServices(page: Page) {
-  await page.route('**/api/**', async (route) => {
-    const pathname = new URL(route.request().url()).pathname;
-    let json: unknown = [];
-    if (pathname === '/api/public/network/status')
-      json = {
-        status: 'ready',
-        workersReady: true,
-        tradingMode: 'PAPER',
-        slot: 100,
-        scanner: { state: 'HEALTHY', wsHealthy: true, fallbackHealthy: false },
-      };
-    else if (pathname === '/api/public/copy-trading')
-      json = {
-        executionMode: 'disabled',
-        copyWatcherReady: false,
-        liveExecutionEnabled: false,
-        buyReadiness: {
-          ready: false,
-          blockers: ['COPY_EXECUTION_DISABLED'],
-          checkedAt: Date.now(),
-        },
-        recommendations: [],
-        localWallets: [],
-        gmgn: { status: 'not_configured', wallets: [], trades: [] },
-        limits: { maxBuySol: 0.1, maxDailyBuys: 10, maxOpenPositions: 3, slippageBps: 150 },
-      };
-    else if (pathname.startsWith('/api/public/wallet/'))
-      json = {
-        address: pathname.split('/').pop(),
-        sol: pathname.endsWith(secondAddress) ? 2 : 1,
-        lamports: '1000000000',
-        slot: 100,
-        signatures: [],
-        checkedAt: Date.now(),
-      };
-    else if (pathname === '/api/auth/login' || pathname === '/api/auth/register')
-      json = { token: 'test-account-token' };
-    else if (pathname === '/api/auth/me')
-      json = { id: 'test-account', email: 'user@example.com', role: 'USER' };
-    else if (pathname === '/api/wallets')
-      json = [
-        {
-          id: 'wallet-1',
-          label: 'Home',
-          publicKey: address,
-          isActive: true,
-          createdAt: '2026-10-24T00:00:00Z',
-        },
-      ];
-    else if (pathname === '/api/public/gmgn/markets')
-      json = { status: 'not_configured', tokens: [] };
-    await route.fulfill({ json });
-  });
-}
-
-async function injectWallet(page: Page, reject = false) {
-  await page.addInitScript(
-    ({ address, reject }) => {
-      const events = new Map<string, Set<(value?: unknown) => void>>();
-      const publicKey = (value: string) => ({ toBase58: () => value, toString: () => value });
-      const provider = {
-        isPhantom: true,
-        publicKey: publicKey(address),
-        connect: async () => {
-          if (reject) throw Object.assign(new Error('User rejected connection'), { code: 4001 });
-          return { publicKey: provider.publicKey };
-        },
-        disconnect: async () => {
-          events.get('disconnect')?.forEach((fn) => fn());
-        },
-        on: (event: string, fn: (value?: unknown) => void) => {
-          const listeners = events.get(event) ?? new Set();
-          listeners.add(fn);
-          events.set(event, listeners);
-        },
-        off: (event: string, fn: (value?: unknown) => void) => {
-          events.get(event)?.delete(fn);
-        },
-        signTransaction: () => {
-          throw new Error('UNEXPECTED_SIGNING_REQUEST');
-        },
-        signMessage: () => {
-          throw new Error('UNEXPECTED_SIGNING_REQUEST');
-        },
-      };
-      Object.assign(window, {
-        phantom: { solana: provider },
-        __novaWalletChange: (next: string) => {
-          provider.publicKey = publicKey(next);
-          events.get('accountChanged')?.forEach((fn) => fn(provider.publicKey));
-        },
-      });
-    },
-    { address, reject },
-  );
-}
 
 test.beforeEach(async ({ page }) => {
   await mockServices(page);

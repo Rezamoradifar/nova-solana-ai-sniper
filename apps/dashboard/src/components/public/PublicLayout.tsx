@@ -19,6 +19,7 @@ import {
 import { LanguageSwitch, useLanguage } from '../../lib/LanguageContext.js';
 import { WalletButton } from '../WalletUI.js';
 import { SiteBrand } from '../SiteBrand.js';
+import { MainnetRibbon } from '../MainnetRibbon.js';
 import '../../landing.css';
 import '../../workspace.css';
 import '../../moneyland.css';
@@ -471,6 +472,7 @@ export function PublicLayout() {
             </div>
           </div>
         </header>
+        <MainnetRibbon />
         <main id="main-content">
           <Outlet />
         </main>

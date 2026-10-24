@@ -1,16 +1,56 @@
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import publicNetworkRoutes from './publicNetwork.js';
+import { MAINNET_GENESIS, MAINNET_PROGRAMS } from '../solana/mainnetGateway.js';
 
-async function setup() {
+async function setup(network = false) {
   const app = Fastify();
   app.decorate('config', { DEXSCREENER_API_BASE: 'https://source.example/' } as never);
+  if (network) {
+    app.decorate('solanaConnection', {} as never);
+    app.decorate('backgroundWorkersReady', true);
+    app.decorate('tradingMode', 'PAPER');
+  }
   await app.register(publicNetworkRoutes);
   return app;
 }
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe('verified public mainnet routes', () => {
+  function rpc(genesis: string) {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (_url, init) => {
+      const methods = JSON.parse(init.body) as Array<{id:number;method:string}>;
+      return new Response(JSON.stringify(methods.map(({id,method})=>({id,jsonrpc:'2.0',result:
+        method === 'getGenesisHash' ? genesis : method === 'getSlot' ? 123 :
+        method === 'getMultipleAccounts' ? {value:MAINNET_PROGRAMS.map(()=>({executable:true,owner:'BPFLoader2111111111111111111111111111111111'}))} :
+        method === 'getBalance' ? {context:{slot:122},value:1000000000} : []}))));
+    }));
+  }
+  it('returns genesis evidence while keeping paper execution separate from network readiness', async () => {
+    rpc(MAINNET_GENESIS);
+    const app = await setup(true);
+    try {
+      const r=await app.inject('/public/solana/overview');
+      expect(r.statusCode).toBe(200);
+      expect(r.headers['cache-control']).toBe('no-store');
+      expect(r.json()).toMatchObject({mainnetVerified:true,genesisHash:MAINNET_GENESIS,slot:123,tradingMode:'PAPER'});
+      expect((await app.inject('/public/network/status')).json()).toMatchObject({status:'ready',mainnetVerified:true,tradingMode:'PAPER'});
+      expect((await app.inject('/public/wallet/11111111111111111111111111111111')).json()).toMatchObject({sol:1,slot:122,mainnetVerified:true});
+    } finally { await app.close(); }
+  });
+  it('never reports a devnet provider or its wallet values as mainnet-ready', async () => {
+    rpc('devnet');
+    const app=await setup(true);
+    try {
+      const r=await app.inject('/public/network/status');
+      expect(r.statusCode).toBe(503);
+      expect(r.json()).toMatchObject({status:'degraded',mainnetVerified:false,slot:null,cluster:null});
+      expect((await app.inject('/public/wallet/11111111111111111111111111111111')).statusCode).toBe(503);
+    } finally { await app.close(); }
+  });
 });
 describe('public market feed', () => {
   it('shares slow upstream requests and expires snapshots without relabeling their age', async () => {

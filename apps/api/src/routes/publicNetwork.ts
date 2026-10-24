@@ -3,6 +3,8 @@ import { PublicKey } from '@solana/web3.js';
 import { z } from 'zod';
 import { createGmgnMarketFeed } from '../integrations/gmgnMarket.js';
 import { JupiterClient, SOL_MINT } from '../solana/jupiter.js';
+import { resolveAllRpcEndpoints } from '../solana/connection.js';
+import { createMainnetGateway } from '../solana/mainnetGateway.js';
 
 const MARKET_MINTS = [
   SOL_MINT,
@@ -42,6 +44,21 @@ const winnersQuery = z.object({
 
 export default async function publicNetworkRoutes(fastify: FastifyInstance) {
   const gmgnMarket = createGmgnMarketFeed();
+  const mainnet = createMainnetGateway({ endpoints: () => resolveAllRpcEndpoints({
+    rpcUrl: fastify.config.SOLANA_RPC_URL, wsUrl: fastify.config.SOLANA_WS_URL,
+    heliusApiKey: fastify.config.HELIUS_API_KEY, quicknodeRpcUrl: fastify.config.QUICKNODE_RPC_URL,
+    quicknodeWsUrl: fastify.config.QUICKNODE_WS_URL, chainstackRpcUrl: fastify.config.CHAINSTACK_RPC_URL,
+    additionalRpcUrls: fastify.config.ADDITIONAL_RPC_URLS,
+  }) });
+  const release = /^[0-9a-f]{40}$/.test(process.env.NOVA_SITE_RELEASE ?? '') ? process.env.NOVA_SITE_RELEASE : null;
+  fastify.get('/public/solana/overview', {
+    config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
+  }, async (_req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const value = await mainnet.overview();
+    return reply.code(value.mainnetVerified ? 200 : 503).send({ ...value, release,
+      workersReady: fastify.backgroundWorkersReady === true, tradingMode: fastify.tradingMode ?? 'PAPER' });
+  });
   fastify.get(
     '/public/gmgn/markets',
     { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
@@ -100,17 +117,19 @@ export default async function publicNetworkRoutes(fastify: FastifyInstance) {
         });
       }
       try {
-        const slot = await fastify.solanaConnection.getSlot('confirmed');
-        return {
+        const proof = await mainnet.overview();
+        return reply.code(proof.mainnetVerified ? 200 : 503).send({
           chain: 'solana',
-          cluster: 'mainnet-beta',
-          status: 'ready',
+          cluster: proof.cluster,
+          status: proof.mainnetVerified ? 'ready' : 'degraded',
+          mainnetVerified: proof.mainnetVerified,
+          genesisHash: proof.genesisHash,
           tradingMode: fastify.tradingMode ?? 'PAPER',
           workersReady: fastify.backgroundWorkersReady,
-          slot,
+          slot: proof.slot,
           scanner: fastify.scannerHealthCoordinator?.snapshot() ?? null,
-          checkedAt: Date.now(),
-        };
+          checkedAt: proof.checkedAt,
+        });
       } catch (error) {
         fastify.log.warn({ error }, 'public network status RPC check failed');
         return reply.code(503).send({
@@ -143,28 +162,11 @@ export default async function publicNetworkRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'Invalid Solana address' });
       }
 
-      const [lamports, signatures, slot] = await Promise.all([
-        fastify.solanaConnection.getBalance(publicKey, 'confirmed'),
-        fastify.solanaConnection.getSignaturesForAddress(publicKey, { limit: 10 }, 'confirmed'),
-        fastify.solanaConnection.getSlot('confirmed'),
-      ]);
-
-      return {
-        chain: 'solana',
-        cluster: 'mainnet-beta',
-        address,
-        lamports: lamports.toString(),
-        sol: lamports / 1e9,
-        slot,
-        signatures: signatures.map((row) => ({
-          signature: row.signature,
-          slot: row.slot,
-          err: row.err,
-          blockTime: row.blockTime,
-          confirmationStatus: row.confirmationStatus,
-        })),
-        checkedAt: Date.now(),
-      };
+      try {
+        return await mainnet.wallet(publicKey.toBase58());
+      } catch {
+        return reply.code(503).send({ error: 'Verified Solana mainnet wallet data is unavailable' });
+      }
     },
   );
 

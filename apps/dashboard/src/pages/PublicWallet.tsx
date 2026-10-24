@@ -7,8 +7,11 @@ import { PUBLIC_API_BASE } from '../lib/publicMarket.js';
 import { WalletButton } from '../components/WalletUI.js';
 import { MobileWalletActions } from '../components/MobileWalletActions.js';
 import { useLanguage } from '../lib/LanguageContext.js';
+import { SOLANA_MAINNET_GENESIS } from '../lib/mainnet.js';
 
 interface WalletNetworkSnapshot {
+  mainnetVerified: boolean;
+  genesisHash: string;
   chain: 'solana';
   cluster: 'mainnet-beta';
   address: string;
@@ -72,7 +75,9 @@ export default function PublicWallet() {
         );
         if (!response.ok) throw new Error('Solana RPC data is currently unavailable.');
         const next = (await response.json()) as WalletNetworkSnapshot;
-        if (next.address !== address) throw new Error('Solana RPC data is currently unavailable.');
+        if (next.address !== address || next.mainnetVerified !== true || next.genesisHash !== SOLANA_MAINNET_GENESIS ||
+          next.chain !== 'solana' || next.cluster !== 'mainnet-beta')
+          throw new Error('Solana RPC data is currently unavailable.');
         if (!controller.signal.aborted) {
           setNetwork(next);
           setNetworkError(null);

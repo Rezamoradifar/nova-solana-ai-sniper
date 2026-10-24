@@ -36,7 +36,11 @@ export function WalletButton({ className = '' }: { className?: string }) {
       onClick={open}
       aria-label={t('Connect or manage wallet', 'اتصال یا مدیریت کیف پول')}
     >
-      <span aria-hidden="true">◈</span>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+        <path d="M20 8V5a2 2 0 0 0-2-2H6a3 3 0 0 0 0 6h14v12H6a3 3 0 0 1-3-3V6" />
+        <path d="M20 12h-5a2 2 0 0 0 0 4h5" />
+        <path d="M16 14h.01" />
+      </svg>
       <span dir={address ? 'ltr' : undefined}>
         {address ? `${address.slice(0, 4)}…${address.slice(-4)}` : t('Connect wallet')}
       </span>

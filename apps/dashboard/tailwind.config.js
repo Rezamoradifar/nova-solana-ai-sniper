@@ -5,9 +5,9 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'Space Grotesk', 'ui-sans-serif', 'system-ui'],
-        display: ['Space Grotesk', 'Inter', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['var(--lux-body)', 'sans-serif'],
+        display: ['var(--lux-display)', 'sans-serif'],
+        mono: ['MLMono', 'monospace'],
       },
       colors: {
         moneyland: {
@@ -19,14 +19,14 @@ export default {
           loss: '#EF4444',
         },
         surface: {
-          DEFAULT: '#0b0e14',
-          raised: '#111623',
-          hover: '#161c2c',
-          border: '#232a3d',
+          DEFAULT: '#090909',
+          raised: '#141310',
+          hover: '#1b1915',
+          border: '#302b21',
         },
         accent: {
-          DEFAULT: '#7c5cff',
-          hover: '#9179ff',
+          DEFAULT: '#c4a66e',
+          hover: '#e1c690',
         },
         profit: '#22c55e',
         loss: '#ef4444',
