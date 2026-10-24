@@ -25,6 +25,12 @@ jobs:
         run: npm run build --workspace @nova/dashboard
         env:
           VITE_WALLETCONNECT_PROJECT_ID: 1a2b3c4d5e6f708192a3b4c5d6e7f809
+      - name: Release, RPC setup and copy activation boundaries
+        run: |
+          python3 scripts/test-deploy-nova-mainnet-luxury.py
+          python3 scripts/test-deploy-nova-wallet-language.py
+          python3 scripts/test_enable_copy_trading.py
+          node --test scripts/test_nova_copy_diagnostic.mjs scripts/test_nova_live_copy_control.mjs
       - name: Browser engines
         run: npx playwright install --with-deps chromium webkit
       - name: Desktop, Android and iPhone mainnet and wallet flows
@@ -36,6 +42,8 @@ jobs:
           name: nova-mainnet-luxury-browser-results
           path: test-results/wallet-language
           retention-days: 5
+      - name: Real API/web configuration leases and protected container identity
+        run: NOVA_MAINNET_COMPOSE_INTEGRATION=1 python3 scripts/test-deploy-nova-mainnet-luxury.py
       - name: Build actual API image and verify release identity
         run: |
           docker build --build-arg NOVA_SITE_RELEASE="$GITHUB_SHA" -t nova-mainnet-api-ci -f apps/api/Dockerfile .

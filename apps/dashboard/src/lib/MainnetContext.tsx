@@ -14,7 +14,7 @@ export function MainnetProvider({ children }: { children: ReactNode }) {
   const [copy, setCopy] = useState<PublicCopyReadiness | null>(null);
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
-  const refresh = useCallback(() => setRevision(n => n + 1), []);
+  const refresh = useCallback(() => { setLoading(true); setRevision(n => n + 1); }, []);
   useEffect(() => {
     let live = true;
     let pending = false;

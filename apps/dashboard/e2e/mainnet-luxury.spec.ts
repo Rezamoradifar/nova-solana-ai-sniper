@@ -13,11 +13,16 @@ test('luxury landing shows observed prices and network proof without horizontal 
   await page.evaluate(() => document.fonts.ready);
   expect(await page.evaluate(() => Array.from(document.fonts).some(f => f.family === 'MLDisplay' && f.status === 'loaded'))).toBe(true);
   await page.screenshot({path:info.outputPath('luxury-home-fa.png'), fullPage:true});
+  await page.screenshot({path:info.outputPath('luxury-home-fa-viewport.png')});
   await page.getByRole('button', {name:'Switch language to English'}).click();
   await expect(page.getByRole('heading', {level:1})).toContainText('ON SOLANA.');
   await expect(page.locator('html')).toHaveAttribute('dir','ltr');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await page.screenshot({path:info.outputPath('luxury-home-en.png'), fullPage:true});
+  await page.screenshot({path:info.outputPath('luxury-home-en-viewport.png')});
+  await page.setViewportSize({width:320,height:740});
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await expect(page.getByRole('button',{name:'Connect or manage wallet'}).first()).toBeVisible();
 });
 
 test('network programs and paper trading remain distinct and the page fits mobile', async ({page}, info) => {
