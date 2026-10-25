@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Icon, PageHeading } from '../components/public/PublicLayout.js';
+import { CopyButton } from '../components/CopyButton.js';
 import { WalletButton } from '../components/WalletUI.js';
 import { api, ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.js';
@@ -88,6 +89,7 @@ export default function PublicCopyTrading() {
   const [sort, setSort] = useState('profit');
   const [params, setParams] = useSearchParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const target = params.get('trader') ?? '';
   const [copyPercent, setCopyPercent] = useState('25');
   const [maxSol, setMaxSol] = useState('0.10');
@@ -97,6 +99,8 @@ export default function PublicCopyTrading() {
   const [notice, setNotice] = useState<{ ownerId: string | null; text: string } | null>(null);
   const [busy, setBusy] = useState<{ ownerId: string; address: string } | null>(null);
   const setup = useRef<HTMLElement>(null);
+  const initialFeedSettled = useRef(false);
+  const [selectionRevision, setSelectionRevision] = useState(0);
   const ownerId = user?.id ?? null;
   const current = account?.ownerId === ownerId ? account : null;
   const accountLoading = Boolean(user && (!current || current.loading));
@@ -133,6 +137,29 @@ export default function PublicCopyTrading() {
   const loginState = { returnTo };
 
   useEffect(() => {
+    if (location.hash !== '#copy-setup') return;
+    // Run after route/layout effects (which reset scrolling on login return).
+    const frame = requestAnimationFrame(() => {
+      setup.current?.focus({ preventScroll: true });
+      setup.current?.scrollIntoView({ behavior: 'instant', block: 'start' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [location.hash, selectionRevision]);
+
+  useEffect(() => {
+    if (feed.loading || initialFeedSettled.current) return;
+    initialFeedSettled.current = true;
+    if (location.hash !== '#copy-setup' || document.activeElement !== setup.current) return;
+    // Initial cards can move a deep-linked form. Do not steal focus from an
+    // input/dialog, or jump back to setup on subsequent background refreshes.
+    const frame = requestAnimationFrame(() => {
+      if (document.activeElement === setup.current)
+        setup.current?.scrollIntoView({ behavior: 'instant', block: 'start' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [feed.loading, location.hash]);
+
+  useEffect(() => {
     if (!ownerId) return;
     const controller = new AbortController();
     let active = true;
@@ -157,15 +184,17 @@ export default function PublicCopyTrading() {
     const next = new URLSearchParams(params);
     if (address) next.set('trader', address);
     else next.delete('trader');
-    setParams(next, { replace: true });
+    if (scroll) {
+      navigate(
+        { pathname: location.pathname, search: next.toString(), hash: '#copy-setup' },
+        {
+          replace: true,
+        },
+      );
+      // Reselecting the same wallet must reveal its setup again too.
+      setSelectionRevision((value) => value + 1);
+    } else setParams(next, { replace: true });
     setConfirmed(false);
-    if (scroll)
-      setup.current?.scrollIntoView({
-        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-          ? 'instant'
-          : 'smooth',
-        block: 'start',
-      });
   }
   function refresh() {
     feed.refresh();
@@ -506,7 +535,13 @@ export default function PublicCopyTrading() {
                   <span>{t('Last activity', 'آخرین فعالیت')}</span>
                   <time>{activity(trader.lastActivityAt)}</time>
                 </div>
-                <button className="ct-select" type="button" onClick={() => choose(trader.address)}>
+                <button
+                  className="ct-select"
+                  type="button"
+                  aria-controls="copy-setup"
+                  aria-pressed={target === trader.address}
+                  onClick={() => choose(trader.address)}
+                >
                   {saved ? t('Manage copy', 'مدیریت کپی') : t('Set up copy', 'تنظیم کپی')}
                   <Icon name="chevron" size={16} />
                 </button>
@@ -536,7 +571,13 @@ export default function PublicCopyTrading() {
           </div>
         )}
       </section>
-      <section className="ct-setup" id="copy-setup" ref={setup} aria-labelledby="copy-setup-title">
+      <section
+        className="ct-setup"
+        id="copy-setup"
+        ref={setup}
+        tabIndex={-1}
+        aria-labelledby="copy-setup-title"
+      >
         <div className="ct-section-heading">
           <div>
             <span className="ct-eyebrow">YOUR WALLET. YOUR LIMITS.</span>
@@ -550,6 +591,31 @@ export default function PublicCopyTrading() {
               : t('Execution paused', 'اجرای کپی متوقف است')}
           </span>
         </div>
+        {validTarget(target) && (
+          <div className="ct-selected-wallet" key={target}>
+            <div role="status">
+              <strong>{t('Trader selected for review', 'ولت تریدر برای بررسی انتخاب شد')}</strong>
+              <code dir="ltr">{target}</code>
+              <p>
+                {!user
+                  ? t(
+                      'Next: sign in and continue with this trader.',
+                      'مرحلهٔ بعد: وارد حساب شو و تنظیم همین ولت را ادامه بده.',
+                    )
+                  : !activeWallet
+                    ? t(
+                        'Next: choose your account trading wallet.',
+                        'مرحلهٔ بعد: کیف پول معاملات حسابت را انتخاب کن.',
+                      )
+                    : t(
+                        'Next: review your limits and confirm below.',
+                        'مرحلهٔ بعد: سقف‌ها را بررسی و در فرم زیر تأیید کن.',
+                      )}
+              </p>
+            </div>
+            <CopyButton text={target} label={t('Copy address', 'کپی آدرس')} />
+          </div>
+        )}
         <div className="ct-connection-steps">
           <div>
             <span className="ct-step-no">01</span>
@@ -814,7 +880,12 @@ export default function PublicCopyTrading() {
                   {wallet.recommendation.closedTrades} {t('verified closes', 'خروج تأییدشده')} ·{' '}
                   {percent(wallet.recommendation.winRatePct)}
                 </small>
-                <button type="button" onClick={() => choose(wallet.address)}>
+                <button
+                  type="button"
+                  aria-controls="copy-setup"
+                  aria-pressed={target === wallet.address}
+                  onClick={() => choose(wallet.address)}
+                >
                   {t('Review wallet', 'بررسی کیف پول')} ↗
                 </button>
               </article>

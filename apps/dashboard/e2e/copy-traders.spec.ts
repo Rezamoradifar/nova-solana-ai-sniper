@@ -121,6 +121,9 @@ test('trader choice survives browser wallet approval, account login and saves ex
   });
   await page.goto('/copy-trading?lang=fa');
   await page.getByRole('button', { name: 'تنظیم کپی', exact: true }).first().click();
+  await expect(page).toHaveURL(/#copy-setup$/);
+  await expect(page.locator('#copy-setup')).toBeFocused();
+  await expect(page.locator('#copy-setup-title')).toBeInViewport();
   await expect(page.getByLabel('آدرس کیف پول تریدر', { exact: true })).toHaveValue(first);
   await page
     .locator('.ct-connection-steps')
@@ -138,6 +141,8 @@ test('trader choice survives browser wallet approval, account login and saves ex
   await page.getByLabel('رمز عبور', { exact: true }).fill('test-password-only');
   await page.getByRole('button', { name: 'ورود', exact: true }).click();
   await expect(page.getByLabel('آدرس کیف پول تریدر', { exact: true })).toHaveValue(first);
+  await expect(page.locator('#copy-setup')).toBeFocused();
+  await expect(page.locator('#copy-setup-title')).toBeInViewport();
   await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
   await expect(page.getByRole('button', { name: 'ذخیرهٔ تنظیم کپی متوقف' })).toBeDisabled();
   await page.getByLabel('سقف هر خرید (SOL)', { exact: true }).fill('0.05');
@@ -152,6 +157,148 @@ test('trader choice survives browser wallet approval, account login and saves ex
   await expect(
     page.locator('.ct-saved').getByRole('button', { name: 'فعال‌سازی', exact: true }),
   ).toBeDisabled();
+});
+
+test('selecting and reselecting a wallet reveals its setup without submitting a trade', async ({
+  page,
+}, info) => {
+  await setup(page);
+  let submissions = 0;
+  await page.route(/\/api\/copy-trades(?:\/drafts)?$/, async (route) => {
+    if (route.request().method() !== 'GET') submissions += 1;
+    await route.fulfill({ json: [] });
+  });
+  await page.goto('/copy-trading?lang=fa');
+  const choose = page.getByRole('button', { name: 'تنظیم کپی', exact: true }).first();
+  await choose.click();
+  await expect(choose).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#copy-setup')).toBeFocused();
+  await expect(page.locator('#copy-setup-title')).toBeInViewport();
+  await expect(page.locator('.ct-selected-wallet')).toContainText(first);
+  await expect(page.locator('.ct-selected-wallet')).toContainText('مرحلهٔ بعد: وارد حساب شو');
+  await expect(page.getByTestId('copy-engine-state')).toHaveText('متوقف');
+  await choose.click();
+  await expect(page.locator('#copy-setup')).toBeFocused();
+  await expect(page.locator('#copy-setup-title')).toBeInViewport();
+  expect(submissions).toBe(0);
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
+    true,
+  );
+  await choose.click();
+  await page.screenshot({ path: info.outputPath('selected-copy-wallet.png') });
+});
+
+test('delayed trader cards preserve the deep-linked setup and refresh preserves input focus', async ({
+  page,
+}) => {
+  await setup(page);
+  let reads = 0;
+  let finish = () => {};
+  await page.route('**/api/public/copy-trading/traders?*', async (route) => {
+    reads += 1;
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    await route.fulfill({ json: traderFixture() });
+  });
+  await page.goto('/copy-trading?lang=en&trader=' + first + '#copy-setup');
+  await expect(page.locator('#copy-setup')).toBeFocused();
+  await expect(page.locator('#copy-setup-title')).toBeInViewport();
+  await expect.poll(() => reads).toBe(1);
+  finish();
+  await expect(page.getByTestId('trader-card')).toHaveCount(2);
+  await expect(page.locator('#copy-setup-title')).toBeInViewport();
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect.poll(() => reads).toBe(2);
+  const input = page.getByLabel('Maximum per buy (SOL)', { exact: true });
+  await input.focus();
+  finish();
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
+  await expect(input).toBeFocused();
+});
+
+test('copy address writes the full selected address and announces success', async ({ page }) => {
+  await setup(page);
+  await page.addInitScript(() => {
+    const values: string[] = [];
+    Object.assign(window, { __copiedAddresses: values });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          values.push(value);
+        },
+      },
+    });
+  });
+  await page.goto('/copy-trading?lang=fa&trader=' + first + '#copy-setup');
+  const summary = page.locator('.ct-selected-wallet');
+  await summary.getByRole('button', { name: 'کپی آدرس', exact: true }).click();
+  await expect(summary.getByRole('button', { name: 'کپی شد!', exact: true })).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __copiedAddresses: string[] }).__copiedAddresses,
+    ),
+  ).toEqual([first]);
+});
+
+test('blocked clipboard APIs offer a selected manual address without claiming success', async ({
+  page,
+}) => {
+  await setup(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async () => {
+          throw new DOMException('Denied', 'NotAllowedError');
+        },
+      },
+    });
+    document.execCommand = () => false;
+  });
+  await page.goto('/copy-trading?lang=en&trader=' + first + '#copy-setup');
+  const summary = page.locator('.ct-selected-wallet');
+  await summary.getByRole('button', { name: 'Copy address', exact: true }).click();
+  const manual = summary.getByRole('textbox', { name: 'Address to copy manually' });
+  await expect(summary.getByRole('alert')).toContainText('Automatic copying failed');
+  await expect(manual).toHaveValue(first);
+  await expect(manual).toBeFocused();
+  expect(
+    await manual.evaluate((input: HTMLInputElement) => [input.selectionStart, input.selectionEnd]),
+  ).toEqual([0, first.length]);
+  await expect(summary.getByRole('button', { name: 'Copied!', exact: true })).toHaveCount(0);
+});
+
+test('legacy clipboard fallback copies the full address and restores button focus', async ({
+  page,
+}) => {
+  await setup(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    Object.assign(window, { __legacyAddress: '' });
+    document.execCommand = (command: string) => {
+      if (command !== 'copy') return false;
+      Object.assign(window, {
+        __legacyAddress: (document.activeElement as HTMLTextAreaElement).value,
+      });
+      return true;
+    };
+  });
+  await page.goto('/copy-trading?lang=en&trader=' + first + '#copy-setup');
+  const button = page
+    .locator('.ct-selected-wallet')
+    .getByRole('button', { name: 'Copy address', exact: true });
+  // Keyboard focus must survive the temporary textarea, including Safari taps.
+  await button.focus();
+  await button.click();
+  await expect(button).toHaveText('Copied!');
+  await expect(button).toBeFocused();
+  expect(
+    await page.evaluate(() => (window as unknown as { __legacyAddress: string }).__legacyAddress),
+  ).toBe(first);
+  await expect(page.locator('textarea')).toHaveCount(0);
 });
 
 test('period changes use the correct window and search never replaces loss with volume', async ({

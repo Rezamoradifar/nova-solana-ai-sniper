@@ -504,6 +504,73 @@
   border-radius: 14px;
   background: radial-gradient(ellipse at 95% 0, #dec59107, transparent 60%), #12120f;
 }
+.ct-setup:focus-visible {
+  outline: 2px solid var(--ct-gold, #dec591);
+  outline-offset: 4px;
+}
+.ct-selected-wallet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  margin-bottom: 22px;
+  border: 1px solid #dec59140;
+  border-radius: 10px;
+  background: #dec59109;
+}
+.ct-selected-wallet > div {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.ct-selected-wallet strong {
+  font-size: 13px;
+  color: #dec591;
+}
+.ct-selected-wallet code {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-block: 10px;
+  color: #e4d7bd;
+  font-size: 12px;
+}
+.ct-selected-wallet p {
+  color: #a69a83;
+  font-size: 12px;
+  line-height: 1.9;
+}
+.ct-selected-wallet .copy-address-control {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.ct-selected-wallet .copy-address-control > button {
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid #dec59140;
+  border-radius: 8px;
+  color: #dec591;
+  font-size: 13px;
+}
+.copy-address-control {
+  display: inline-block;
+  max-width: 100%;
+}
+.copy-address-fallback {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  color: #e4b393;
+  font-size: 12px;
+}
+.copy-address-fallback input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #dec59140;
+  background: #14140f;
+  color: #e4d7bd;
+  font-size: 16px;
+}
 .ct-connection-steps {
   display: flex;
   flex-direction: column;
