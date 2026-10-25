@@ -89,9 +89,10 @@ test('real performance cards distinguish live analytics, losses and a paused cop
   await page.screenshot({ path: info.outputPath('copy-traders-fa.png'), fullPage: true });
   await page.screenshot({ path: info.outputPath('copy-traders-fa-viewport.png') });
   await page.setViewportSize({ width: 320, height: 740 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
-    true,
-  );
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
+    .toBe(true);
+  await expect(page.locator('.wallet-header-link svg')).toBeVisible();
 });
 
 test('trader choice survives browser wallet approval, account login and saves explicitly paused', async ({

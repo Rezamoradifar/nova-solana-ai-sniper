@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { address, secondAddress, mockServices, injectWallet } from './fixtures.js';
 
-const chartScriptUrl = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+const chartScriptUrl =
+  'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
 // Exercise the asynchronous embed boundary without depending on the live vendor's
 // network, market data or cross-origin ResizeObserver implementation.
 const chartScriptFixture = `(() => {
@@ -38,9 +39,7 @@ test('one approved connection and Persian choice survive navigation across every
   await dialog.getByRole('button', { name: 'بستن', exact: true }).click();
   await page.locator('footer').getByRole('link', { name: 'کپی ترید', exact: true }).click();
   await expect(page).toHaveURL(/\/copy-trading$/);
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(
-    'کیف پول‌ها را دنبال کنید؛ با محدودیت کپی کنید.',
-  );
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('همراهِ معامله‌گرهای برتر.');
   await expect(page.getByRole('button', { name: 'اتصال یا مدیریت کیف پول' }).first()).toContainText(
     '1111…1111',
   );
@@ -63,13 +62,11 @@ test('language switch translates connected tools and survives reload in both dir
   await page.goto('/copy-trading');
   await page.getByRole('button', { name: 'تغییر زبان به فارسی' }).click();
   await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('کیف پول‌ها را دنبال کنید');
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('همراهِ معامله‌گرهای برتر.');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fa');
   await page.getByRole('button', { name: 'Switch to English' }).click();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(
-    'Track conviction. Copy with limits.',
-  );
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Follow the edge.');
   await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
 });
 
@@ -177,7 +174,9 @@ test('a delayed chart response cannot access a removed route and the next visit 
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   let requested = false;
   await page.route(chartScriptUrl, async (route) => {
     requested = true;
@@ -193,12 +192,19 @@ test('a delayed chart response cannot access a removed route and the next visit 
     await expect(page.getByTitle('نمودار بازار TradingView', { exact: true })).toHaveCount(0);
     release();
     for (let visit = 0; visit < 2; visit++) {
-      await page.locator('footer').getByRole('link', { name: 'محیط معاملاتی', exact: true }).click();
+      await page
+        .locator('footer')
+        .getByRole('link', { name: 'محیط معاملاتی', exact: true })
+        .click();
       const chart = page.getByTitle('نمودار بازار TradingView', { exact: true });
       await expect(chart).toHaveCount(1);
-      const embeddedChart = chart.contentFrame().getByTitle('Fixture TradingView chart', { exact: true });
+      const embeddedChart = chart
+        .contentFrame()
+        .getByTitle('Fixture TradingView chart', { exact: true });
       await expect(embeddedChart).toHaveAttribute('data-symbol', 'COINBASE:SOLUSD');
-      await expect(embeddedChart.contentFrame().locator('body')).toHaveText('Approved chart fixture');
+      await expect(embeddedChart.contentFrame().locator('body')).toHaveText(
+        'Approved chart fixture',
+      );
       await page.locator('footer a[href="/terminal/copy"]').click();
     }
     expect(errors).toEqual([]);

@@ -643,11 +643,25 @@
   cursor: pointer;
 }
 .ct-consent input {
+  appearance: none;
+  -webkit-appearance: none;
   accent-color: #dec591;
+  height: 18px;
   min-height: 18px;
   width: 18px;
   flex: none;
-  margin-top: 3px;
+  padding: 0;
+  margin: 3px 0 0;
+  border: 1px solid #b9a06d;
+  border-radius: 4px;
+  background: #0d0e0b;
+  cursor: pointer;
+}
+.ct-consent input:checked {
+  border-color: #dec591;
+  background: #dec591
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3 8 3 3 7-7' fill='none' stroke='%2319150d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 13px 13px no-repeat;
 }
 .ct-submit {
   grid-column: 1/-1;
