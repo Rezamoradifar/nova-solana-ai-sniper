@@ -88,6 +88,8 @@ test('real performance cards distinguish live analytics, losses and a paused cop
   await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: info.outputPath('copy-traders-fa.png'), fullPage: true });
   await page.screenshot({ path: info.outputPath('copy-traders-fa-viewport.png') });
+  await cards.first().scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath('copy-traders-profit-viewport.png') });
   await page.setViewportSize({ width: 320, height: 740 });
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1))
@@ -218,7 +220,9 @@ test('ready execution still requires an explicit reviewed account setup before e
   await expect(page.getByTestId('copy-engine-state')).toHaveText('READY');
   await expect(page.getByRole('button', { name: 'Enable copy within limits' })).toBeDisabled();
   expect(submitted).toBeNull();
-  await page.getByRole('checkbox').check();
+  await page.getByRole('checkbox').focus();
+  await page.keyboard.press('Space');
+  await expect(page.getByRole('checkbox')).toBeChecked();
   await page.getByRole('button', { name: 'Enable copy within limits' }).click();
   await expect
     .poll(() => submitted)

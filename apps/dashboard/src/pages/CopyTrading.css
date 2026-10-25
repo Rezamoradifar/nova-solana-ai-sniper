@@ -641,27 +641,29 @@
   color: #b5a98f;
   line-height: 1.9;
   cursor: pointer;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  text-align: start;
+  border: 0;
+  background: transparent;
 }
-.ct-consent input {
-  appearance: none;
-  -webkit-appearance: none;
-  accent-color: #dec591;
-  height: 18px;
-  min-height: 18px;
-  width: 18px;
+.ct-consent-box {
+  display: grid;
+  place-items: center;
+  height: 22px;
+  width: 22px;
   flex: none;
   padding: 0;
   margin: 3px 0 0;
   border: 1px solid #b9a06d;
   border-radius: 4px;
   background: #0d0e0b;
-  cursor: pointer;
 }
-.ct-consent input:checked {
+.ct-consent[aria-checked='true'] .ct-consent-box {
   border-color: #dec591;
-  background: #dec591
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3 8 3 3 7-7' fill='none' stroke='%2319150d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
-    center / 13px 13px no-repeat;
+  background: #dec591;
+  color: #19150d;
 }
 .ct-submit {
   grid-column: 1/-1;
@@ -869,6 +871,10 @@
   }
 }
 @media (max-width: 700px) {
+  .ct-search input,
+  .ct-sort select {
+    font-size: 16px;
+  }
   .ct-page {
     padding-top: 32px !important;
   }
@@ -1013,7 +1019,7 @@
     line-height: 1.9;
   }
   .nova-site .ct-copy-form input:not([type='checkbox']) {
-    font-size: 11px;
+    font-size: 16px;
     padding: 11px;
   }
   .ct-copy-form .ct-consent {

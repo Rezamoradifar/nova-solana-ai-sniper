@@ -677,12 +677,16 @@ export default function PublicCopyTrading() {
             {runtime?.limits?.maxOpenPositions ?? '—'} {t('open positions', 'پوزیشن باز')} ·{' '}
             {(runtime?.limits?.slippageBps ?? 0) / 100}% {t('slippage', 'لغزش')}
           </p>
-          <label className="ct-consent">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(event) => setConfirmed(event.target.checked)}
-            />
+          <button
+            className="ct-consent"
+            type="button"
+            role="checkbox"
+            aria-checked={confirmed}
+            onClick={() => setConfirmed((value) => !value)}
+          >
+            <span className="ct-consent-box" aria-hidden="true">
+              {confirmed ? <Icon name="check" size={16} /> : null}
+            </span>
             <span>
               {liveReady
                 ? t(
@@ -694,7 +698,7 @@ export default function PublicCopyTrading() {
                     'این تریدر را بررسی کرده‌ام و تنظیمات را در حالت متوقف ذخیره می‌کنم.',
                   )}
             </span>
-          </label>
+          </button>
           {selectedConfig ? (
             <p className="ct-feedback">
               {t(
