@@ -193,24 +193,28 @@ test('delayed trader cards preserve the deep-linked setup and refresh preserves 
   page,
 }) => {
   await setup(page);
-  let reads = 0;
-  let finish = () => {};
+  let delayed = true;
+  const pending: Array<() => void> = [];
+  const finish = () => {
+    delayed = false;
+    pending.splice(0).forEach((resolve) => resolve());
+  };
   await page.route('**/api/public/copy-trading/traders?*', async (route) => {
-    reads += 1;
-    await new Promise<void>((resolve) => {
-      finish = resolve;
-    });
+    // Strict Mode can cancel and restart the initial request. Gate the whole
+    // initial batch, rather than asserting a particular number of attempts.
+    if (delayed) await new Promise<void>((resolve) => pending.push(resolve));
     await route.fulfill({ json: traderFixture() });
   });
   await page.goto('/copy-trading?lang=en&trader=' + first + '#copy-setup');
   await expect(page.locator('#copy-setup')).toBeFocused();
   await expect(page.locator('#copy-setup-title')).toBeInViewport();
-  await expect.poll(() => reads).toBe(1);
+  await expect.poll(() => pending.length > 0).toBe(true);
   finish();
   await expect(page.getByTestId('trader-card')).toHaveCount(2);
   await expect(page.locator('#copy-setup-title')).toBeInViewport();
+  delayed = true;
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect.poll(() => reads).toBe(2);
+  await expect.poll(() => pending.length > 0).toBe(true);
   const input = page.getByLabel('Maximum per buy (SOL)', { exact: true });
   await input.focus();
   finish();

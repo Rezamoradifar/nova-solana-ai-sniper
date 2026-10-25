@@ -38,8 +38,9 @@ export function CopyButton({ text, label }: { text: string; label?: string }) {
         onClick={onClick}
         className="text-xs text-accent hover:underline"
         title={localize('Copy to clipboard')}
+        aria-live="polite"
       >
-        <span role="status">{copied ? localize('Copied!') : (label ?? localize('Copy'))}</span>
+        {copied ? localize('Copied!') : (label ?? localize('Copy'))}
       </button>
       {failed && (
         <span className="copy-address-fallback">
