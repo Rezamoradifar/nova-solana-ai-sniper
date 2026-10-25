@@ -91,7 +91,7 @@ export default function PublicCopyTrading() {
   const target = params.get('trader') ?? '';
   const [copyPercent, setCopyPercent] = useState('25');
   const [maxSol, setMaxSol] = useState('0.10');
-  const [confirmed, setConfirmed] = useState(false);
+  const [reviewed, setReviewed] = useState<string | null>(null);
   const [account, setAccount] = useState<AccountState | null>(null);
   const [accountRevision, setAccountRevision] = useState(0);
   const [notice, setNotice] = useState<{ ownerId: string | null; text: string } | null>(null);
@@ -108,6 +108,20 @@ export default function PublicCopyTrading() {
   const limit = runtime?.limits?.maxBuySol ?? 0.1;
   const amount = Number(maxSol);
   const size = Number(copyPercent);
+  const reviewContext = JSON.stringify([
+    ownerId,
+    activeWallet?.id,
+    target,
+    size,
+    amount,
+    liveReady,
+    limit,
+    runtime?.limits?.maxDailyBuys,
+    runtime?.limits?.maxOpenPositions,
+    runtime?.limits?.slippageBps,
+  ]);
+  const confirmed = reviewed === reviewContext;
+  const setConfirmed = (value: boolean) => setReviewed(value ? reviewContext : null);
   const validSize =
     Number.isFinite(amount) &&
     amount > 0 &&
@@ -684,7 +698,7 @@ export default function PublicCopyTrading() {
             type="button"
             role="checkbox"
             aria-checked={confirmed}
-            onClick={() => setConfirmed((value) => !value)}
+            onClick={() => setConfirmed(!confirmed)}
           >
             <span className="ct-consent-box" aria-hidden="true">
               {confirmed ? <Icon name="check" size={16} /> : null}

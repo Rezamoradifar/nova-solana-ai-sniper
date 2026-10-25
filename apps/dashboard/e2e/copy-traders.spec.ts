@@ -215,6 +215,7 @@ test('ready execution still requires an explicit reviewed account setup before e
     } else await route.fulfill({ json: [] });
   });
   await page.goto('/copy-trading?lang=en&trader=' + first);
+  await expect(page.locator('.ct-server-limits')).toContainText('10');
   await expect(page.getByTestId('copy-engine-state')).toHaveText('READY');
   await expect(page.getByRole('button', { name: 'Enable copy within limits' })).toBeDisabled();
   expect(submitted).toBeNull();
@@ -239,9 +240,39 @@ test('an older API cannot interpret a paused setup as an active copy instruction
     route.fulfill({ status: 404, json: { error: 'Copy API upgrade required' } }),
   );
   await page.goto('/copy-trading?lang=en&trader=' + first);
+  await expect(page.locator('.ct-server-limits')).toContainText('10');
   await page.getByRole('checkbox').check();
   await page.getByRole('button', { name: 'Save paused copy settings' }).click();
   await expect(page.getByText('Copy API upgrade required', { exact: true })).toBeVisible();
   expect(activeWrites).toBe(0);
   await expect(page.locator('.ct-saved')).not.toContainText('DZAa5');
+});
+
+test('a paused review does not authorize live buys after the engine becomes ready', async ({
+  page,
+}) => {
+  await setup(page);
+  await page.addInitScript(() => localStorage.setItem('nova.token', 'test-account-token'));
+  await page.goto('/copy-trading?lang=en&trader=' + first);
+  await expect(page.locator('.ct-server-limits')).toContainText('10');
+  await page.getByRole('checkbox').check();
+  await expect(page.getByRole('button', { name: 'Save paused copy settings' })).toBeEnabled();
+  await page.route('**/api/public/copy-trading', (route) =>
+    route.fulfill({
+      json: {
+        executionMode: 'live',
+        copyWatcherReady: true,
+        liveExecutionEnabled: true,
+        watcher: { running: true, healthy: true },
+        buyReadiness: { ready: true, blockers: [], checkedAt: Date.now() },
+        localWallets: [],
+        gmgn: { status: 'connected', trades: [], wallets: [] },
+        limits: { maxBuySol: 0.1, maxDailyBuys: 10, maxOpenPositions: 3, slippageBps: 150 },
+      },
+    }),
+  );
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByTestId('copy-engine-state')).toHaveText('READY');
+  await expect(page.getByRole('checkbox')).not.toBeChecked();
+  await expect(page.getByRole('button', { name: 'Enable copy within limits' })).toBeDisabled();
 });
