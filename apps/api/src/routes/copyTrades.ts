@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, RouteHandlerMethod } from 'fastify';
 import type { PrismaClient } from '@prisma/client';
 import { isValidSolanaPublicKey } from '@nova/shared';
 import { z } from 'zod';
@@ -7,7 +7,6 @@ export const createCopySchema = z.object({
   targetAddress: z.string().trim().refine(isValidSolanaPublicKey, 'Invalid Solana wallet address'),
   copyPercentSize: z.number().finite().positive().max(100).default(25),
   maxAmountSol: z.number().finite().positive().max(10).default(0.1),
-  enabled: z.boolean().default(true),
 });
 
 export async function isInternalCopyTarget(prisma: Pick<PrismaClient, 'wallet'>, address: string) {
@@ -34,30 +33,36 @@ export default async function copyTradeRoutes(fastify: FastifyInstance) {
     return user && !user.isSuspended && !user.deletedAt && user.wallets.length > 0;
   }
 
-  fastify.post('/copy-trades', guard, async (req, reply) => {
-    const parsed = createCopySchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
-    const { enabled, ...body } = parsed.data;
-    if (!(await accountReady(req.user.userId))) {
-      return reply.code(409).send({ error: 'An active account and trading wallet are required' });
-    }
-    if (await isInternalCopyTarget(fastify.prisma, body.targetAddress))
-      return reply.code(400).send({ error: 'Internal GSP wallets cannot be copy targets' });
-    const existing = await fastify.prisma.copyTradeConfig.findFirst({
-      where: { userId: req.user.userId, targetAddress: body.targetAddress },
-    });
-    if (existing)
-      return reply.code(409).send({ error: 'Wallet already configured; use Resume if paused' });
-    const config = await fastify.prisma.copyTradeConfig.create({
-      data: {
-        ...body,
-        maxAmountSol: Math.min(body.maxAmountSol, fastify.config.COPY_TRADING_MAX_BUY_SOL),
-        userId: req.user.userId,
-        isActive: enabled,
-      },
-    });
-    return reply.code(201).send(config);
-  });
+  const createConfig =
+    (isActive: boolean): RouteHandlerMethod =>
+    async (req, reply) => {
+      const parsed = createCopySchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
+      const body = parsed.data;
+      if (!(await accountReady(req.user.userId))) {
+        return reply.code(409).send({ error: 'An active account and trading wallet are required' });
+      }
+      if (await isInternalCopyTarget(fastify.prisma, body.targetAddress))
+        return reply.code(400).send({ error: 'Internal GSP wallets cannot be copy targets' });
+      const existing = await fastify.prisma.copyTradeConfig.findFirst({
+        where: { userId: req.user.userId, targetAddress: body.targetAddress },
+      });
+      if (existing)
+        return reply.code(409).send({ error: 'Wallet already configured; use Resume if paused' });
+      const config = await fastify.prisma.copyTradeConfig.create({
+        data: {
+          ...body,
+          maxAmountSol: Math.min(body.maxAmountSol, fastify.config.COPY_TRADING_MAX_BUY_SOL),
+          userId: req.user.userId,
+          isActive,
+        },
+      });
+      return reply.code(201).send(config);
+    };
+  fastify.post('/copy-trades', guard, createConfig(true));
+  // A distinct endpoint fails closed against an older API during a rollback;
+  // an ignored JSON property must never turn a paused setup into an active one.
+  fastify.post('/copy-trades/drafts', guard, createConfig(false));
 
   fastify.put('/copy-trades/:id/status', guard, async (req, reply) => {
     const parsed = z.object({ enabled: z.boolean() }).safeParse(req.body);

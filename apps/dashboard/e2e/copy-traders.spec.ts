@@ -104,16 +104,16 @@ test('trader choice survives browser wallet approval, account login and saves ex
   await injectWallet(page);
   const writes: unknown[] = [];
   let saved: unknown[] = [];
-  await page.route('**/api/copy-trades', async (route) => {
+  await page.route(/\/api\/copy-trades(?:\/drafts)?$/, async (route) => {
     if (route.request().method() === 'POST') {
       const body = route.request().postDataJSON();
-      writes.push(body);
+      writes.push({ path: new URL(route.request().url()).pathname, body });
       const row = {
         id: 'cfg',
         targetAddress: body.targetAddress,
         copyPercentSize: body.copyPercentSize,
         maxAmountSol: body.maxAmountSol,
-        isActive: body.enabled,
+        isActive: !route.request().url().endsWith('/drafts'),
       };
       saved = [row];
       await route.fulfill({ status: 201, json: row });
@@ -145,10 +145,8 @@ test('trader choice survives browser wallet approval, account login and saves ex
   await page.getByRole('button', { name: 'ذخیرهٔ تنظیم کپی متوقف' }).click();
   await expect.poll(() => writes.length).toBe(1);
   expect(writes[0]).toEqual({
-    targetAddress: first,
-    copyPercentSize: 25,
-    maxAmountSol: 0.05,
-    enabled: false,
+    path: '/api/copy-trades/drafts',
+    body: { targetAddress: first, copyPercentSize: 25, maxAmountSol: 0.05 },
   });
   await expect(page.locator('.ct-saved')).toContainText('متوقف');
   await expect(
@@ -224,7 +222,26 @@ test('ready execution still requires an explicit reviewed account setup before e
   await page.keyboard.press('Space');
   await expect(page.getByRole('checkbox')).toBeChecked();
   await page.getByRole('button', { name: 'Enable copy within limits' }).click();
-  await expect
-    .poll(() => submitted)
-    .toMatchObject({ targetAddress: first, enabled: true, maxAmountSol: 0.1 });
+  await expect.poll(() => submitted).toMatchObject({ targetAddress: first, maxAmountSol: 0.1 });
+});
+
+test('an older API cannot interpret a paused setup as an active copy instruction', async ({
+  page,
+}) => {
+  await setup(page);
+  await page.addInitScript(() => localStorage.setItem('nova.token', 'test-account-token'));
+  let activeWrites = 0;
+  await page.route('**/api/copy-trades', (route) => {
+    if (route.request().method() === 'POST') activeWrites++;
+    return route.fulfill({ json: [] });
+  });
+  await page.route('**/api/copy-trades/drafts', (route) =>
+    route.fulfill({ status: 404, json: { error: 'Copy API upgrade required' } }),
+  );
+  await page.goto('/copy-trading?lang=en&trader=' + first);
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'Save paused copy settings' }).click();
+  await expect(page.getByText('Copy API upgrade required', { exact: true })).toBeVisible();
+  expect(activeWrites).toBe(0);
+  await expect(page.locator('.ct-saved')).not.toContainText('DZAa5');
 });

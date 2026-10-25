@@ -57,6 +57,7 @@ describe('copy account API', () => {
       });
       expect(r.statusCode).toBe(201);
       expect(r.json().maxAmountSol).toBe(0.1);
+      expect(r.json().isActive).toBe(true);
     } finally {
       await app.close();
     }
@@ -66,8 +67,8 @@ describe('copy account API', () => {
     try {
       const r = await app.inject({
         method: 'POST',
-        url: '/copy-trades',
-        payload: { targetAddress: target, enabled: false, maxAmountSol: 0.05 },
+        url: '/copy-trades/drafts',
+        payload: { targetAddress: target, enabled: true, isActive: true, maxAmountSol: 0.05 },
       });
       expect(r.statusCode).toBe(201);
       expect(r.json()).toMatchObject({ isActive: false, maxAmountSol: 0.05 });

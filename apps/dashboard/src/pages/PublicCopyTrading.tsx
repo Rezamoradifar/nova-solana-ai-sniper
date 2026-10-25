@@ -181,12 +181,14 @@ export default function PublicCopyTrading() {
     setBusy({ ownerId, address });
     setNotice(null);
     try {
-      const created = await api.post<CopyConfig>('/copy-trades', {
-        targetAddress: address,
-        copyPercentSize: size,
-        maxAmountSol: amount,
-        enabled: liveReady,
-      });
+      const created = await api.post<CopyConfig>(
+        liveReady ? '/copy-trades' : '/copy-trades/drafts',
+        {
+          targetAddress: address,
+          copyPercentSize: size,
+          maxAmountSol: amount,
+        },
+      );
       setAccount((value) =>
         value?.ownerId === ownerId ? { ...value, configs: [...value.configs, created] } : value,
       );
