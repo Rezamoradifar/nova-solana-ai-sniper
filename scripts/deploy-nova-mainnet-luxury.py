@@ -96,12 +96,16 @@ class Installer(web.Installer):
             detail, code, returncode = str(error), 'DOCKER_UNAVAILABLE', None
         # Never print arbitrary daemon output, references or container configuration.
         path = backup / 'image-retention.private.jsonl'
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, 'a') as stream:
-            os.fchmod(stream.fileno(), 0o600)
-            stream.write(json.dumps({'service': service, 'step': step, 'code': code,
-                                     'returncode': returncode, 'detail': detail[:8192]}) + '\n')
         print('NOVA_IMAGE_CHECK=' + service + ':' + step + ':' + code, flush=True)
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, 'a') as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(json.dumps({'service': service, 'step': step, 'code': code,
+                                         'returncode': returncode, 'detail': detail[:8192]}) + '\n')
+        except OSError:
+            # A full disk must not suppress the very error we are diagnosing.
+            print('NOVA_IMAGE_JOURNAL=UNAVAILABLE', flush=True)
         return None, code
 
     def verify_retained_images(self, backup, images, tags):
@@ -147,7 +151,7 @@ class Installer(web.Installer):
                         error = error or 'IMAGE_ID_MISMATCH'
                 last_error = error or last_error
             require(retained, 'Cannot retain original ' + service + ' image (' + last_error +
-                    '); no service replacement attempted. Private Docker details: ' +
+                    '); no service replacement attempted. Private journal (when writable): ' +
                     str(backup / 'image-retention.private.jsonl'))
             tags[service] = tag
         self.verify_retained_images(backup, images, tags)

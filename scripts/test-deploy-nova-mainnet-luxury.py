@@ -198,6 +198,13 @@ class MainnetDeployment(unittest.TestCase):
                 with patch.object(deploy.subprocess,'run',side_effect=error):
                     self.assertEqual(value.image_command(['image','inspect',IMAGE_A],Path(directory),'api','inspect'),(None,code))
 
+    def test_full_disk_diagnostic_survives_an_unwritable_private_journal(self):
+        value=self.installer();output=io.StringIO()
+        with redirect_stdout(output),patch.object(deploy.subprocess,'run',return_value=SimpleNamespace(returncode=1,stdout='',stderr='no space left on device')),patch.object(deploy.os,'open',side_effect=OSError('no space left on device')):
+            self.assertEqual(value.image_command(['image','tag',IMAGE_A,'backup:test'],Path('/private'),'api','tag-bare-id'),(None,'DISK_FULL'))
+        self.assertIn('api:tag-bare-id:DISK_FULL',output.getvalue())
+        self.assertIn('NOVA_IMAGE_JOURNAL=UNAVAILABLE',output.getvalue())
+
     def test_retention_failure_prevents_build_replacement_and_premature_restore_command(self):
         value=self.installer();value.args.release='c'*40
         value.rows={s:{'id':s+'-container','image':IMAGE_A} for s in deploy.TARGETS}
