@@ -186,6 +186,8 @@ test('selecting and reselecting a wallet reveals its setup without submitting a 
     true,
   );
   await choose.click();
+  await expect(page.locator('#copy-setup')).toBeFocused();
+  await expect(page.locator('#copy-setup-title')).toBeInViewport();
   await page.screenshot({ path: info.outputPath('selected-copy-wallet.png') });
 });
 
@@ -291,9 +293,10 @@ test('legacy clipboard fallback copies the full address and restores button focu
     };
   });
   await page.goto('/copy-trading?lang=en&trader=' + first + '#copy-setup');
-  const button = page
-    .locator('.ct-selected-wallet')
-    .getByRole('button', { name: 'Copy address', exact: true });
+  // The accessible name changes to Copied!; keep the locator stable while
+  // asserting both labels, rather than filtering out the successful button.
+  const button = page.locator('.ct-selected-wallet').getByRole('button');
+  await expect(button).toHaveAccessibleName('Copy address');
   // Keyboard focus must survive the temporary textarea, including Safari taps.
   await button.focus();
   await button.click();
