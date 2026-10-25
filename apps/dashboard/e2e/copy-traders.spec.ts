@@ -1,0 +1,225 @@
+import { test, expect, type Page } from '@playwright/test';
+import { mockServices, injectWallet } from './fixtures.js';
+
+const first = 'DZAa55HwXgv5hStwaTEJGXZz1DhHejvpb7Yr762urXam';
+const second = '7BWy2mtHNdnWLMZejk5E5sfDDSQfXsjzjy9jPzeDyYk5';
+function traderFixture(period = '7d', age = 0) {
+  return {
+    source: 'GMGN',
+    chain: 'solana',
+    scope: 'active_smart_money_sample',
+    period,
+    status: 'connected',
+    updatedAt: Date.now() - age,
+    performanceUpdatedAt: Date.now() - age,
+    refreshMs: 30000,
+    traders: [
+      {
+        address: first,
+        name: 'Verified Alpha',
+        tags: ['smart_degen', 'kol'],
+        observedTrades: 8,
+        observedVolumeUsd: 12000,
+        lastActivityAt: Date.now() - 20000,
+        performance: {
+          realizedPnlUsd: period === '7d' ? 2677.72 : 7123.45,
+          roiPct: 7.05,
+          winRatePct: 65.2,
+          buys: 612,
+          sells: 166,
+        },
+      },
+      {
+        address: second,
+        name: 'Active Beta',
+        tags: ['axiom'],
+        observedTrades: 3,
+        observedVolumeUsd: 90000,
+        lastActivityAt: Date.now() - 40000,
+        performance: { realizedPnlUsd: -125.5, roiPct: -3.5, winRatePct: 37.5, buys: 12, sells: 9 },
+      },
+    ],
+  };
+}
+async function setup(page: Page, live = false) {
+  await mockServices(page);
+  await page.route('**/api/public/copy-trading', (route) =>
+    route.fulfill({
+      json: {
+        executionMode: live ? 'live' : 'disabled',
+        copyWatcherReady: live,
+        liveExecutionEnabled: live,
+        watcher: { running: live, healthy: live },
+        buyReadiness: {
+          ready: live,
+          blockers: live ? [] : ['COPY_EXECUTION_DISABLED'],
+          checkedAt: Date.now(),
+        },
+        localWallets: [],
+        recommendations: [],
+        gmgn: { status: 'connected', trades: [], wallets: [] },
+        limits: { maxBuySol: 0.1, maxDailyBuys: 10, maxOpenPositions: 3, slippageBps: 150 },
+      },
+    }),
+  );
+  await page.route('**/api/public/copy-trading/traders?*', (route) =>
+    route.fulfill({
+      json: traderFixture(new URL(route.request().url()).searchParams.get('period') ?? '7d'),
+    }),
+  );
+}
+
+test('real performance cards distinguish live analytics, losses and a paused copy engine', async ({
+  page,
+}, info) => {
+  await setup(page);
+  await page.goto('/copy-trading?lang=fa');
+  await expect(page.getByTestId('copy-feed-state')).toHaveText('LIVE DATA');
+  await expect(page.getByTestId('copy-engine-state')).toHaveText('متوقف');
+  const cards = page.getByTestId('trader-card');
+  await expect(cards).toHaveCount(2);
+  await expect(cards.first()).toContainText('Verified Alpha');
+  await expect(cards.first().getByTestId('trader-pnl')).toHaveText('+$2,677.72');
+  await expect(cards.last().getByTestId('trader-pnl')).toHaveText('-$125.50');
+  await expect(cards.last().getByTestId('trader-pnl')).toHaveCSS('color', 'rgb(237, 155, 152)');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
+    true,
+  );
+  await page.evaluate(() => document.fonts.ready);
+  await page.screenshot({ path: info.outputPath('copy-traders-fa.png'), fullPage: true });
+  await page.screenshot({ path: info.outputPath('copy-traders-fa-viewport.png') });
+  await page.setViewportSize({ width: 320, height: 740 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
+    true,
+  );
+});
+
+test('trader choice survives browser wallet approval, account login and saves explicitly paused', async ({
+  page,
+}) => {
+  await setup(page);
+  await injectWallet(page);
+  const writes: unknown[] = [];
+  let saved: unknown[] = [];
+  await page.route('**/api/copy-trades', async (route) => {
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON();
+      writes.push(body);
+      const row = {
+        id: 'cfg',
+        targetAddress: body.targetAddress,
+        copyPercentSize: body.copyPercentSize,
+        maxAmountSol: body.maxAmountSol,
+        isActive: body.enabled,
+      };
+      saved = [row];
+      await route.fulfill({ status: 201, json: row });
+    } else await route.fulfill({ json: saved });
+  });
+  await page.goto('/copy-trading?lang=fa');
+  await page.getByRole('button', { name: 'تنظیم کپی', exact: true }).first().click();
+  await expect(page.getByLabel('آدرس کیف پول تریدر', { exact: true })).toHaveValue(first);
+  await page
+    .locator('.ct-connection-steps')
+    .getByRole('button', { name: 'اتصال یا مدیریت کیف پول' })
+    .click();
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: /Phantom/ })
+    .click();
+  await page.getByRole('dialog').getByRole('button', { name: 'بستن', exact: true }).click();
+  expect(writes).toEqual([]);
+  await page.locator('.ct-copy-form').getByRole('link', { name: 'ورود و ادامه' }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await page.getByLabel('ایمیل', { exact: true }).fill('user@example.com');
+  await page.getByLabel('رمز عبور', { exact: true }).fill('test-password-only');
+  await page.getByRole('button', { name: 'ورود', exact: true }).click();
+  await expect(page.getByLabel('آدرس کیف پول تریدر', { exact: true })).toHaveValue(first);
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(page.getByRole('button', { name: 'ذخیرهٔ تنظیم کپی متوقف' })).toBeDisabled();
+  await page.getByLabel('سقف هر خرید (SOL)', { exact: true }).fill('0.05');
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'ذخیرهٔ تنظیم کپی متوقف' }).click();
+  await expect.poll(() => writes.length).toBe(1);
+  expect(writes[0]).toEqual({
+    targetAddress: first,
+    copyPercentSize: 25,
+    maxAmountSol: 0.05,
+    enabled: false,
+  });
+  await expect(page.locator('.ct-saved')).toContainText('متوقف');
+  await expect(
+    page.locator('.ct-saved').getByRole('button', { name: 'فعال‌سازی', exact: true }),
+  ).toBeDisabled();
+});
+
+test('period changes use the correct window and search never replaces loss with volume', async ({
+  page,
+}) => {
+  await setup(page);
+  await page.goto('/copy-trading?lang=en');
+  await expect(page.getByTestId('trader-pnl').first()).toHaveText('+$2,677.72');
+  await page.getByRole('button', { name: '30D', exact: true }).click();
+  await expect(page.getByTestId('trader-pnl').first()).toHaveText('+$7,123.45');
+  await page.getByLabel('Search traders', { exact: true }).fill('Beta');
+  await expect(page.getByTestId('trader-card')).toHaveCount(1);
+  await expect(page.getByTestId('trader-pnl')).toHaveText('-$125.50');
+});
+
+test('stale and failed analytics never keep a live badge while old values stay labeled', async ({
+  page,
+}) => {
+  await setup(page);
+  await page.route('**/api/public/copy-trading/traders?*', (route) =>
+    route.fulfill({ json: traderFixture('7d', 120000) }),
+  );
+  await page.goto('/copy-trading?lang=en');
+  await expect(page.getByTestId('trader-pnl').first()).toHaveText('+$2,677.72');
+  await expect(page.getByTestId('copy-feed-state')).not.toHaveText('LIVE DATA');
+  await page.route('**/api/public/copy-trading/traders?*', (route) =>
+    route.fulfill({ status: 503, json: { error: 'unavailable' } }),
+  );
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(
+    page.getByText('Data source temporarily unavailable. Retry to refresh.'),
+  ).toBeVisible();
+  await expect(page.getByTestId('copy-feed-state')).not.toHaveText('LIVE DATA');
+});
+
+test('an account without a trading wallet gets a working setup and return path', async ({
+  page,
+}) => {
+  await setup(page);
+  await page.addInitScript(() => localStorage.setItem('nova.token', 'test-account-token'));
+  await page.route('**/api/wallets', (route) => route.fulfill({ json: [] }));
+  await page.goto('/copy-trading?lang=fa&trader=' + first);
+  await page.getByRole('checkbox').check();
+  await expect(page.getByRole('button', { name: 'ذخیرهٔ تنظیم کپی متوقف' })).toBeDisabled();
+  await page.getByRole('link', { name: 'مدیریت کیف پول‌ها', exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard\/wallets$/);
+  await page.getByRole('link', { name: 'بازگشت به تنظیم کپی' }).click();
+  await expect(page.getByLabel('آدرس کیف پول تریدر', { exact: true })).toHaveValue(first);
+});
+
+test('ready execution still requires an explicit reviewed account setup before enabling', async ({
+  page,
+}) => {
+  await setup(page, true);
+  await page.addInitScript(() => localStorage.setItem('nova.token', 'test-account-token'));
+  let submitted: Record<string, unknown> | null = null;
+  await page.route('**/api/copy-trades', async (route) => {
+    if (route.request().method() === 'POST') {
+      submitted = route.request().postDataJSON();
+      await route.fulfill({ status: 201, json: { ...submitted, id: 'cfg', isActive: true } });
+    } else await route.fulfill({ json: [] });
+  });
+  await page.goto('/copy-trading?lang=en&trader=' + first);
+  await expect(page.getByTestId('copy-engine-state')).toHaveText('READY');
+  await expect(page.getByRole('button', { name: 'Enable copy within limits' })).toBeDisabled();
+  expect(submitted).toBeNull();
+  await page.getByRole('checkbox').check();
+  await page.getByRole('button', { name: 'Enable copy within limits' }).click();
+  await expect
+    .poll(() => submitted)
+    .toMatchObject({ targetAddress: first, enabled: true, maxAmountSol: 0.1 });
+});

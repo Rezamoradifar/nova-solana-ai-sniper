@@ -1,9 +1,10 @@
 name: Nova Solana mainnet and luxury interface
 on:
   push:
-    branches: [codex/nova-solana-luxury-mainnet-20261024]
+    branches: [codex/nova-solana-luxury-mainnet-20261024, codex/nova-copy-live-traders-20261025]
   pull_request:
-    branches: [codex/nova-unified-wallet-language-20261024]
+    branches:
+      [codex/nova-unified-wallet-language-20261024, codex/nova-solana-luxury-mainnet-20261024]
 permissions:
   contents: read
 jobs:
@@ -20,7 +21,7 @@ jobs:
       - run: npx prisma generate --schema apps/api/prisma/schema.prisma
       - run: npx tsc -b apps/api
       - name: Mainnet identity, wallet and copy engine invariants
-        run: npx vitest run apps/dashboard/src apps/api/src/solana/mainnetGateway.test.ts apps/api/src/routes/publicNetwork.test.ts apps/api/src/routes/publicCopyTrading.test.ts apps/api/src/trading/copyTradeWatcher.test.ts apps/api/src/trading/copyTrading.test.ts
+        run: npx vitest run apps/dashboard/src apps/api/src/solana/mainnetGateway.test.ts apps/api/src/routes/publicNetwork.test.ts apps/api/src/routes/publicCopyTrading.test.ts apps/api/src/routes/copyTrades.test.ts apps/api/src/integrations/gmgnTraders.test.ts apps/api/src/trading/copyTradeWatcher.test.ts apps/api/src/trading/copyTrading.test.ts
       - name: Build configured production dashboard
         run: npm run build --workspace @nova/dashboard
         env:

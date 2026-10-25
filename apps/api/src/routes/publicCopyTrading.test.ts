@@ -149,4 +149,26 @@ describe('public copy runtime status', () => {
       await app.close();
     }
   });
+  it('exposes an explicitly unconfigured trader feed and rejects unsupported periods', async () => {
+    const app = Fastify();
+    app.decorate('config', {} as never);
+    await app.register(publicRoutes);
+    try {
+      const response = await app.inject('/public/copy-trading/traders?period=7d');
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.json()).toMatchObject({
+        source: 'GMGN',
+        chain: 'solana',
+        period: '7d',
+        scope: 'active_smart_money_sample',
+        status: 'not_configured',
+        traders: [],
+        performanceUpdatedAt: null,
+      });
+      expect((await app.inject('/public/copy-trading/traders?period=1d')).statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
 });

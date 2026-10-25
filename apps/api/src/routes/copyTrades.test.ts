@@ -61,6 +61,29 @@ describe('copy account API', () => {
       await app.close();
     }
   });
+  it('saves an explicitly paused setup without enabling future buys', async () => {
+    const { app, prisma } = await fixture();
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/copy-trades',
+        payload: { targetAddress: target, enabled: false, maxAmountSol: 0.05 },
+      });
+      expect(r.statusCode).toBe(201);
+      expect(r.json()).toMatchObject({ isActive: false, maxAmountSol: 0.05 });
+      expect(prisma.copyTradeConfig.create).toHaveBeenCalledWith({
+        data: {
+          targetAddress: target,
+          userId: 'mine',
+          copyPercentSize: 25,
+          maxAmountSol: 0.05,
+          isActive: false,
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
   it('rejects suspended accounts and internal targets', async () => {
     const { app, prisma } = await fixture();
     try {

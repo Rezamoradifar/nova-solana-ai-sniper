@@ -7,6 +7,7 @@ export const createCopySchema = z.object({
   targetAddress: z.string().trim().refine(isValidSolanaPublicKey, 'Invalid Solana wallet address'),
   copyPercentSize: z.number().finite().positive().max(100).default(25),
   maxAmountSol: z.number().finite().positive().max(10).default(0.1),
+  enabled: z.boolean().default(true),
 });
 
 export async function isInternalCopyTarget(prisma: Pick<PrismaClient, 'wallet'>, address: string) {
@@ -36,7 +37,7 @@ export default async function copyTradeRoutes(fastify: FastifyInstance) {
   fastify.post('/copy-trades', guard, async (req, reply) => {
     const parsed = createCopySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message });
-    const body = parsed.data;
+    const { enabled, ...body } = parsed.data;
     if (!(await accountReady(req.user.userId))) {
       return reply.code(409).send({ error: 'An active account and trading wallet are required' });
     }
@@ -52,6 +53,7 @@ export default async function copyTradeRoutes(fastify: FastifyInstance) {
         ...body,
         maxAmountSol: Math.min(body.maxAmountSol, fastify.config.COPY_TRADING_MAX_BUY_SOL),
         userId: req.user.userId,
+        isActive: enabled,
       },
     });
     return reply.code(201).send(config);

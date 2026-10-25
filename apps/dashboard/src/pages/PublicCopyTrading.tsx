@@ -1,83 +1,23 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { Icon, PageHeading } from '../components/public/PublicLayout.js';
+import { WalletButton } from '../components/WalletUI.js';
 import { api, ApiError } from '../lib/api.js';
 import { useAuth } from '../lib/AuthContext.js';
-import { PUBLIC_API_BASE } from '../lib/publicMarket.js';
-import { liveCopyBuysReady, type PublicCopyReadiness } from '../neon/realReadiness.js';
 import { useLanguage } from '../lib/LanguageContext.js';
-
-interface LocalWallet {
-  address: string;
-  label: string | null;
-  signalScore: number;
-  recommendation: {
-    eligible: boolean;
-    reasons: string[];
-    warnings: string[];
-    score: number;
-    closedTrades: number;
-    distinctTokens: number;
-    realizedPnlSol: number;
-    profitFactor: number | null;
-    winRatePct: number;
-  };
-  confidenceScore: number | null;
-  sampleSize: number;
-  medianRoiPercent: number | null;
-  avgRoiPercent: number | null;
-  earlyEntryRatePct: number | null;
-  rugExposureRatePct: number | null;
-  realizedPnlUsd: number | null;
-  unrealizedPnlUsd: number | null;
-  lastActivityAt: string | null;
-  sybilConfidencePct: number | null;
-}
-
-interface GmgnWallet {
-  address: string;
-  trades: number;
-  volumeUsd: number;
-  buys: number;
-  sells: number;
-  tags: string[];
-}
-
-interface GmgnTrade {
-  transactionHash: string;
-  maker: string;
-  side: 'buy' | 'sell' | 'unknown';
-  tokenAddress: string;
-  tokenSymbol: string;
-  amountUsd?: number;
-  priceUsd?: number;
-  timestamp?: number;
-  tags: string[];
-}
-
-interface PublicCopyData {
-  chain: 'solana';
-  mode: 'buy_and_proportional_sell_mirror_independent_exits';
-  recommendations: LocalWallet[];
-  limits: {
-    maxBuySol: number;
-    maxDailyBuys: number;
-    maxOpenPositions: number;
-    slippageBps: number;
-  };
-  watcher: { running: boolean; healthy: boolean; lastSuccessAt: number | null } | null;
-  copyConfigEnabled: boolean;
-  copyWatcherReady: boolean;
-  executionMode: 'disabled' | 'paper' | 'live';
-  liveExecutionEnabled: boolean;
-  buyReadiness?: PublicCopyReadiness['buyReadiness'];
-  updatedAt: number;
-  localWallets: LocalWallet[];
-  gmgn:
-    | { status: 'not_configured'; trades: GmgnTrade[]; wallets: GmgnWallet[] }
-    | { status: 'connected'; trades: GmgnTrade[]; wallets: GmgnWallet[] }
-    | { status: 'unavailable'; trades: GmgnTrade[]; wallets: GmgnWallet[]; reason: string };
-}
+import { useWalletConnection } from '../lib/WalletContext.js';
+import { useMainnet } from '../lib/MainnetContext.js';
+import { useCopyTraders } from '../lib/useCopyTraders.js';
+import {
+  pnlTone,
+  signedValue,
+  traderDataLive,
+  validTarget,
+  type TraderPeriod,
+} from '../lib/copyTraders.js';
+import { liveCopyBuysReady, type PublicCopyReadiness } from '../neon/realReadiness.js';
+import type { Wallet } from '../lib/types.js';
+import './CopyTrading.css';
 
 interface CopyConfig {
   id: string;
@@ -86,657 +26,830 @@ interface CopyConfig {
   copyPercentSize: number;
   maxAmountSol: number | null;
 }
-
-const short = (value: string) => `${value.slice(0, 5)}…${value.slice(-5)}`;
-const num = (value: number | null | undefined, suffix = '') =>
-  value == null || !Number.isFinite(value) ? '—' : `${value.toFixed(1)}${suffix}`;
-const usd = (value: number | null | undefined) =>
+interface LocalWallet {
+  address: string;
+  label: string | null;
+  signalScore: number;
+  recommendation: {
+    eligible: boolean;
+    closedTrades: number;
+    realizedPnlSol: number;
+    winRatePct: number;
+    reasons: string[];
+    warnings: string[];
+  };
+}
+interface Runtime extends PublicCopyReadiness {
+  localWallets?: LocalWallet[];
+  gmgn?: {
+    status: string;
+    trades: Array<{
+      transactionHash: string;
+      maker: string;
+      side: string;
+      tokenAddress: string;
+      tokenSymbol: string;
+      amountUsd?: number;
+      timestamp?: number;
+    }>;
+  };
+}
+interface AccountState {
+  ownerId: string;
+  configs: CopyConfig[];
+  wallets: Wallet[];
+  loading: boolean;
+  failed: boolean;
+}
+const short = (address: string) => `${address.slice(0, 5)}…${address.slice(-5)}`;
+const colors = ['#d8bc80', '#8ec4b0', '#b4a5d5', '#80b1d0', '#d2a88c'];
+const toneColor = (address: string) =>
+  colors[[...address].reduce((sum, c) => sum + c.charCodeAt(0), 0) % colors.length];
+const money = (value?: number | null) =>
   value == null || !Number.isFinite(value)
     ? '—'
     : new Intl.NumberFormat('en-US', {
         style: 'currency',
         currency: 'USD',
-        notation: 'compact',
+        maximumFractionDigits: 2,
       }).format(value);
+const percent = (value?: number | null) =>
+  value == null || !Number.isFinite(value) ? '—' : `${value.toFixed(1)}%`;
 
 export default function PublicCopyTrading() {
-  const { t: localize } = useLanguage();
+  const { t, lang } = useLanguage();
   const { user } = useAuth();
-  const [data, setData] = useState<PublicCopyData | null>(null);
-  const [configs, setConfigs] = useState<CopyConfig[]>([]);
+  const { state: walletState } = useWalletConnection();
+  const { copy, refresh: refreshRuntime } = useMainnet();
+  const runtime = copy as Runtime | null;
+  const [period, setPeriod] = useState<TraderPeriod>('7d');
+  const feed = useCopyTraders(period);
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState('profit');
+  const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  const target = params.get('trader') ?? '';
   const [copyPercent, setCopyPercent] = useState('25');
   const [maxSol, setMaxSol] = useState('0.10');
-  const [manualAddress, setManualAddress] = useState('');
-  const [message, setMessage] = useState<string | null>(null);
-  const [busyAddress, setBusyAddress] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
+  const [account, setAccount] = useState<AccountState | null>(null);
+  const [accountRevision, setAccountRevision] = useState(0);
+  const [notice, setNotice] = useState<{ ownerId: string | null; text: string } | null>(null);
+  const [busy, setBusy] = useState<{ ownerId: string; address: string } | null>(null);
+  const setup = useRef<HTMLElement>(null);
+  const ownerId = user?.id ?? null;
+  const current = account?.ownerId === ownerId ? account : null;
+  const accountLoading = Boolean(user && (!current || current.loading));
+  const activeWallet = current?.wallets.find((wallet) => wallet.isActive);
+  const liveReady = liveCopyBuysReady(runtime);
+  const feedLive = !feed.error && traderDataLive(feed.data, feed.now);
+  const configs = current?.configs ?? [];
+  const busyHere = busy?.ownerId === ownerId;
+  const limit = runtime?.limits?.maxBuySol ?? 0.1;
+  const amount = Number(maxSol);
+  const size = Number(copyPercent);
+  const validSize =
+    Number.isFinite(amount) &&
+    amount > 0 &&
+    amount <= limit &&
+    Number.isFinite(size) &&
+    size > 0 &&
+    size <= 100;
+  const returnTo = location.pathname + location.search + '#copy-setup';
+  const loginState = { returnTo };
 
   useEffect(() => {
+    if (!ownerId) return;
     const controller = new AbortController();
-    const load = async () => {
-      try {
-        const response = await fetch(`${PUBLIC_API_BASE}/public/copy-trading`, {
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]),
-        });
-        if (!response.ok) throw new Error('Copy-trading feed unavailable.');
-        setData((await response.json()) as PublicCopyData);
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          setData(null);
-          setMessage(error instanceof Error ? error.message : 'Copy-trading feed unavailable.');
-        }
-      }
-    };
-    void load();
-    const timer = setInterval(() => void load(), 20_000);
+    let active = true;
+    setAccount({ ownerId, configs: [], wallets: [], loading: true, failed: false });
+    void Promise.all([
+      api.get<CopyConfig[]>('/copy-trades', { signal: controller.signal }),
+      api.get<Wallet[]>('/wallets', { signal: controller.signal }),
+    ])
+      .then(([configs, wallets]) => {
+        if (active) setAccount({ ownerId, configs, wallets, loading: false, failed: false });
+      })
+      .catch(() => {
+        if (active) setAccount({ ownerId, configs: [], wallets: [], loading: false, failed: true });
+      });
     return () => {
+      active = false;
       controller.abort();
-      clearInterval(timer);
     };
-  }, []);
+  }, [ownerId, accountRevision]);
 
-  useEffect(() => {
-    if (!user) {
-      setConfigs([]);
-      return;
-    }
-    void api
-      .get<CopyConfig[]>('/copy-trades')
-      .then(setConfigs)
-      .catch(() => setConfigs([]));
-  }, [user]);
-
-  const configured = useMemo(() => new Set(configs.map((item) => item.targetAddress)), [configs]);
-  const liveBuysReady = liveCopyBuysReady(data);
-  const executionLabel =
-    data?.executionMode === 'live'
-      ? liveBuysReady
-        ? 'LIVE COPY READY'
-        : data.buyReadiness
-          ? 'NEW COPY BUYS PAUSED'
-          : 'BUY READINESS NOT VERIFIED'
-      : data?.executionMode === 'paper'
-        ? 'PAPER COPY BUYS'
-        : 'WATCHER NOT READY';
-  const executionNotice = liveBuysReady
-    ? 'New verified buys may spend real SOL, subject to your wallet and trade limits.'
-    : data?.executionMode === 'paper'
-      ? 'Paper mode only; live spending is disabled.'
-      : data?.executionMode === 'live'
-        ? 'New copy buys are paused or their readiness could not be verified.'
-        : 'The copy configuration is stored while the server watcher is unavailable.';
-
-  async function addCopy(address: string) {
-    if (!user || busyAddress) return;
-    const percent = Number(copyPercent);
-    const amount = Number(maxSol);
+  function choose(address: string, scroll = true) {
+    const next = new URLSearchParams(params);
+    if (address) next.set('trader', address);
+    else next.delete('trader');
+    setParams(next, { replace: true });
+    setConfirmed(false);
+    if (scroll)
+      setup.current?.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'instant'
+          : 'smooth',
+        block: 'start',
+      });
+  }
+  function refresh() {
+    feed.refresh();
+    refreshRuntime();
+  }
+  function activity(stamp: number | null) {
+    if (stamp === null || !Number.isFinite(stamp)) return '—';
+    return new Date(stamp).toLocaleString(lang === 'fa' ? 'fa-IR' : 'en-GB', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+  async function saveCopy() {
     if (
-      !Number.isFinite(percent) ||
-      percent <= 0 ||
-      percent > 100 ||
-      !Number.isFinite(amount) ||
-      amount <= 0
-    ) {
-      setMessage('Copy size must be 0–100% and max SOL must be greater than zero.');
+      !ownerId ||
+      !activeWallet ||
+      !validTarget(target) ||
+      !validSize ||
+      !confirmed ||
+      busyHere ||
+      current?.failed
+    )
       return;
-    }
-    setBusyAddress(address);
-    setMessage(null);
+    const address = target;
+    setBusy({ ownerId, address });
+    setNotice(null);
     try {
       const created = await api.post<CopyConfig>('/copy-trades', {
         targetAddress: address,
-        copyPercentSize: percent,
+        copyPercentSize: size,
         maxAmountSol: amount,
+        enabled: liveReady,
       });
-      setConfigs((current) => [...current.filter((item) => item.id !== created.id), created]);
-      setMessage(
-        `${localize('Copy configuration enabled for')} ${short(address)} · ${localize('cap')} ${created.maxAmountSol} SOL. ${localize(executionNotice)}`,
+      setAccount((value) =>
+        value?.ownerId === ownerId ? { ...value, configs: [...value.configs, created] } : value,
       );
+      setNotice({
+        ownerId,
+        text: created.isActive
+          ? t('Copy configuration enabled within your limits.', 'تنظیم کپی با سقف انتخابی فعال شد.')
+          : t(
+              'Copy settings saved paused. Activate after the execution engine is ready.',
+              'تنظیم کپی ذخیره شد و متوقف است؛ پس از آماده‌شدن موتور می‌توانی آن را فعال کنی.',
+            ),
+      });
+      setConfirmed(false);
     } catch (error) {
-      setMessage(
-        error instanceof ApiError ? error.message : 'Could not create copy configuration.',
-      );
+      setNotice({
+        ownerId,
+        text:
+          error instanceof ApiError
+            ? t(error.message)
+            : t(
+                'Could not save copy settings. Try again.',
+                'ذخیرهٔ تنظیم کپی انجام نشد؛ دوباره تلاش کن.',
+              ),
+      });
     } finally {
-      setBusyAddress(null);
+      setBusy((value) => (value?.ownerId === ownerId ? null : value));
     }
   }
-
-  async function toggleCopy(config: CopyConfig) {
-    if (busyAddress) return;
-    setBusyAddress(config.targetAddress);
+  async function toggle(config: CopyConfig) {
+    if (!ownerId || busyHere || (!config.isActive && (!liveReady || !activeWallet))) return;
+    if (
+      !config.isActive &&
+      !window.confirm(
+        t(
+          'Enable real copy buys for this saved trader within the displayed limits?',
+          'خرید واقعی کپی برای این تریدر با سقف ذخیره‌شده فعال شود؟',
+        ),
+      )
+    )
+      return;
+    setBusy({ ownerId, address: config.targetAddress });
+    setNotice(null);
     try {
       const updated = await api.put<CopyConfig>(`/copy-trades/${config.id}/status`, {
         enabled: !config.isActive,
       });
-      setConfigs((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      setMessage(
-        updated.isActive
-          ? `${localize('Copy configuration enabled.')} ${localize(executionNotice)}`
-          : 'New copy buys paused. Existing positions retain their exits.',
+      setAccount((value) =>
+        value?.ownerId === ownerId
+          ? { ...value, configs: value.configs.map((c) => (c.id === updated.id ? updated : c)) }
+          : value,
       );
+      setNotice({
+        ownerId,
+        text: updated.isActive
+          ? t('Copy enabled.', 'کپی فعال شد.')
+          : t('New copy buys paused.', 'خریدهای جدید کپی متوقف شدند.'),
+      });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not update copy configuration.');
+      setNotice({
+        ownerId,
+        text:
+          error instanceof ApiError
+            ? t(error.message)
+            : t('Could not update copy settings.', 'به‌روزرسانی تنظیم کپی انجام نشد.'),
+      });
     } finally {
-      setBusyAddress(null);
+      setBusy((value) => (value?.ownerId === ownerId ? null : value));
     }
   }
+  const needle = search.trim().toLowerCase();
+  const traders = [...(feed.data?.traders ?? [])].filter(
+    (trader) =>
+      !needle ||
+      `${trader.address} ${trader.name ?? ''} ${trader.tags.join(' ')}`
+        .toLowerCase()
+        .includes(needle),
+  );
+  const metric = (trader: (typeof traders)[number]) =>
+    sort === 'wins'
+      ? trader.performance?.winRatePct
+      : sort === 'activity'
+        ? trader.lastActivityAt
+        : trader.performance?.realizedPnlUsd;
+  traders.sort(
+    (a, b) =>
+      Number(metric(b) != null) - Number(metric(a) != null) || (metric(b) ?? 0) - (metric(a) ?? 0),
+  );
+  const selectedConfig = configs.find((config) => config.targetAddress === target);
+  const localWallets = (runtime?.localWallets ?? [])
+    .filter((wallet) => wallet.recommendation?.closedTrades > 0)
+    .sort((a, b) => b.recommendation.realizedPnlSol - a.recommendation.realizedPnlSol)
+    .slice(0, 12);
+  const profits =
+    feed.data?.traders.filter((trader) => (trader.performance?.realizedPnlUsd ?? 0) > 0).length ??
+    0;
 
   return (
-    <div className="site-container interior-page copy-trading-page">
+    <div className="site-container interior-page copy-trading-page ct-page">
       <PageHeading
-        eyebrow={localize('SOLANA COPY TRADING')}
-        title={localize('Track conviction. Copy with limits.')}
-        text={localize(
-          'Rank tracked Solana wallets using GSP on-chain history, inspect GMGN Smart Money activity when the official API is connected, and create bounded copy configurations.',
+        eyebrow="COPY TRADING / SOLANA"
+        title={t('Follow the edge.', 'همراهِ معامله‌گرهای برتر.')}
+        text={t(
+          'Explore active Smart Money wallets, compare realized performance and build a copy strategy with your own limits.',
+          'کیف پول‌های فعال اسمارت‌مانی را ببین، سود محقق‌شده را مقایسه کن و کپی را با سقف انتخابی خودت تنظیم کن.',
         )}
       >
-        <span className="observation-badge" role="status" aria-live="polite">
-          <Icon name="activity" size={17} /> {localize(executionLabel ?? '')}
+        <span
+          className={`ct-feed-badge ${feedLive ? 'is-live' : ''}`}
+          role="status"
+          data-testid="copy-feed-state"
+        >
+          <i />
+          {feedLive ? 'LIVE DATA' : t('DATA PENDING', 'در انتظار داده')}
         </span>
       </PageHeading>
-
-      <div className="copy-hero-visual panel">
-        <img
-          src="/images/gsp-copy-network.svg"
-          alt={localize('Solana smart-wallet copy-trading network visualization')}
-        />
-        <div className="copy-hero-overlay">
-          <span className="eyebrow">{localize('GSP TRADING · SMART WALLET NETWORK')}</span>
-          <h2>{localize('Follow the wallet, not the noise.')}</h2>
-          <p>
-            {localize(
-              'On-chain scoring + optional GMGN Smart Money feed + per-wallet position limits.',
-            )}
-          </p>
+      <div className="ct-overview">
+        <div>
+          <span>{t('ACTIVE WATCHLIST', 'فهرست فعال')}</span>
+          <strong>{feed.data?.traders.length ?? '—'}</strong>
+          <small>GMGN · SOLANA</small>
+        </div>
+        <div>
+          <span>{t('PROFITABLE IN SAMPLE', 'سودده در این فهرست')}</span>
+          <strong className="is-profit">{feed.data?.performanceUpdatedAt ? profits : '—'}</strong>
+          <small>
+            {period === '7d'
+              ? t('7-day realized PnL', 'سود محقق‌شدهٔ ۷روزه')
+              : t('30-day realized PnL', 'سود محقق‌شدهٔ ۳۰روزه')}
+          </small>
+        </div>
+        <div>
+          <span>{t('COPY EXECUTION', 'اجرای کپی')}</span>
+          <strong
+            className={liveReady ? 'is-profit' : 'ct-waiting'}
+            data-testid="copy-engine-state"
+          >
+            {liveReady ? t('READY', 'آماده') : t('PAUSED', 'متوقف')}
+          </strong>
+          <small>
+            {runtime?.executionMode === 'paper'
+              ? 'PAPER'
+              : t('Account limits apply', 'با سقف‌های حساب')}
+          </small>
+        </div>
+        <div>
+          <span>{t('PER-BUY CEILING', 'سقف هر خرید')}</span>
+          <strong dir="ltr">
+            {limit} <em>SOL</em>
+          </strong>
+          <small>{t('Your cap can be lower', 'سقف شخصی می‌تواند کمتر باشد')}</small>
         </div>
       </div>
-
-      <section className="copy-control-strip">
-        <label>
-          <span>{localize('Copy size')}</span>
-          <div className="input-unit">
-            <input
-              value={copyPercent}
-              onChange={(e) => setCopyPercent(e.target.value)}
-              type="number"
-              min="1"
-              max="100"
-            />
-            <span>%</span>
-          </div>
-        </label>
-        <label>
-          <span>{localize('Max per copied buy')}</span>
-          <div className="input-unit">
-            <input
-              value={maxSol}
-              onChange={(e) => setMaxSol(e.target.value)}
-              type="number"
-              min="0.01"
-              step="0.01"
-            />
-            <span>SOL</span>
-          </div>
-        </label>
-        <div className="copy-mode">
-          <span>{localize('Execution')}</span>
-          <strong>
-            {data?.executionMode === 'live'
-              ? liveBuysReady
-                ? 'LIVE'
-                : localize('BUYS PAUSED / UNVERIFIED')
-              : data?.executionMode === 'paper'
-                ? localize('PAPER MIRROR')
-                : localize('EXECUTION LOCKED')}
-          </strong>
-          <small>
-            {data?.executionMode === 'live' && !liveBuysReady
-              ? executionNotice
-              : data?.executionMode === 'paper'
-                ? executionNotice
-                : data?.copyWatcherReady
-                  ? localize(
-                      'Copies SOL-funded buys and mirrors source sells proportionally. Stop-loss and trailing exits remain active independently.',
-                    )
-                  : data?.watcher?.running
-                    ? localize(
-                        'Watcher health is degraded. Copy signals may be missed for unavailable targets.',
-                      )
-                    : localize('Watcher is stopped. Copy configurations are stored.')}
-          </small>
-        </div>
-        <div className="copy-mode">
-          <span>{localize('GMGN provider')}</span>
-          <strong>
-            {data?.gmgn.status === 'connected' ? localize('CONNECTED') : localize('OPTIONAL')}
-          </strong>
-          <small>
-            {data?.gmgn.status === 'connected'
-              ? localize('Official OpenAPI')
-              : localize('Add GMGN_API_KEY on the server')}
-          </small>
-        </div>
-      </section>
-
-      {message && (
-        <div className="inline-notice">
-          <Icon name="shield" size={18} />
-          <span>{localize(message ?? '')}</span>
-        </div>
-      )}
-
-      <section className="panel copy-wallet-panel">
-        <div className="table-toolbar">
+      <div className="ct-status-note">
+        <Icon name="activity" size={18} />
+        <p>
+          {feedLive
+            ? t(
+                'Live analytics are connected. Copy execution has its own readiness checks.',
+                'دادهٔ زنده متصل است. اجرای کپی، وضعیت آمادگی جداگانه دارد.',
+              )
+            : t(
+                'Waiting for fresh trader analytics. Last available figures keep their original observation time.',
+                'در انتظار اطلاعات تازهٔ تریدرها؛ اعداد قبلی با زمان مشاهدهٔ خودشان نمایش داده می‌شوند.',
+              )}
+        </p>
+        <button type="button" onClick={refresh} disabled={feed.loading}>
+          <Icon name="refresh" size={15} />
+          {t('Refresh', 'تازه‌سازی')}
+        </button>
+      </div>
+      <section className="ct-discovery" aria-labelledby="trader-title">
+        <div className="ct-section-heading">
           <div>
-            <h2>{localize('Recommended from verified history')}</h2>
+            <span className="ct-eyebrow">SMART MONEY / PERFORMANCE</span>
+            <h2 id="trader-title">{t('Top active traders', 'برترین تریدرهای فعال')}</h2>
             <p>
-              {localize(
-                '30-day recorded sample · 20+ closed trades · 5+ tokens · positive realized SOL · risk and freshness checks.',
+              {t(
+                'Ranked within the active GMGN sample by realized USD profit; not a market-wide ranking or a copy recommendation.',
+                'رتبه‌بندی سود دلاری در نمونهٔ فعال GMGN؛ این فهرست رتبه‌بندی کل بازار یا توصیهٔ خودکار کپی نیست.',
               )}
             </p>
           </div>
-          <span className="outline-tag">{localize('UP TO 3 CANDIDATES')}</span>
-        </div>
-        {(data?.recommendations ?? []).map((wallet) => (
-          <div className="table-toolbar" key={wallet.address}>
-            <div>
-              <strong>{wallet.label || short(wallet.address)}</strong>
-              <p>
-                {wallet.recommendation.closedTrades}
-                {' ' + localize('verified closes ·')}{' '}
-                {num(wallet.recommendation.realizedPnlSol, ' SOL')}
-                {' ' + localize('realized ·')} {num(wallet.recommendation.winRatePct, '%')}
-                {' ' + localize('wins')}
-              </p>
-              <p>{wallet.recommendation.warnings.join(' · ')}</p>
-              <a
-                className="text-link"
-                href={`https://solscan.io/account/${wallet.address}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {localize('Inspect wallet ↗')}
-              </a>
-            </div>
-            {configured.has(wallet.address) ? (
-              <span className="copy-active-pill">{localize('Configured below')}</span>
-            ) : user ? (
+          <div
+            className="ct-period"
+            role="group"
+            aria-label={t('Performance period', 'بازهٔ عملکرد')}
+          >
+            {(['7d', '30d'] as const).map((value) => (
               <button
-                className="nova-button button-sm"
-                disabled={busyAddress !== null}
-                onClick={() => void addCopy(wallet.address)}
+                type="button"
+                key={value}
+                aria-pressed={period === value}
+                onClick={() => setPeriod(value)}
               >
-                {localize('Enable copy buys')}
+                {value.toUpperCase()}
               </button>
-            ) : (
-              <Link
-                className="nova-button button-sm"
-                to="/login"
-                state={{ returnTo: '/copy-trading' }}
+            ))}
+          </div>
+        </div>
+        <div className="ct-toolbar">
+          <label className="ct-search">
+            <Icon name="search" size={17} />
+            <input
+              aria-label={t('Search traders', 'جستجوی تریدر')}
+              placeholder={t('Name, wallet or tag…', 'نام، آدرس یا برچسب…')}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </label>
+          <label className="ct-sort">
+            <span>{t('Sort by', 'مرتب‌سازی')}</span>
+            <select
+              aria-label={t('Sort traders', 'مرتب‌سازی تریدرها')}
+              value={sort}
+              onChange={(event) => setSort(event.target.value)}
+            >
+              <option value="profit">{t('Realized profit', 'سود محقق‌شده')}</option>
+              <option value="wins">{t('Win rate', 'نرخ برد')}</option>
+              <option value="activity">{t('Latest activity', 'آخرین فعالیت')}</option>
+            </select>
+          </label>
+        </div>
+        <div className="ct-data-note" aria-live="polite">
+          {feed.loading
+            ? t('Updating trader data…', 'در حال به‌روزرسانی تریدرها…')
+            : feed.error || feed.data?.status === 'unavailable'
+              ? t(
+                  'Data source temporarily unavailable. Retry to refresh.',
+                  'منبع داده موقتاً در دسترس نیست؛ تازه‌سازی را بزن.',
+                )
+              : feed.data?.status === 'partial'
+                ? t(
+                    'Some wallets have no reported performance. Missing values remain blank.',
+                    'اطلاعات عملکرد برخی کیف پول‌ها گزارش نشده و با — نمایش داده می‌شود.',
+                  )
+                : t('Observed', 'زمان مشاهده')}{' '}
+          {feed.data?.performanceUpdatedAt ? activity(feed.data.performanceUpdatedAt) : ''}
+        </div>
+        <div className="ct-trader-grid">
+          {traders.map((trader, index) => {
+            const p = trader.performance;
+            const saved = configs.find((config) => config.targetAddress === trader.address);
+            return (
+              <article
+                className={`ct-trader-card ${target === trader.address ? 'is-selected' : ''}`}
+                key={trader.address}
+                style={{ '--trader-color': toneColor(trader.address) } as CSSProperties}
+                data-testid="trader-card"
               >
-                {localize('Sign in to copy')}
+                <div className="ct-trader-top">
+                  <span className="ct-avatar" aria-hidden="true">
+                    {trader.name
+                      ? trader.name.slice(0, 2).toUpperCase()
+                      : trader.address.slice(0, 2)}
+                  </span>
+                  <div>
+                    <h3>{trader.name || short(trader.address)}</h3>
+                    <a
+                      href={`https://gmgn.ai/sol/address/${trader.address}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      dir="ltr"
+                    >
+                      {short(trader.address)} ↗
+                    </a>
+                  </div>
+                  <span className="ct-rank">#{index + 1}</span>
+                </div>
+                <div className="ct-tags">
+                  {trader.tags.slice(0, 3).map((tag) => (
+                    <span key={tag}>{tag.replaceAll('_', ' ')}</span>
+                  ))}
+                </div>
+                <div className="ct-profit">
+                  <span>
+                    {t('Realized PnL', 'سود و زیان محقق‌شده')} · {period.toUpperCase()}
+                  </span>
+                  <strong dir="ltr" className={pnlTone(p?.realizedPnlUsd)} data-testid="trader-pnl">
+                    {signedValue(p?.realizedPnlUsd, 'USD')}
+                  </strong>
+                  <small className={pnlTone(p?.roiPct)} dir="ltr">
+                    {signedValue(p?.roiPct, 'percent')} <span>ROI</span>
+                  </small>
+                </div>
+                <div className="ct-trader-metrics">
+                  <div>
+                    <span>{t('Win rate', 'نرخ برد')}</span>
+                    <strong>{percent(p?.winRatePct)}</strong>
+                  </div>
+                  <div>
+                    <span>{t('Buys / sells', 'خرید / فروش')}</span>
+                    <strong dir="ltr">
+                      {p?.buys ?? '—'} / {p?.sells ?? '—'}
+                    </strong>
+                  </div>
+                </div>
+                <div className="ct-win-track" aria-hidden="true">
+                  <i style={{ width: `${p?.winRatePct ?? 0}%` }} />
+                </div>
+                <div className="ct-last-activity">
+                  <span>{t('Last activity', 'آخرین فعالیت')}</span>
+                  <time>{activity(trader.lastActivityAt)}</time>
+                </div>
+                <button className="ct-select" type="button" onClick={() => choose(trader.address)}>
+                  {saved ? t('Manage copy', 'مدیریت کپی') : t('Set up copy', 'تنظیم کپی')}
+                  <Icon name="chevron" size={16} />
+                </button>
+              </article>
+            );
+          })}
+        </div>
+        {!traders.length && (
+          <div className="ct-empty">
+            <Icon name="scan" size={30} />
+            <h3>
+              {feed.loading
+                ? t('Loading active traders', 'در حال دریافت تریدرهای فعال')
+                : search
+                  ? t('No matching trader', 'تریدر مطابق پیدا نشد')
+                  : t(
+                      'Trader performance is not available yet',
+                      'عملکرد تریدرها هنوز در دسترس نیست',
+                    )}
+            </h3>
+            <p>
+              {t(
+                'You can review a wallet directly in the copy setup below.',
+                'می‌توانی آدرس کیف پول را مستقیماً در تنظیم کپی وارد کنی.',
+              )}
+            </p>
+          </div>
+        )}
+      </section>
+      <section className="ct-setup" id="copy-setup" ref={setup} aria-labelledby="copy-setup-title">
+        <div className="ct-section-heading">
+          <div>
+            <span className="ct-eyebrow">YOUR WALLET. YOUR LIMITS.</span>
+            <h2 id="copy-setup-title">
+              {t('Connect. Review. Copy.', 'متصل شو. بررسی کن. کپی کن.')}
+            </h2>
+          </div>
+          <span className={`ct-engine-pill ${liveReady ? 'is-live' : ''}`}>
+            {liveReady
+              ? t('Execution ready', 'اجرای کپی آماده است')
+              : t('Execution paused', 'اجرای کپی متوقف است')}
+          </span>
+        </div>
+        <div className="ct-connection-steps">
+          <div>
+            <span className="ct-step-no">01</span>
+            <div>
+              <strong>{t('Browser wallet', 'کیف پول مرورگر')}</strong>
+              <p>
+                {walletState.account
+                  ? short(walletState.account.address)
+                  : t(
+                      'Connect or manage your external wallet.',
+                      'کیف پول بیرونی را متصل یا مدیریت کن.',
+                    )}
+              </p>
+            </div>
+            <WalletButton />
+          </div>
+          <div>
+            <span className="ct-step-no">02</span>
+            <div>
+              <strong>{t('Your trading account', 'حساب معاملات تو')}</strong>
+              <p>
+                {user
+                  ? user.email
+                  : t('Sign in to save your copy settings.', 'برای ذخیرهٔ تنظیم کپی وارد حساب شو.')}
+              </p>
+            </div>
+            {!user && (
+              <Link className="ct-small-button" to="/login" state={loginState}>
+                {t('Sign in and continue', 'ورود و ادامه')}
               </Link>
             )}
           </div>
-        ))}
-        {!data?.recommendations?.length && (
-          <div className="empty-state">
-            <h3>{localize('No qualified wallet yet')}</h3>
-            <p>
-              {localize(
-                'We wait for enough verified history. Recent volume or a Smart Money tag alone does not qualify a wallet.',
-              )}
-            </p>
+          <div>
+            <span className="ct-step-no">03</span>
+            <div>
+              <strong>{t('Account trading wallet', 'کیف پول معاملات حساب')}</strong>
+              <p>
+                {accountLoading
+                  ? t('Checking account…', 'در حال بررسی حساب…')
+                  : activeWallet
+                    ? short(activeWallet.publicKey)
+                    : t(
+                        'Automatic copy uses the trading wallet in your account.',
+                        'کپی خودکار از کیف پول معاملات داخل حساب استفاده می‌کند.',
+                      )}
+              </p>
+            </div>
+            {user && (
+              <Link className="ct-small-button" to="/dashboard/wallets" state={{ returnTo }}>
+                {t('Manage wallets', 'مدیریت کیف پول‌ها')}
+              </Link>
+            )}
+          </div>
+        </div>
+        <p className="ct-setup-explanation">
+          {t(
+            'Connecting a browser wallet shares its address. Automatic copying requires your signed-in account and an active account trading wallet.',
+            'اتصال کیف پول مرورگر، آدرس آن را در سایت نمایش می‌دهد. کپی خودکار به حساب واردشده و کیف پول فعال معاملات آن نیاز دارد.',
+          )}
+        </p>
+        {!liveReady && (
+          <div className="ct-paused-notice">
+            <Icon name="pause" size={19} />
+            <div>
+              <strong>{t('Copy execution is paused', 'اجرای کپی فعلاً متوقف است')}</strong>
+              <p>
+                {t(
+                  'The server needs a healthy mainnet RPC and copy worker. You can save a paused setup now, then enable it when ready.',
+                  'سرور به RPC سالم شبکهٔ اصلی و موتور کپی آماده نیاز دارد. اکنون می‌توانی تنظیم را متوقف ذخیره کنی و پس از آماده‌شدن، فعالش کنی.',
+                )}
+              </p>
+              <Link to="/network">{t('Check network status ↗', 'بررسی وضعیت شبکه ↗')}</Link>
+            </div>
           </div>
         )}
-        {data?.limits && (
-          <p className="inline-notice">
-            {localize('Server ceilings:') + ' '}
-            {data.limits.maxBuySol}
-            {' ' + localize('SOL per buy ·') + ' '}
-            {data.limits.maxDailyBuys} {localize('attempts per Tehran day ·') + ' '}
-            {data.limits.maxOpenPositions}
-            {' ' + localize('open positions ·')} {data.limits.slippageBps / 100}
-            {localize('% slippage. Your account and plan can impose tighter limits.')}
+        {current?.failed && (
+          <div className="ct-feedback" role="alert">
+            {t('Your account could not be loaded.', 'اطلاعات حساب دریافت نشد.')}{' '}
+            <button type="button" onClick={() => setAccountRevision((n) => n + 1)}>
+              {t('Retry account', 'بررسی دوبارهٔ حساب')}
+            </button>
+          </div>
+        )}
+        <form
+          className="ct-copy-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveCopy();
+          }}
+        >
+          <label className="ct-target">
+            <span>{t('Trader wallet address', 'آدرس کیف پول تریدر')}</span>
+            <input
+              dir="ltr"
+              aria-label={t('Trader wallet address', 'آدرس کیف پول تریدر')}
+              value={target}
+              maxLength={44}
+              placeholder="Solana address"
+              onChange={(event) => choose(event.target.value.trim(), false)}
+              required
+            />
+            {target && !validTarget(target) && (
+              <small>{t('Enter a valid Solana address.', 'آدرس معتبر سولانا وارد کن.')}</small>
+            )}
+          </label>
+          <label>
+            <span>{t('Copy size (%)', 'اندازهٔ کپی (%)')}</span>
+            <input
+              aria-label={t('Copy size (%)', 'اندازهٔ کپی (%)')}
+              dir="ltr"
+              type="number"
+              min="0.01"
+              max="100"
+              step="0.01"
+              value={copyPercent}
+              onChange={(event) => {
+                setCopyPercent(event.target.value);
+                setConfirmed(false);
+              }}
+            />
+          </label>
+          <label>
+            <span>{t('Maximum per buy (SOL)', 'سقف هر خرید (SOL)')}</span>
+            <input
+              aria-label={t('Maximum per buy (SOL)', 'سقف هر خرید (SOL)')}
+              dir="ltr"
+              type="number"
+              min="0.000001"
+              max={limit}
+              step="0.000001"
+              value={maxSol}
+              onChange={(event) => {
+                setMaxSol(event.target.value);
+                setConfirmed(false);
+              }}
+            />
+          </label>
+          <p className="ct-server-limits">
+            {t('Server limits', 'سقف‌های سرور')}: {limit} SOL ·{' '}
+            {runtime?.limits?.maxDailyBuys ?? '—'} {t('daily buy attempts', 'تلاش خرید روزانه')} ·{' '}
+            {runtime?.limits?.maxOpenPositions ?? '—'} {t('open positions', 'پوزیشن باز')} ·{' '}
+            {(runtime?.limits?.slippageBps ?? 0) / 100}% {t('slippage', 'لغزش')}
+          </p>
+          <label className="ct-consent">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(event) => setConfirmed(event.target.checked)}
+            />
+            <span>
+              {liveReady
+                ? t(
+                    'I reviewed this trader and authorize copy buys within these limits.',
+                    'این تریدر را بررسی کرده‌ام و خرید کپی را با این سقف‌ها تأیید می‌کنم.',
+                  )
+                : t(
+                    'I reviewed this trader and want to save these settings paused.',
+                    'این تریدر را بررسی کرده‌ام و تنظیمات را در حالت متوقف ذخیره می‌کنم.',
+                  )}
+            </span>
+          </label>
+          {selectedConfig ? (
+            <p className="ct-feedback">
+              {t(
+                'This trader is already saved. Manage it below.',
+                'این تریدر قبلاً ذخیره شده؛ از بخش زیر مدیریتش کن.',
+              )}
+            </p>
+          ) : user ? (
+            <button
+              className="ct-submit"
+              type="submit"
+              disabled={
+                busyHere ||
+                accountLoading ||
+                current?.failed ||
+                !activeWallet ||
+                !validSize ||
+                !validTarget(target) ||
+                !confirmed
+              }
+            >
+              {busyHere
+                ? t('Saving…', 'در حال ذخیره…')
+                : liveReady
+                  ? t('Enable copy within limits', 'فعال‌سازی کپی با این سقف‌ها')
+                  : t('Save paused copy settings', 'ذخیرهٔ تنظیم کپی متوقف')}
+            </button>
+          ) : (
+            <Link className="ct-submit" to="/login" state={loginState}>
+              {t('Sign in and continue', 'ورود و ادامه')}
+            </Link>
+          )}
+        </form>
+        {notice?.ownerId === ownerId && (
+          <p className="ct-feedback" role="status">
+            {notice.text}
           </p>
         )}
-      </section>
-
-      {user && (
-        <section className="panel copy-wallet-panel">
-          <div className="table-toolbar">
-            <div>
-              <h2>{localize('Your copy wallets')}</h2>
+        {user && (
+          <div className="ct-saved">
+            <h3>{t('Your saved traders', 'تریدرهای ذخیره‌شدهٔ تو')}</h3>
+            {configs.map((config) => (
+              <div key={config.id}>
+                <span>
+                  <strong dir="ltr">{short(config.targetAddress)}</strong>
+                  <small>
+                    {config.copyPercentSize}% · {config.maxAmountSol ?? limit} SOL ·{' '}
+                    {config.isActive ? t('Enabled', 'فعال') : t('Paused', 'متوقف')}
+                  </small>
+                </span>
+                <button
+                  type="button"
+                  className="ct-small-button"
+                  disabled={
+                    busyHere ||
+                    (!config.isActive && (!liveReady || !activeWallet || accountLoading))
+                  }
+                  onClick={() => void toggle(config)}
+                >
+                  {config.isActive ? t('Pause', 'توقف') : t('Enable', 'فعال‌سازی')}
+                </button>
+              </div>
+            ))}
+            {!configs.length && !accountLoading && (
               <p>
-                {localize(
-                  'New buys require verified server readiness, account authorization and limits. Failed submissions count toward the daily limit.',
+                {t(
+                  'Your selected traders will appear here after saving.',
+                  'پس از ذخیره، تریدرهای انتخاب‌شده در این قسمت نمایش داده می‌شوند.',
+                )}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+      {localWallets.length > 0 && (
+        <section className="ct-local">
+          <div className="ct-section-heading">
+            <div>
+              <span className="ct-eyebrow">GSP / RECORDED ON-CHAIN SAMPLE</span>
+              <h2>{t('Tracked wallet results', 'نتایج کیف پول‌های رصدشده')}</h2>
+              <p>
+                {t(
+                  '30-day recorded SOL sample. This is separate from GMGN wallet-wide USD performance.',
+                  'نمونهٔ ثبت‌شدهٔ ۳۰روزه به SOL؛ این اعداد از عملکرد دلاری کل کیف پول در GMGN جدا هستند.',
                 )}
               </p>
             </div>
           </div>
-          <form
-            className="copy-control-strip"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void addCopy(manualAddress.trim());
-            }}
-          >
-            <label>
-              <span>{localize('Reviewed Solana wallet address')}</span>
-              <input
-                className="input-field"
-                required
-                value={manualAddress}
-                onChange={(event) => setManualAddress(event.target.value)}
-                placeholder={localize('Wallet address')}
-              />
-            </label>
-            <button className="nova-button button-sm" disabled={busyAddress !== null} type="submit">
-              {localize('Enable copy buys')}
-            </button>
-          </form>
-          {configs.map((config) => (
-            <div className="table-toolbar" key={config.id}>
-              <div>
-                <strong>{short(config.targetAddress)}</strong>
-                <p>
-                  {config.copyPercentSize}
-                  {localize('% of source · cap')}{' '}
-                  {config.maxAmountSol ?? data?.limits?.maxBuySol ?? localize('server limit')}
-                  {' ' + localize('SOL ·')}{' '}
-                  {config.isActive ? localize('Enabled') : localize('Paused')}
-                </p>
-              </div>
-              <button
-                className="nova-button button-sm button-outline"
-                disabled={busyAddress !== null}
-                onClick={() => void toggleCopy(config)}
-              >
-                {config.isActive ? localize('Pause') : localize('Resume')}
-              </button>
-            </div>
-          ))}
-          {!configs.length && (
-            <p className="empty-state">
-              {localize('No copy wallets configured for this account.')}
-            </p>
-          )}
+          <div className="ct-local-grid">
+            {localWallets.map((wallet) => (
+              <article key={wallet.address}>
+                <strong>{wallet.label || short(wallet.address)}</strong>
+                <span className={pnlTone(wallet.recommendation.realizedPnlSol)} dir="ltr">
+                  {signedValue(wallet.recommendation.realizedPnlSol, 'SOL')}
+                </span>
+                <small>
+                  {wallet.recommendation.closedTrades} {t('verified closes', 'خروج تأییدشده')} ·{' '}
+                  {percent(wallet.recommendation.winRatePct)}
+                </small>
+                <button type="button" onClick={() => choose(wallet.address)}>
+                  {t('Review wallet', 'بررسی کیف پول')} ↗
+                </button>
+              </article>
+            ))}
+          </div>
         </section>
       )}
-
-      <section className="panel copy-wallet-panel">
-        <div className="table-toolbar">
-          <div>
-            <h2>{localize('GSP ranked Solana wallets')}</h2>
-            <p>
-              {localize(
-                'Candidate score uses verified closed trades. Expand your review using the reasons below each wallet.',
-              )}
-            </p>
-          </div>
-          <span className="outline-tag">{localize('ON-CHAIN GSP DATA')}</span>
-        </div>
-        <div className="table-scroll">
-          <table className="nova-table copy-wallet-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>{localize('Wallet')}</th>
-                <th>{localize('Signal')}</th>
-                <th>{localize('Sample')}</th>
-                <th>{localize('Median ROI')}</th>
-                <th>{localize('Early entries')}</th>
-                <th>{localize('Rug exposure')}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.localWallets ?? []).map((wallet, index) => (
-                <tr key={wallet.address}>
-                  <td>{index + 1}</td>
-                  <td>
-                    <strong>{wallet.label || short(wallet.address)}</strong>
-                    <small className="cell-subtext">{short(wallet.address)}</small>
-                    <small className="cell-subtext">
-                      {wallet.recommendation.eligible
-                        ? ['Qualifies for review', ...wallet.recommendation.warnings].join(' · ')
-                        : wallet.recommendation.reasons.join(' · ')}
-                    </small>
-                  </td>
-                  <td className="number positive">{wallet.signalScore}/100</td>
-                  <td className="number">
-                    {wallet.recommendation.closedTrades}
-                    {' ' + localize('verified closes')}
-                  </td>
-                  <td
-                    className={
-                      wallet.medianRoiPercent != null && wallet.medianRoiPercent >= 0
-                        ? 'positive number'
-                        : 'number'
-                    }
-                  >
-                    {num(wallet.medianRoiPercent, '%')}
-                  </td>
-                  <td className="number">{num(wallet.earlyEntryRatePct, '%')}</td>
-                  <td className="number">{num(wallet.rugExposureRatePct, '%')}</td>
-                  <td>
-                    {configured.has(wallet.address) ? (
-                      <span className="copy-active-pill">{localize('Configured')}</span>
-                    ) : user ? (
-                      <button
-                        className="nova-button button-sm"
-                        disabled={busyAddress !== null}
-                        onClick={() => void addCopy(wallet.address)}
-                      >
-                        {busyAddress === wallet.address
-                          ? localize('Adding…')
-                          : localize('Enable copy buys')}
-                      </button>
-                    ) : (
-                      <Link
-                        className="nova-button button-sm button-outline"
-                        to="/login"
-                        state={{ returnTo: '/copy-trading' }}
-                      >
-                        {localize('Sign in to copy')}
-                      </Link>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!data?.localWallets.length && (
-            <div className="empty-state">
-              <Icon name="wallet" size={30} />
-              <h3>{localize('Building wallet history')}</h3>
-              <p>
-                {localize(
-                  'Enable Smart Money analysis and the network trade scanner to populate scored wallets from on-chain activity.',
-                )}
-              </p>
+      {!!runtime?.gmgn?.trades.length && (
+        <section className="ct-activity">
+          <div className="ct-section-heading">
+            <div>
+              <span className="ct-eyebrow">SMART MONEY / ACTIVITY</span>
+              <h2>{t('Recent trader activity', 'آخرین فعالیت تریدرها')}</h2>
             </div>
-          )}
-        </div>
-      </section>
-
-      <section className="panel gmgn-wallet-panel">
-        <div className="table-toolbar">
-          <div>
-            <h2>{localize('GMGN Smart Money wallets')}</h2>
-            <p>
-              {localize(
-                'Wallets observed in the official GMGN Solana Smart Money feed, ranked by recent observed volume.',
-              )}
-            </p>
           </div>
-          <span className="outline-tag">
-            {data?.gmgn.status === 'connected'
-              ? localize('OFFICIAL OPENAPI')
-              : localize('GMGN API KEY REQUIRED')}
-          </span>
-        </div>
-        {data?.gmgn.status === 'connected' && data.gmgn.wallets.length ? (
-          <div className="table-scroll">
-            <table className="nova-table copy-wallet-table">
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>{localize('Wallet')}</th>
-                  <th>{localize('Observed trades')}</th>
-                  <th>{localize('Buys / sells')}</th>
-                  <th>{localize('Observed volume')}</th>
-                  <th>{localize('Tags')}</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {data.gmgn.wallets.map((wallet, index) => (
-                  <tr key={wallet.address}>
-                    <td>{index + 1}</td>
-                    <td className="number">{short(wallet.address)}</td>
-                    <td className="number">{wallet.trades}</td>
-                    <td className="number">
-                      <span className="positive">{wallet.buys}</span> /{' '}
-                      <span className="negative">{wallet.sells}</span>
-                    </td>
-                    <td className="number">{usd(wallet.volumeUsd)}</td>
-                    <td>{wallet.tags.slice(0, 2).join(' · ') || '—'}</td>
-                    <td>
-                      {configured.has(wallet.address) ? (
-                        <span className="copy-active-pill">{localize('Configured')}</span>
-                      ) : user ? (
-                        <button
-                          className="nova-button button-sm"
-                          disabled={busyAddress !== null}
-                          onClick={() => void addCopy(wallet.address)}
-                        >
-                          {busyAddress === wallet.address
-                            ? localize('Adding…')
-                            : localize('Enable copy buys')}
-                        </button>
-                      ) : (
-                        <Link
-                          className="nova-button button-sm button-outline"
-                          to="/login"
-                          state={{ returnTo: '/copy-trading' }}
-                        >
-                          {localize('Sign in to copy')}
-                        </Link>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="ct-activity-list">
+            {runtime.gmgn.trades.slice(0, 12).map((trade, index) => (
+              <div key={`${trade.transactionHash}-${trade.tokenAddress}-${index}`}>
+                <span
+                  className={`ct-side ${trade.side === 'buy' ? 'is-profit' : trade.side === 'sell' ? 'is-loss' : ''}`}
+                >
+                  {trade.side === 'buy'
+                    ? t('BUY', 'خرید')
+                    : trade.side === 'sell'
+                      ? t('SELL', 'فروش')
+                      : '—'}
+                </span>
+                <span>
+                  <strong>{trade.tokenSymbol}</strong>
+                  <small dir="ltr">{short(trade.maker)}</small>
+                </span>
+                <strong dir="ltr">{money(trade.amountUsd)}</strong>
+                <time>{activity(trade.timestamp ? trade.timestamp * 1000 : null)}</time>
+                {trade.transactionHash && (
+                  <a
+                    href={`https://solscan.io/tx/${encodeURIComponent(trade.transactionHash)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={t('View transaction', 'مشاهدهٔ تراکنش')}
+                  >
+                    <Icon name="external" size={16} />
+                  </a>
+                )}
+              </div>
+            ))}
           </div>
-        ) : (
-          <div className="empty-state">
-            <Icon name="activity" size={30} />
-            <h3>
-              {data?.gmgn.status === 'not_configured'
-                ? localize('Connect the official GMGN OpenAPI')
-                : localize('No GMGN Smart Money wallets available')}
-            </h3>
-            <p>
-              {localize(
-                'Add an approved GMGN_API_KEY directly to the server environment. GSP TRADING does not scrape private GMGN endpoints.',
-              )}
-            </p>
-          </div>
+        </section>
+      )}
+      <p className="ct-risk-note">
+        <Icon name="shield" size={17} />
+        {t(
+          'Historical profit is not a forecast. Review wallet activity and risk before enabling copying.',
+          'سود گذشته پیش‌بینی آینده نیست؛ پیش از فعال‌سازی کپی، فعالیت و ریسک کیف پول را بررسی کن.',
         )}
-      </section>
-
-      <section className="panel gmgn-feed-panel">
-        <div className="table-toolbar">
-          <div>
-            <h2>{localize('GMGN Smart Money activity')}</h2>
-            <p>{localize('Official GMGN OpenAPI data when your server API key is configured.')}</p>
-          </div>
-          <span className="outline-tag">
-            {data?.gmgn.status === 'connected'
-              ? localize('GMGN CONNECTED')
-              : localize('GMGN API KEY REQUIRED')}
-          </span>
-        </div>
-        {data?.gmgn.status === 'connected' && data.gmgn.trades.length ? (
-          <div className="table-scroll">
-            <table className="nova-table">
-              <thead>
-                <tr>
-                  <th>{localize('Wallet')}</th>
-                  <th>{localize('Side')}</th>
-                  <th>{localize('Token')}</th>
-                  <th>{localize('Trade value')}</th>
-                  <th>{localize('Price')}</th>
-                  <th>{localize('Tags')}</th>
-                  <th>{localize('Time')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.gmgn.trades.slice(0, 30).map((trade, index) => (
-                  <tr key={trade.transactionHash || `${trade.maker}-${trade.timestamp}-${index}`}>
-                    <td className="number">{short(trade.maker)}</td>
-                    <td>
-                      <span
-                        className={
-                          trade.side === 'buy'
-                            ? 'positive'
-                            : trade.side === 'sell'
-                              ? 'negative'
-                              : 'muted'
-                        }
-                      >
-                        {trade.side.toUpperCase()}
-                      </span>
-                    </td>
-                    <td>
-                      <strong>{trade.tokenSymbol}</strong>
-                      <small className="cell-subtext">{short(trade.tokenAddress)}</small>
-                    </td>
-                    <td className="number">{usd(trade.amountUsd)}</td>
-                    <td className="number">{trade.priceUsd == null ? '—' : usd(trade.priceUsd)}</td>
-                    <td>{trade.tags.slice(0, 2).join(' · ') || '—'}</td>
-                    <td className="muted">
-                      {trade.timestamp
-                        ? new Date(trade.timestamp * 1000).toLocaleTimeString()
-                        : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="empty-state">
-            <Icon name="activity" size={30} />
-            <h3>
-              {data?.gmgn.status === 'not_configured'
-                ? localize('GMGN integration is ready for a key')
-                : localize('GMGN feed unavailable')}
-            </h3>
-            <p>
-              {localize(
-                'GSP does not scrape private GMGN endpoints. Configure an approved GMGN OpenAPI key on the server to enable this feed.',
-              )}
-            </p>
-          </div>
-        )}
-      </section>
-
-      <div className="flash-safety-banner">
-        <Icon name="shield" size={24} />
-        <div>
-          <strong>{localize('Copy trading can copy losses as quickly as gains.')}</strong>
-          <p>
-            {localize(
-              'Wallet scores and Smart Money tags describe observed history, not future performance. Use a dedicated wallet, small per-trade caps, stop-loss rules, and verify the token before enabling real execution.',
-            )}
-          </p>
-        </div>
-        <Link className="text-link" to="/security">
-          {localize('Risk controls ↗')}
-        </Link>
-      </div>
+      </p>
     </div>
   );
 }

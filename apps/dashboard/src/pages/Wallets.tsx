@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { api, ApiError } from '../lib/api.js';
 import { usePolling } from '../lib/usePolling.js';
 import { CopyButton } from '../components/CopyButton.js';
 import type { Wallet, WalletCreateResult, WalletBackupFile } from '../lib/types.js';
 import { useLanguage } from '../lib/LanguageContext.js';
+import { safeReturnPath } from '../lib/returnPath.js';
 
 function downloadJson(filename: string, data: unknown) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -134,6 +135,8 @@ function BackupModal({
 export function Wallets() {
   const { t: localize } = useLanguage();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = safeReturnPath(location.state?.returnTo);
   const { data: wallets, error: pollError } = usePolling(
     () => api.get<Wallet[]>('/wallets'),
     10000,
@@ -211,6 +214,11 @@ export function Wallets() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold text-white">{localize('Wallets')}</h1>
+      {returnTo.startsWith('/copy-trading') && (
+        <Link className="text-accent text-sm" to={returnTo}>
+          {localize('Return to copy setup', 'بازگشت به تنظیم کپی')} ↗
+        </Link>
+      )}
 
       {revealMnemonic && (
         <SeedPhraseModal
