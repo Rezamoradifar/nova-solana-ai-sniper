@@ -67,7 +67,93 @@ def require_restore_images(rows, expected):
             'A later API or web release is present; refusing to overwrite it')
 
 
+def image_error(message):
+    """Public error codes only; Docker's original text stays in the private journal."""
+    text = message.lower()
+    for code, fragments in (
+        ('DISK_FULL', ('no space left', 'disk quota exceeded')),
+        ('PERMISSION_DENIED', ('permission denied', 'operation not permitted')),
+        ('DAEMON_UNAVAILABLE', ('cannot connect', 'connection refused', 'daemon is not running')),
+        ('AMBIGUOUS_IMAGE', ('ambiguous',)),
+        ('NO_SUCH_IMAGE', ('no such image', 'image does not exist', 'not found')),
+        ('INVALID_REFERENCE', ('invalid reference', 'invalid tag', 'invalid repository')),
+    ):
+        if any(fragment in text for fragment in fragments):
+            return code
+    return 'DOCKER_ERROR'
+
+
 class Installer(web.Installer):
+    def image_command(self, command, backup, service, step):
+        try:
+            result = subprocess.run(['docker'] + command, capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                return result.stdout.strip(), None
+            detail, code, returncode = result.stderr, image_error(result.stderr), result.returncode
+        except subprocess.TimeoutExpired:
+            detail, code, returncode = 'Docker image operation timed out', 'TIMEOUT', None
+        except OSError as error:
+            detail, code, returncode = str(error), 'DOCKER_UNAVAILABLE', None
+        # Never print arbitrary daemon output, references or container configuration.
+        path = backup / 'image-retention.private.jsonl'
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'a') as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write(json.dumps({'service': service, 'step': step, 'code': code,
+                                     'returncode': returncode, 'detail': detail[:8192]}) + '\n')
+        print('NOVA_IMAGE_CHECK=' + service + ':' + step + ':' + code, flush=True)
+        return None, code
+
+    def verify_retained_images(self, backup, images, tags):
+        for service, expected in images.items():
+            for step, reference in (('verify-backup', tags[service]), ('verify-immutable-id', expected)):
+                found, error = self.image_command(['image', 'inspect', '--format', '{{.Id}}', reference],
+                                                  backup, service, step)
+                require(found == expected, service + ' rollback image is unavailable or changed (' +
+                        (error or 'IMAGE_ID_MISMATCH') + '); no deployment is safe')
+
+    def retain_images(self, backup, images):
+        tags = {}
+        for service, expected in images.items():
+            require(service in TARGETS and re.fullmatch(r'sha256:[0-9a-f]{64}', expected),
+                    'Original immutable image required')
+            tag = 'nova-mainnet-backup-' + service + ':' + backup.name
+            retained, last_error = False, 'NO_SUCH_IMAGE'
+            # Docker versions/image stores may resolve full IDs and named refs
+            # differently. Accept an alias only after its complete ID matches.
+            candidates = [('bare-id', expected[7:]), ('full-id', expected)]
+            for source_kind, reference in candidates:
+                found, error = self.image_command(['image', 'inspect', '--format', '{{.Id}}', reference],
+                                                  backup, service, 'inspect-' + source_kind)
+                if found != expected:
+                    last_error = error or 'IMAGE_ID_MISMATCH'
+                    continue
+                _out, error = self.image_command(['image', 'tag', reference, tag], backup, service, 'tag-' + source_kind)
+                if not error:
+                    retained = True
+                    break
+                last_error = error
+            if not retained:
+                reference, error = self.image_command(
+                    ['container', 'inspect', '--format', '{{.Config.Image}}', self.rows[service]['id']],
+                    backup, service, 'read-original-reference')
+                if reference:
+                    found, error = self.image_command(['image', 'inspect', '--format', '{{.Id}}', reference],
+                                                      backup, service, 'inspect-original-reference')
+                    if found == expected:
+                        _out, error = self.image_command(['image', 'tag', reference, tag], backup, service, 'tag-original-reference')
+                        retained = not error
+                    else:
+                        error = error or 'IMAGE_ID_MISMATCH'
+                last_error = error or last_error
+            require(retained, 'Cannot retain original ' + service + ' image (' + last_error +
+                    '); no service replacement attempted. Private Docker details: ' +
+                    str(backup / 'image-retention.private.jsonl'))
+            tags[service] = tag
+        self.verify_retained_images(backup, images, tags)
+        print('NOVA_ORIGINAL_IMAGES_RETAINED=YES', flush=True)
+        return tags
+
     def verify_current_config(self, container, files):
         service = ops.service(container)
         require(service in TARGETS, 'Unexpected deployment service')
@@ -186,25 +272,30 @@ class Installer(web.Installer):
         identifier = web.project_id(identifier)
         backup = Path(tempfile.mkdtemp(prefix='release-', dir=self.backup_root))
         print('NOVA_MAINNET_BACKUP=' + str(backup), flush=True)
+        old = {service: row['image'] for service, row in self.rows.items()}
+        try:
+            tags = self.retain_images(backup, old)
+            archive = backup / 'source.tar'
+            ops.run(['git', '-C', str(self.app), 'archive', '--format=tar', '--output=' + str(archive), release], 'Extract exact reviewed source')
+            source = backup / 'source'; source.mkdir()
+            ops.run(['tar', '-xf', str(archive), '-C', str(source)], 'Prepare isolated source')
+            new = {service: self.build(source, service, release, identifier) for service in TARGETS}
+            self.unchanged_inputs()
+            current, protected = self.state()
+            require(protected == self.protected and all(current[s]['id'] == self.rows[s]['id'] for s in TARGETS),
+                    'Services changed during image build; no replacement attempted')
+            self.verify_retained_images(backup, old, tags)
+            forward, rollback = backup / 'release.json', backup / 'rollback.json'
+            self.write(forward, merge_images(self.app, self.contexts, new))
+            self.write(rollback, merge_images(self.app, self.contexts, old))
+            self.write(backup / 'manifest.json', {'version': 1, 'app': str(self.app), 'project': self.project,
+                       'public': self.public, 'old': old, 'new': new, 'retained': tags, 'release': release})
+        except (Exception, KeyboardInterrupt):
+            print('NOVA_MAINNET_REPLACEMENT_STARTED=NO\nNOVA_MAINNET_ROLLBACK_READY=NO', flush=True)
+            raise
+        print('NOVA_MAINNET_ROLLBACK_READY=YES', flush=True)
         print('Restore command: ' + shlex.join([sys.executable, str(Path(__file__).resolve()), '--app-dir', str(self.app),
               '--public-url', self.public, '--restore', str(backup)]), flush=True)
-        old = {service: row['image'] for service, row in self.rows.items()}
-        for service, image in old.items():
-            ops.run(['docker', 'image', 'tag', image, 'nova-mainnet-backup-' + service + ':' + backup.name], 'Retain old ' + service + ' image')
-        archive = backup / 'source.tar'
-        ops.run(['git', '-C', str(self.app), 'archive', '--format=tar', '--output=' + str(archive), release], 'Extract exact reviewed source')
-        source = backup / 'source'; source.mkdir()
-        ops.run(['tar', '-xf', str(archive), '-C', str(source)], 'Prepare isolated source')
-        new = {service: self.build(source, service, release, identifier) for service in TARGETS}
-        self.unchanged_inputs()
-        current, protected = self.state()
-        require(protected == self.protected and all(current[s]['id'] == self.rows[s]['id'] for s in TARGETS),
-                'Services changed during image build; no replacement attempted')
-        forward, rollback = backup / 'release.json', backup / 'rollback.json'
-        self.write(forward, merge_images(self.app, self.contexts, new))
-        self.write(rollback, merge_images(self.app, self.contexts, old))
-        self.write(backup / 'manifest.json', {'version': 1, 'app': str(self.app), 'project': self.project,
-                   'public': self.public, 'old': old, 'new': new, 'release': release})
         try:
             self.require_stopped()
             self.replace(forward)
@@ -238,6 +329,7 @@ class Installer(web.Installer):
         current, protected = self.state(); require_restore_images(current, manifest['new'])
         overlay = backup / 'restore-current-context.json'
         self.write(overlay, merge_images(self.app, self.contexts, manifest['old']))
+        self.verify_retained_images(backup, manifest['old'], manifest.get('retained') or manifest['old'])
         self.unchanged_inputs(); self.replace(overlay); web.check_site(self.public)
         current, after = self.state(); require_restore_images(current, manifest['old'])
         require(after == protected, 'An unrelated service changed during restore')
