@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Deployment boundaries, bootstrap sequencing and opt-in real Compose integration."""
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import subprocess
 import tempfile
 import time
 from types import SimpleNamespace
+from contextlib import redirect_stdout
 import unittest
 import uuid
 from unittest.mock import patch
@@ -117,6 +119,119 @@ class MainnetDeployment(unittest.TestCase):
             with self.assertRaises(deploy.Failure):value.operator_step('configure-nova-copy-rpc.py')
         refresh.assert_called_once()
 
+    def test_retains_original_full_image_identity_using_bare_id(self):
+        value=self.installer();value.rows={'api':{'id':'api-container','image':IMAGE_A}}
+        with tempfile.TemporaryDirectory(prefix='release-') as directory:
+            backup=Path(directory);tag='nova-mainnet-backup-api:'+backup.name
+            def docker(command,**_kwargs):
+                if command[1:3]==['image','tag']:
+                    self.assertEqual(command[3:],[IMAGE_A[7:],tag])
+                    return SimpleNamespace(returncode=0,stdout='',stderr='')
+                return SimpleNamespace(returncode=0,stdout=IMAGE_A+'\n',stderr='')
+            with patch.object(deploy.subprocess,'run',side_effect=docker) as run:
+                self.assertEqual(value.retain_images(backup,{'api':IMAGE_A}),{'api':tag})
+            self.assertEqual(run.call_args_list[-2].args[0][-1],tag)
+            self.assertEqual(run.call_args_list[-1].args[0][-1],IMAGE_A)
+
+    def test_tag_failure_can_use_only_a_verified_original_reference(self):
+        value=self.installer();value.rows={'api':{'id':'api-container'}}
+        with tempfile.TemporaryDirectory(prefix='release-') as directory:
+            def docker(command,**_kwargs):
+                if command[1:3]==['container','inspect']:
+                    return SimpleNamespace(returncode=0,stdout='installed-api:old\n',stderr='')
+                if command[1:3]==['image','tag'] and command[3]!='installed-api:old':
+                    return SimpleNamespace(returncode=1,stdout='',stderr='No such image: original ID')
+                return SimpleNamespace(returncode=0,stdout=IMAGE_A+'\n',stderr='')
+            with patch.object(deploy.subprocess,'run',side_effect=docker) as run:
+                value.retain_images(Path(directory),{'api':IMAGE_A})
+            tags=[c.args[0][3] for c in run.call_args_list if c.args[0][1:3]==['image','tag']]
+            self.assertEqual(tags,[IMAGE_A[7:],IMAGE_A,'installed-api:old'])
+
+    def test_a_moved_original_tag_is_never_accepted_as_the_backup(self):
+        value=self.installer();value.rows={'api':{'id':'api-container'}}
+        with tempfile.TemporaryDirectory(prefix='release-') as directory:
+            def docker(command,**_kwargs):
+                if command[1:3]==['container','inspect']:
+                    return SimpleNamespace(returncode=0,stdout='installed-api:latest',stderr='')
+                if command[-1]=='installed-api:latest':
+                    return SimpleNamespace(returncode=0,stdout=IMAGE_B,stderr='')
+                return SimpleNamespace(returncode=1,stdout='',stderr='No such image')
+            with patch.object(deploy.subprocess,'run',side_effect=docker) as run, self.assertRaisesRegex(deploy.Failure,'IMAGE_ID_MISMATCH'):
+                value.retain_images(Path(directory),{'api':IMAGE_A})
+            self.assertTrue(all(c.args[0][1:3] in (['image','inspect'],['container','inspect']) for c in run.call_args_list))
+
+    def test_successful_tag_with_wrong_backup_id_still_aborts(self):
+        value=self.installer();value.rows={'api':{'id':'api-container'}}
+        with tempfile.TemporaryDirectory(prefix='release-') as directory:
+            def docker(command,**_kwargs):
+                found=IMAGE_B if command[-1].startswith('nova-mainnet-backup-') else IMAGE_A
+                return SimpleNamespace(returncode=0,stdout=found,stderr='')
+            with patch.object(deploy.subprocess,'run',side_effect=docker),self.assertRaisesRegex(deploy.Failure,'IMAGE_ID_MISMATCH'):
+                value.retain_images(Path(directory),{'api':IMAGE_A})
+
+    def test_tag_cannot_hide_an_unusable_immutable_rollback_id(self):
+        value=self.installer();value.rows={'api':{'id':'api-container'}}
+        with tempfile.TemporaryDirectory(prefix='release-') as directory:
+            def docker(command,**_kwargs):
+                if command[-1]==IMAGE_A:
+                    return SimpleNamespace(returncode=1,stdout='',stderr='No such image')
+                return SimpleNamespace(returncode=0,stdout=IMAGE_A,stderr='')
+            with patch.object(deploy.subprocess,'run',side_effect=docker),self.assertRaisesRegex(deploy.Failure,'NO_SUCH_IMAGE'):
+                value.retain_images(Path(directory),{'api':IMAGE_A})
+
+    def test_original_docker_error_is_private_and_public_diagnostic_is_static(self):
+        value=self.installer();message='no space left on device; secret-example-token'
+        with tempfile.TemporaryDirectory() as directory:
+            backup=Path(directory);output=io.StringIO()
+            with redirect_stdout(output),patch.object(deploy.subprocess,'run',return_value=SimpleNamespace(returncode=1,stdout='',stderr=message)):
+                self.assertEqual(value.image_command(['image','tag',IMAGE_A,'backup:test'],backup,'api','tag-bare-id'),(None,'DISK_FULL'))
+            self.assertIn('api:tag-bare-id:DISK_FULL',output.getvalue())
+            self.assertNotIn('secret-example-token',output.getvalue())
+            journal=backup/'image-retention.private.jsonl'
+            self.assertEqual(journal.stat().st_mode & 0o777,0o600)
+            self.assertEqual(json.loads(journal.read_text())['detail'],message)
+
+    def test_timeout_and_missing_docker_are_diagnosed_without_raising_raw_errors(self):
+        value=self.installer()
+        with tempfile.TemporaryDirectory() as directory:
+            for error,code in [(subprocess.TimeoutExpired('docker',30),'TIMEOUT'),(FileNotFoundError('docker'),'DOCKER_UNAVAILABLE')]:
+                with patch.object(deploy.subprocess,'run',side_effect=error):
+                    self.assertEqual(value.image_command(['image','inspect',IMAGE_A],Path(directory),'api','inspect'),(None,code))
+
+    def test_full_disk_diagnostic_survives_an_unwritable_private_journal(self):
+        value=self.installer();output=io.StringIO()
+        with redirect_stdout(output),patch.object(deploy.subprocess,'run',return_value=SimpleNamespace(returncode=1,stdout='',stderr='no space left on device')),patch.object(deploy.os,'open',side_effect=OSError('no space left on device')):
+            self.assertEqual(value.image_command(['image','tag',IMAGE_A,'backup:test'],Path('/private'),'api','tag-bare-id'),(None,'DISK_FULL'))
+        self.assertIn('api:tag-bare-id:DISK_FULL',output.getvalue())
+        self.assertIn('NOVA_IMAGE_JOURNAL=UNAVAILABLE',output.getvalue())
+
+    def test_retention_failure_prevents_build_replacement_and_premature_restore_command(self):
+        value=self.installer();value.args.release='c'*40
+        value.rows={s:{'id':s+'-container','image':IMAGE_A} for s in deploy.TARGETS}
+        with tempfile.TemporaryDirectory() as directory:
+            value.backup_root=Path(directory);output=io.StringIO()
+            with patch.dict(os.environ,{'NOVA_WALLETCONNECT_PROJECT_ID':'1a2b3c4d5e6f708192a3b4c5d6e7f809'}),redirect_stdout(output),patch.object(value,'discover'),patch.object(value,'require_stopped'),patch.object(deploy.web,'check_site'),patch.object(deploy.ops,'run'),patch.object(value,'retain_images',side_effect=deploy.Failure('NO_SUCH_IMAGE')),patch.object(value,'build') as build,patch.object(value,'replace') as replace:
+                with self.assertRaisesRegex(deploy.Failure,'NO_SUCH_IMAGE'):value.install()
+            build.assert_not_called();replace.assert_not_called()
+            self.assertIn('NOVA_MAINNET_REPLACEMENT_STARTED=NO',output.getvalue())
+            self.assertIn('NOVA_MAINNET_ROLLBACK_READY=NO',output.getvalue())
+            self.assertNotIn('Restore command:',output.getvalue())
+            self.assertFalse(list(value.backup_root.glob('release-*/manifest.json')))
+
+    def test_restore_is_announced_only_after_complete_manifest_and_retained_id_checks(self):
+        value=self.installer();value.args.release='c'*40
+        value.rows={s:{'id':s+'-container','image':IMAGE_A} for s in deploy.TARGETS};value.protected=['bot']
+        with tempfile.TemporaryDirectory() as directory:
+            value.backup_root=Path(directory);value.contexts=[[str(value.app/'docker-compose.yml')]];output=io.StringIO()
+            def replace(_overlay):
+                manifest=json.loads(next(value.backup_root.glob('release-*/manifest.json')).read_text())
+                self.assertEqual(set(manifest['retained']),set(deploy.TARGETS))
+                self.assertIn('NOVA_MAINNET_ROLLBACK_READY=YES',output.getvalue())
+                self.assertIn('Restore command:',output.getvalue())
+            with patch.dict(os.environ,{'NOVA_WALLETCONNECT_PROJECT_ID':'1a2b3c4d5e6f708192a3b4c5d6e7f809'}),redirect_stdout(output),patch.object(value,'discover'),patch.object(value,'require_stopped'),patch.object(deploy.web,'check_site'),patch.object(deploy.ops,'run'),patch.object(value,'retain_images',return_value={s:'backup-'+s for s in deploy.TARGETS}),patch.object(value,'verify_retained_images') as verify,patch.object(value,'build',return_value=IMAGE_A),patch.object(value,'unchanged_inputs'),patch.object(value,'state',return_value=(value.rows,value.protected)),patch.object(value,'replace',side_effect=replace),patch.object(value,'verify_public',return_value={}):
+                value.install()
+            verify.assert_called_once()
+
     @unittest.skipUnless(os.environ.get('NOVA_MAINNET_COMPOSE_INTEGRATION')=='1','opt-in real Docker Compose check')
     def test_real_api_and_web_hashes_image_only_rollout_and_protected_identity(self):
         def run(command): return subprocess.run(command,check=True,capture_output=True,text=True).stdout
@@ -132,8 +247,13 @@ class MainnetDeployment(unittest.TestCase):
                 value=deploy.Installer(SimpleNamespace(app_dir=str(app),public_url='https://moneyland.tr'))
                 value.discover();self.assertEqual(value.project,project)
                 before,protected=value.state();images={s:r['image'] for s,r in before.items()}
+                backup=app/'release-integration';backup.mkdir(mode=0o700)
+                tags=value.retain_images(backup,images)
+                for service,tag in tags.items():
+                    self.assertEqual(run(['docker','image','inspect','--format','{{.Id}}',tag]).strip(),images[service])
                 overlay=app/'release.json';value.write(overlay,deploy.merge_images(app,value.contexts,images))
                 value.unchanged_inputs()
+                value.verify_retained_images(backup,images,tags)
                 for service in deploy.TARGETS:value.recreate_target(overlay,service)
                 after,after_protected=value.state()
                 self.assertEqual(protected,after_protected)
@@ -141,7 +261,10 @@ class MainnetDeployment(unittest.TestCase):
                 value.discover()
                 self.assertTrue(all(str(overlay) in c for c in value.contexts))
                 deploy.require_restore_images(after,images)
-            finally:run(base+['down','--remove-orphans'])
+            finally:
+                run(base+['down','--remove-orphans'])
+                for service in deploy.TARGETS:
+                    subprocess.run(['docker','image','rm','nova-mainnet-backup-'+service+':release-integration'],capture_output=True)
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

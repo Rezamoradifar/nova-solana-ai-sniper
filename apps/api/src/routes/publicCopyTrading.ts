@@ -3,6 +3,8 @@ import { KILL_SWITCH_REDIS_KEY, SCANNER_AUTOBUY_PAUSE_REDIS_KEY } from '@nova/sh
 import { fetchGmgnSmartMoney } from '../integrations/gmgn.js';
 import { loadRankedCopyWallets, COPY_RECOMMENDATION_POLICY } from '../trading/copyWalletRanking.js';
 import { copyBuyReadiness } from '../trading/copyExecutionReadiness.js';
+import { createGmgnTraderFeed } from '../integrations/gmgnTraders.js';
+import { z } from 'zod';
 
 export function publicWalletScore(wallet: {
   confidenceScore: number | null;
@@ -16,6 +18,19 @@ export function publicWalletScore(wallet: {
 }
 
 export default async function publicCopyTradingRoutes(fastify: FastifyInstance) {
+  const traderFeed = createGmgnTraderFeed();
+  fastify.get(
+    '/public/copy-trading/traders',
+    { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+    async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      const query = z
+        .object({ period: z.enum(['7d', '30d']).default('7d') })
+        .safeParse(request.query);
+      if (!query.success) return reply.code(400).send({ error: 'Choose 7d or 30d.' });
+      return traderFeed(query.data.period, fastify.config.GMGN_API_KEY);
+    },
+  );
   const RANKED_WALLET_CACHE_TTL_MS = 60_000;
   let rankedWalletCache:
     { expiresAt: number; value: Awaited<ReturnType<typeof loadRankedCopyWallets>> } | undefined;
@@ -116,12 +131,12 @@ export default async function publicCopyTradingRoutes(fastify: FastifyInstance) 
             .sort((a, b) => b.volumeUsd - a.volumeUsd || b.trades - a.trades)
             .slice(0, 30);
           gmgn = { status: 'connected', trades, wallets };
-        } catch (error) {
+        } catch {
           gmgn = {
             status: 'unavailable',
             trades: [],
             wallets: [],
-            reason: error instanceof Error ? error.message : 'GMGN data unavailable',
+            reason: 'GMGN data unavailable',
           };
         }
       }

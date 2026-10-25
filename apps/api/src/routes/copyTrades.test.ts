@@ -57,6 +57,30 @@ describe('copy account API', () => {
       });
       expect(r.statusCode).toBe(201);
       expect(r.json().maxAmountSol).toBe(0.1);
+      expect(r.json().isActive).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+  it('saves an explicitly paused setup without enabling future buys', async () => {
+    const { app, prisma } = await fixture();
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/copy-trades/drafts',
+        payload: { targetAddress: target, enabled: true, isActive: true, maxAmountSol: 0.05 },
+      });
+      expect(r.statusCode).toBe(201);
+      expect(r.json()).toMatchObject({ isActive: false, maxAmountSol: 0.05 });
+      expect(prisma.copyTradeConfig.create).toHaveBeenCalledWith({
+        data: {
+          targetAddress: target,
+          userId: 'mine',
+          copyPercentSize: 25,
+          maxAmountSol: 0.05,
+          isActive: false,
+        },
+      });
     } finally {
       await app.close();
     }

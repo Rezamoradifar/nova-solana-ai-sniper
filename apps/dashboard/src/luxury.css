@@ -156,3 +156,5 @@ html[lang=fa] body,html[lang=fa] .neon,html[lang=fa] .ml2-root,html[lang=fa] .no
 @media(prefers-reduced-motion:reduce){.lux-coin{animation:none}.lux-tool,.neon .n-btn{transition:none;transform:none}.lux-sculpture-aura{filter:none}}
 @media(max-width:360px){.neon .lux-hero h1{font-size:44px}.neon[dir=rtl] .lux-hero h1{font-size:55px}.lux-proof-tag{bottom:140px}.lux-facts strong{font-size:19px}.lux-facts .lux-engine-label{font-size:21px}}
 @media(forced-colors:active){.neon .lux-hero h1>span{background:none;-webkit-text-fill-color:CanvasText}.lux-coin,.lux-tool,.lux-program,.lux-network-proof,.lux-quote-card{border:1px solid CanvasText}.lux-coin-face svg path{fill:CanvasText}.ml-network-state>i{background:CanvasText}}
+
+@media(max-width:760px){.nova-site .header-actions .wallet-header-link{width:40px;min-width:40px;padding:0;flex:none}.nova-site .header-actions .wallet-header-link>span{display:none}.nova-site .header-actions .wallet-header-link>svg{display:block}}
