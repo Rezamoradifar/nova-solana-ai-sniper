@@ -195,4 +195,17 @@ describe('publishPost', () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
+
+  it('falls back once when the image stream wraps an ENOENT cause', async () => {
+    const { bot, sendPhoto, sendMessage } = fakeBot();
+    sendPhoto.mockRejectedValueOnce(Object.assign(new Error('upload error'), {
+      cause: Object.assign(new Error('image missing'), { code: 'ENOENT' }),
+    }));
+    const result = await publishPost(
+      bot, 'CHAT_ID', basePost({ imagePath: '/tmp/missing.png' }), fakeLogger,
+    );
+    expect(result.messageId).toBe(4242);
+    expect(sendMessage).toHaveBeenCalledOnce();
+  });
+
 });
