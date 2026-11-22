@@ -129,6 +129,23 @@ def container_image(app):
     return image
 
 
+def running_marketing_flags(app):
+    base = str(app / "docker-compose.yml")
+    container = run(["docker", "compose", "-f", base, "ps", "-q", "marketing-engine"], app)
+    require(bool(container), "MARKETING_SERVICE_MISSING")
+    # Inspect only locally and return booleans; never print the environment values.
+    payload = run(["docker", "inspect", "--format", "{{json .Config.Env}}", container], app)
+    pairs = json.loads(payload)
+    require(isinstance(pairs, list), "RUNTIME_ENV_UNKNOWN")
+    values = {}
+    for entry in pairs:
+        if isinstance(entry, str) and "=" in entry:
+            key, value = entry.split("=", 1)
+            if key in ("TELEGRAM_TRADES_ONLY", "MARKETING_DAILY_POSTS_ENABLED"):
+                values[key] = value
+    return values
+
+
 def atomic_env_write(path, content, original_mode):
     fd, tmp = tempfile.mkstemp(prefix=".env.nova-", dir=path.parent)
     try:
@@ -178,15 +195,19 @@ def main():
     require(shutil.which("docker") is not None, "DOCKER_MISSING")
     image = container_image(app)
     changed = with_daily_posts(before)
-    if changed == before:
-        print("NOVA_CHANNEL_FLAGS=ALREADY_CONFIGURED")
+    runtime_flags = running_marketing_flags(app)
+    already_active = (changed == before and
+                      runtime_flags.get("TELEGRAM_TRADES_ONLY") == "false" and
+                      runtime_flags.get("MARKETING_DAILY_POSTS_ENABLED") == "true")
+    if already_active:
+        print("NOVA_CHANNEL_FLAGS=ACTIVE_IN_RUNNING_CONTAINER")
         print("NOVA_CHANNEL_POST_RIGHTS=VERIFIED")
-        print("NOVA_CHANNEL_MESSAGE=NOT_SENT")
+        print("NOVA_CHANNEL_REPAIR_SCRIPT_SENT=NO_DIRECT_POST")
         return
     if not args.apply:
         print("NOVA_CHANNEL_REPAIR=AVAILABLE_USE_APPLY")
         print("NOVA_CHANNEL_POST_RIGHTS=VERIFIED")
-        print("NOVA_CHANNEL_MESSAGE=NOT_SENT")
+        print("NOVA_CHANNEL_REPAIR_SCRIPT_SENT=NO_DIRECT_POST")
         return
     require(os.geteuid() == 0, "ROOT_OPERATOR_REQUIRED")
     lock_path = app / ".env.nova-ops.lock"
@@ -214,6 +235,10 @@ def main():
         try:
             atomic_env_write(env_path, changed, mode)
             pinned_recreate(app, image, overlay)
+            observed = running_marketing_flags(app)
+            require(observed.get("TELEGRAM_TRADES_ONLY") == "false" and
+                    observed.get("MARKETING_DAILY_POSTS_ENABLED") == "true",
+                    "RUNTIME_FLAGS_DID_NOT_APPLY")
         except Exception:
             atomic_env_write(env_path, before, mode)
             try:
@@ -224,7 +249,7 @@ def main():
             raise Blocked("CHANNEL_REPAIR_DID_NOT_VERIFY") from None
         print("NOVA_CHANNEL_REPAIR=APPLIED")
         print("NOVA_CHANNEL_POST_RIGHTS=VERIFIED")
-        print("NOVA_CHANNEL_MESSAGE=NOT_SENT")
+        print("NOVA_CHANNEL_REPAIR_SCRIPT_SENT=NO_DIRECT_POST")
         print("NOVA_CHANNEL_NOTE=POSTS_FOLLOW_SCHEDULE_NOT_IMMEDIATE")
         print("NOVA_CHANNEL_BACKUP=" + str(directory))
 
