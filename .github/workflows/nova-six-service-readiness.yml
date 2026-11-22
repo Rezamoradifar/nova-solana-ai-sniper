@@ -19,6 +19,10 @@ jobs:
           cache: npm
       - name: Validate read-only operator diagnostics syntax
         run: bash -n scripts/diagnose-nova-launch-20261122.sh
+      - name: Validate channel recovery and rollback policy (offline)
+        run: |
+          python3 -m py_compile scripts/repair-nova-channel.py
+          python3 -m unittest discover -s scripts -p 'test_repair_nova_channel.py' -v
       - name: Install locked workspace dependencies
         run: npm ci
       - name: Generate API database client for type checking
