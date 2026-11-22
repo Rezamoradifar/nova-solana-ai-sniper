@@ -1,0 +1,35 @@
+name: Nova six-service release readiness
+on:
+  push:
+    branches: [codex/nova-six-service-readiness-20261122]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verified-readonly-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Validate read-only operator diagnostics syntax
+        run: bash -n scripts/diagnose-nova-launch-20261122.sh
+      - name: Install locked workspace dependencies
+        run: npm ci
+      - name: Generate API database client for type checking
+        run: npx prisma generate --schema apps/api/prisma/schema.prisma
+      - name: Telegram publication and WalletConnect regression tests
+        run: npx vitest run apps/telegram-bot/src/marketing/publisher.test.ts apps/dashboard/src/lib/walletConnectSdk.test.ts apps/dashboard/src/lib/walletConnect.test.ts apps/dashboard/src/lib/walletConnection.test.ts
+      - name: API and dashboard type checks
+        run: npx tsc -b apps/api apps/dashboard
+      - name: Production dashboard build
+        run: npm run build --workspace @nova/dashboard
+        env:
+          VITE_WALLETCONNECT_PROJECT_ID: 1a2b3c4d5e6f708192a3b4c5d6e7f809
+      - name: Check whitespace
+        run: git diff --check
