@@ -30,7 +30,7 @@ jobs:
       - name: Telegram publication and WalletConnect regression tests
         run: npx vitest run apps/telegram-bot/src/marketing/publisher.test.ts apps/dashboard/src/lib/walletConnectSdk.test.ts apps/dashboard/src/lib/walletConnect.test.ts apps/dashboard/src/lib/walletConnection.test.ts
       - name: API and dashboard type checks
-        run: npx tsc -b apps/api apps/dashboard
+        run: npx tsc -b apps/api apps/dashboard apps/telegram-bot apps/marketing-engine
       - name: Production dashboard build
         run: npm run build --workspace @nova/dashboard
         env:
