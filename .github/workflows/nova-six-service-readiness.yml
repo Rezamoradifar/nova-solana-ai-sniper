@@ -28,7 +28,7 @@ jobs:
       - name: Generate API database client for type checking
         run: npx prisma generate --schema apps/api/prisma/schema.prisma
       - name: Telegram publication and WalletConnect regression tests
-        run: npx vitest run apps/telegram-bot/src/marketing/publisher.test.ts apps/dashboard/src/lib/walletConnectSdk.test.ts apps/dashboard/src/lib/walletConnect.test.ts apps/dashboard/src/lib/walletConnection.test.ts
+        run: npx vitest run apps/telegram-bot/src/marketing/publisher.test.ts apps/dashboard/src/lib/walletConnectSdk.test.ts apps/dashboard/src/lib/walletConnect.test.ts apps/dashboard/src/lib/walletConnection.test.ts apps/api/src/detection/scannerHealth.test.ts apps/api/src/trading/arbitrageScanner.test.ts apps/api/src/trading/copyTrading.test.ts apps/api/src/trading/copyTradeWatcher.test.ts
       - name: API and dashboard type checks
         run: npx tsc -b apps/api apps/dashboard apps/telegram-bot apps/marketing-engine
       - name: Production dashboard build
