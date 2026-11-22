@@ -164,4 +164,35 @@ describe('publishPost', () => {
       'failed to publish marketing post',
     );
   });
+
+  it('recovers a missing local marketing photo by delivering one text-only post', async () => {
+    const { bot, sendPhoto, sendMessage } = fakeBot();
+    sendPhoto.mockRejectedValueOnce(Object.assign(new Error('image missing'), { code: 'ENOENT' }));
+    const result = await publishPost(
+      bot, 'CHAT_ID', basePost({ imagePath: '/tmp/deleted-image.png', hashtags: ['#Nova'] }), fakeLogger,
+    );
+    expect(result).toEqual({ messageId: 4242 });
+    expect(sendPhoto).toHaveBeenCalledOnce();
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(sendMessage.mock.calls[0]![1]).toContain('#Nova');
+  });
+
+  it('does not double-send after an uncertain photo network error', async () => {
+    const { bot, sendPhoto, sendMessage } = fakeBot();
+    sendPhoto.mockRejectedValueOnce(new Error('socket timeout'));
+    await expect(publishPost(
+      bot, 'CHAT_ID', basePost({ imagePath: '/tmp/image.png' }), fakeLogger,
+    )).rejects.toThrow('socket timeout');
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not retry as text when Telegram forbids posting to the channel', async () => {
+    const { bot, sendPhoto, sendMessage } = fakeBot();
+    sendPhoto.mockRejectedValueOnce(Object.assign(new Error('forbidden'), { code: 403 }));
+    await expect(publishPost(
+      bot, 'CHAT_ID', basePost({ imagePath: '/tmp/image.png' }), fakeLogger,
+    )).rejects.toThrow('forbidden');
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
 });
