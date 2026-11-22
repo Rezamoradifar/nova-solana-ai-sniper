@@ -89,7 +89,41 @@ for (const name of [
   'ECOSYSTEM_FEED_ENABLED', 'NETWORK_TRADE_FEED_ENABLED'
 ]) console.log(name + '=' + flag(name));
 console.log('AI_CONTENT_PROVIDER_PRESENT=' + yes(e.GEMINI_API_KEY || e.OPENROUTER_API_KEY));
-console.log('TELEGRAM_DELIVERY=NOT_TESTED_NO_MESSAGE_SENT');
+// Read-only Bot API permissions: no message is sent and no secret or chat ID is printed.
+const api = async (method, payload = {}) => {
+  const response = await fetch(
+    'https://api.telegram.org/bot' + e.TELEGRAM_BOT_TOKEN + '/' + method,
+    { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload), signal: AbortSignal.timeout(6000) },
+  );
+  if (!response.ok) return null;
+  const data = await response.json();
+  return data?.ok === true ? data.result : null;
+};
+(async () => {
+  if (!e.TELEGRAM_BOT_TOKEN || !chat) {
+    console.log('TELEGRAM_BOT_ACCESS=NOT_CONFIGURED');
+    return;
+  }
+  const me = await api('getMe');
+  console.log('TELEGRAM_BOT_ACCESS=' + (me?.id ? 'OK' : 'FAILED_OR_UNAVAILABLE'));
+  if (!me?.id) return;
+  const target = await api('getChat', { chat_id: chat });
+  const type = ['channel', 'group', 'supergroup', 'private'].includes(target?.type)
+    ? target.type : 'UNKNOWN';
+  console.log('TELEGRAM_TARGET_TYPE=' + type);
+  if (type !== 'channel') {
+    console.log('TELEGRAM_CHANNEL_POST_RIGHTS=NOT_A_VERIFIED_CHANNEL');
+    return;
+  }
+  const member = await api('getChatMember', { chat_id: chat, user_id: me.id });
+  const admin = member?.status === 'creator' || member?.status === 'administrator';
+  console.log('TELEGRAM_CHANNEL_POST_RIGHTS=' + (
+    admin && member.can_post_messages !== false ? 'YES'
+      : !member ? 'UNKNOWN' : 'NO'
+  ));
+})().catch(() => console.log('TELEGRAM_REMOTE_PERMISSION_CHECK=UNAVAILABLE'))
+  .finally(() => console.log('TELEGRAM_DELIVERY=NOT_TESTED_NO_MESSAGE_SENT'));
 NODE
 else
   echo 'TELEGRAM_PROBES=SKIPPED_MARKETING_NOT_RUNNING'
