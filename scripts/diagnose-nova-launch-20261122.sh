@@ -26,6 +26,22 @@ for service in api gsp-web postgres redis telegram-bot marketing-engine; do
   echo "SERVICE_${service}=$state"
 done
 
+# Inspect the exact currently running frontend image; never print Project ID.
+web="$(docker compose -f docker-compose.yml ps -q gsp-web 2>/dev/null || true)"
+if [[ -n "$web" ]] && [[ "$(docker inspect --format '{{.State.Running}}' "$web" 2>/dev/null)" == true ]]; then
+  docker compose -f docker-compose.yml exec -T gsp-web cat /usr/share/nginx/html/nova-wallet-release.json 2>/dev/null |
+    python3 -c 'import json,sys
+try:
+    data=json.load(sys.stdin)
+    configured=data.get("walletConnectConfigured")
+    print("WALLETCONNECT_PROJECT_CONFIGURED="+("YES" if configured is True else "NO" if configured is False else "UNKNOWN"))
+except Exception:
+    print("WALLETCONNECT_PROJECT_CONFIGURED=UNKNOWN")'
+else
+  echo 'WALLETCONNECT_PROJECT_CONFIGURED=UNKNOWN_WEB_NOT_RUNNING'
+fi
+echo 'WALLETCONNECT_DOMAIN_ALLOWLIST=REQUIRES_PROVIDER_VERIFICATION'
+
 api="$(docker compose -f docker-compose.yml ps -q api 2>/dev/null || true)"
 if [[ -n "$api" ]] && [[ "$(docker inspect --format '{{.State.Running}}' "$api" 2>/dev/null)" == true ]]; then
   docker compose -f docker-compose.yml exec -T api node --input-type=module <<'NODE' || echo 'API_PROBES=UNAVAILABLE'
