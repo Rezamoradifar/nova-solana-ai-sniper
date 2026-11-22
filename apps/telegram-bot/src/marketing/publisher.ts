@@ -59,10 +59,13 @@ const TEXT_MESSAGE_MAX = 4096;
 export function isDefinitelyRejectedPhoto(error: unknown): boolean {
   if (error instanceof GrammyError) {
     if (![400, 413].includes(error.error_code)) return false;
-    return /file is too big|file too large|photo.*invalid|wrong file identifier|failed to get http url content|file must be non-empty|file is empty|file not found/i.test(error.description);
+    return /file is too big|file too large|photo.*invalid|wrong file identifier|failed to get http url content|file must be non-empty|file is empty|file not found|can't parse entities|can't find end of entity/i.test(error.description);
   }
   if (!error || typeof error !== 'object') return false;
-  return 'code' in error && (error.code === 'ENOENT' || error.code === 'EISDIR');
+  const outer = error as { code?: unknown; cause?: unknown };
+  const inner = outer.cause && typeof outer.cause === 'object'
+    ? outer.cause as { code?: unknown } : null;
+  return [outer.code, inner?.code].some((code) => code === 'ENOENT' || code === 'EISDIR');
 }
 
 
