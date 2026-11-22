@@ -1,5 +1,5 @@
 import type { Bot } from 'grammy';
-import { InlineKeyboard, InputFile } from 'grammy';
+import { GrammyError, InlineKeyboard, InputFile } from 'grammy';
 import type { Logger } from '@nova/shared';
 import { escapeMd } from '../ui/format.js';
 
@@ -50,6 +50,24 @@ const PHOTO_CAPTION_MAX = 1024;
  * (even though a generated post is normally far under this) means the
  * hashtag line can never be the thing that pushes a send over budget. */
 const TEXT_MESSAGE_MAX = 4096;
+
+/**
+ * Only errors proving the *photo itself* was rejected can safely fall back
+ * to text. Never fall back after an unknown timeout/network failure: Telegram
+ * might have delivered the photo and a second send could duplicate the post.
+ */
+export function isDefinitelyRejectedPhoto(error: unknown): boolean {
+  if (error instanceof GrammyError) {
+    if (![400, 413].includes(error.error_code)) return false;
+    return /file is too big|file too large|photo.*invalid|wrong file identifier|failed to get http url content|file must be non-empty|file is empty|file not found|can't parse entities|can't find end of entity/i.test(error.description);
+  }
+  if (!error || typeof error !== 'object') return false;
+  const outer = error as { code?: unknown; cause?: unknown };
+  const inner = outer.cause && typeof outer.cause === 'object'
+    ? outer.cause as { code?: unknown } : null;
+  return [outer.code, inner?.code].some((code) => code === 'ENOENT' || code === 'EISDIR');
+}
+
 
 function truncateForCaption(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
@@ -130,12 +148,23 @@ export async function publishPost(
           'marketing post caption exceeded the Telegram photo-caption limit (1024) — truncated rather than sent as a second message',
         );
       }
-      const sent = await bot.api.sendPhoto(chatId, new InputFile(post.imagePath), {
-        caption,
-        parse_mode: 'Markdown',
-        reply_markup: keyboard,
-      });
-      return { messageId: sent.message_id };
+      try {
+        const sent = await bot.api.sendPhoto(chatId, new InputFile(post.imagePath), {
+          caption,
+          parse_mode: 'Markdown',
+          reply_markup: keyboard,
+        });
+        return { messageId: sent.message_id };
+      } catch (photoError) {
+        if (!isDefinitelyRejectedPhoto(photoError)) throw photoError;
+        logger.warn({ postId: post.id }, 'marketing visual rejected; retrying exactly once as text');
+        const { text } = composeWithHashtags(bodyText, post.hashtags, TEXT_MESSAGE_MAX);
+        const sent = await bot.api.sendMessage(chatId, text, {
+          parse_mode: 'Markdown',
+          reply_markup: keyboard,
+        });
+        return { messageId: sent.message_id };
+      }
     }
 
     const { text, truncated } = composeWithHashtags(bodyText, post.hashtags, TEXT_MESSAGE_MAX);
