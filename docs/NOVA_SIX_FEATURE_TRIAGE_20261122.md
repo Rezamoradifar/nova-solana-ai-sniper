@@ -20,6 +20,40 @@ and anonymous internal API health. It prints no channel IDs, tokens, wallet keys
 private RPC endpoints, raw API responses or Docker logs. It makes no trades and
 sends no Telegram messages. A clean result is **not proof of live execution**.
 
+## Permission-gated Telegram schedule recovery
+
+A verified bot/channel can still have an empty feed because
+`TELEGRAM_TRADES_ONLY=true` suppresses the normal daily scheduler and the
+network-trade feed waits for a verified trade. The recovery utility is intentionally
+**not run automatically**:
+
+```bash
+cd /opt/nova-solana-ai-sniper
+# Retrieve these scripts from the reviewed, full branch SHA without changing checkout.
+git fetch --no-tags origin codex/nova-six-service-readiness-20261122
+release=$(git rev-parse FETCH_HEAD)
+git show "$release:scripts/diagnose-nova-launch-20261122.sh" > /root/nova-diagnose.sh
+bash -n /root/nova-diagnose.sh && bash /root/nova-diagnose.sh
+git show "$release:scripts/repair-nova-channel.py" > /root/repair-nova-channel.py
+python3 /root/repair-nova-channel.py
+# After inspecting the preflight and approving scheduled content publication:
+# python3 /root/repair-nova-channel.py --apply
+```
+
+The channel recovery checks the configured destination is a Telegram channel,
+verifies that the bot has administrator post rights, and requires an already
+configured AI content provider. It restores daily scheduled posts by setting only
+`TELEGRAM_TRADES_ONLY=false` and `MARKETING_DAILY_POSTS_ENABLED=true`.
+It recreates only `marketing-engine`, pinned to the exact running image,
+backs up the previous environment and rolls back a failed recreate. The recovery
+tool does not send a message itself, and a scheduled post is not evidence of
+successful Telegram delivery until a real message ID is recorded. If no valid
+provider or channel permission exists, it refuses the change.
+
+**Image limitation:** this operation reuses the existing marketing image. To
+ship code changes to the Telegram publisher, a separate reviewed marketing
+image release is still necessary. It does not change the API or web image.
+
 ## Why each feature is blocked or incomplete
 
 1. **Copy trading.** Require API liveness, worker/scanner health, dedicated
